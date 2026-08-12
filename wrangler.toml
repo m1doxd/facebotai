@@ -1,7 +1,7 @@
 name = "facebotpsl"
-main = "worker.js"
+main = "site-worker.js"
 compatibility_date = "2026-08-12"
 
 [assets]
-directory = "./public"
+directory = "./web"
 binding = "ASSETS"
