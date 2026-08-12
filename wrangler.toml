@@ -1,3 +1,7 @@
-name = "facebot-gemini"
+name = "facebotpsl"
 main = "worker/gemini-worker.js"
 compatibility_date = "2026-08-12"
+
+[assets]
+directory = "./web"
+binding = "ASSETS"
