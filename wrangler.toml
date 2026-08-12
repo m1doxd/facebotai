@@ -1,5 +1,4 @@
 name = "facebotpsl"
-main = "site-worker.js"
 compatibility_date = "2026-08-12"
 
 [assets]
