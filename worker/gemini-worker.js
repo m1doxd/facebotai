@@ -109,14 +109,34 @@ async function analyze(request, env) {
   // READ MULTIPART FORM DATA
   // --------------------------------------------------
 
-  const contentType =
-    request.headers.get("content-type") || "";
+const contentType =
+  request.headers.get("content-type") || "";
 
-  if (
-    !contentType.toLowerCase().includes(
-      "multipart/form-data"
-    )
-  ) {
+console.log("ANALYZE REQUEST:", {
+  method: request.method,
+  contentType,
+  url: request.url
+});
+
+if (
+  !contentType.toLowerCase().includes(
+    "multipart/form-data"
+  )
+) {
+  return json(
+    {
+      success: false,
+      detail:
+        "Expected multipart/form-data.",
+      debug: {
+        method: request.method,
+        contentType: contentType,
+        url: request.url
+      }
+    },
+    400
+  );
+}
     return json(
       {
         success: false,
