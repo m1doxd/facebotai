@@ -6,15 +6,15 @@ const ALLOWED_TYPES = new Set([
   "image/webp"
 ]);
 
-const DEFAULT_MODEL = "gemini-2.5-flash";
+const DEFAULT_MODEL = "gemini-3.6-flash";
 
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
-    // ==================================================
+    // --------------------------------------------------
     // CORS
-    // ==================================================
+    // --------------------------------------------------
 
     if (request.method === "OPTIONS") {
       return new Response(null, {
@@ -23,9 +23,9 @@ export default {
       });
     }
 
-    // ==================================================
-    // HEALTH CHECK
-    // ==================================================
+    // --------------------------------------------------
+    // HEALTH
+    // --------------------------------------------------
 
     if (url.pathname === "/api/health") {
       return json({
@@ -36,9 +36,9 @@ export default {
       });
     }
 
-    // ==================================================
+    // --------------------------------------------------
     // ANALYZE
-    // ==================================================
+    // --------------------------------------------------
 
     if (url.pathname === "/api/analyze") {
       if (request.method !== "POST") {
@@ -54,10 +54,7 @@ export default {
       try {
         return await analyze(request, env);
       } catch (error) {
-        console.error(
-          "FaceBot Worker error:",
-          error
-        );
+        console.error("FaceBot Worker error:", error);
 
         return json(
           {
@@ -71,13 +68,9 @@ export default {
       }
     }
 
-    // ==================================================
-    // STATIC ASSETS
-    // ==================================================
-
-    if (env.ASSETS) {
-      return env.ASSETS.fetch(request);
-    }
+    // --------------------------------------------------
+    // DEFAULT
+    // --------------------------------------------------
 
     return new Response(
       "FaceBot Gemini Worker is running.",
@@ -113,13 +106,17 @@ async function analyze(request, env) {
   }
 
   // --------------------------------------------------
-  // Check content type
+  // READ MULTIPART FORM DATA
   // --------------------------------------------------
 
   const contentType =
     request.headers.get("content-type") || "";
 
-  if (!contentType.includes("multipart/form-data")) {
+  if (
+    !contentType.toLowerCase().includes(
+      "multipart/form-data"
+    )
+  ) {
     return json(
       {
         success: false,
@@ -130,13 +127,11 @@ async function analyze(request, env) {
     );
   }
 
-  // --------------------------------------------------
-  // Read form
-  // --------------------------------------------------
+  const formData =
+    await request.formData();
 
-  const form = await request.formData();
-
-  const file = form.get("file");
+  const file =
+    formData.get("file");
 
   if (
     !file ||
@@ -146,20 +141,23 @@ async function analyze(request, env) {
       {
         success: false,
         detail:
-          "No image file was provided."
+          "No image file was provided. Expected field: file"
       },
       400
     );
   }
 
   // --------------------------------------------------
-  // Validate MIME type
+  // VALIDATE FILE
   // --------------------------------------------------
 
   const mimeType =
-    file.type || "application/octet-stream";
+    file.type ||
+    "application/octet-stream";
 
-  if (!ALLOWED_TYPES.has(mimeType)) {
+  if (
+    !ALLOWED_TYPES.has(mimeType)
+  ) {
     return json(
       {
         success: false,
@@ -170,11 +168,9 @@ async function analyze(request, env) {
     );
   }
 
-  // --------------------------------------------------
-  // Validate file size
-  // --------------------------------------------------
-
-  if (file.size > MAX_FILE_SIZE) {
+  if (
+    file.size > MAX_FILE_SIZE
+  ) {
     return json(
       {
         success: false,
@@ -190,14 +186,14 @@ async function analyze(request, env) {
       {
         success: false,
         detail:
-          "The selected image is empty."
+          "The image file is empty."
       },
       400
     );
   }
 
   // --------------------------------------------------
-  // Convert image to base64
+  // FILE -> BASE64
   // --------------------------------------------------
 
   const bytes =
@@ -209,7 +205,7 @@ async function analyze(request, env) {
     uint8ToBase64(bytes);
 
   // --------------------------------------------------
-  // Gemini model
+  // MODEL
   // --------------------------------------------------
 
   const model =
@@ -217,7 +213,7 @@ async function analyze(request, env) {
     DEFAULT_MODEL;
 
   // --------------------------------------------------
-  // Prompt
+  // PROMPT
   // --------------------------------------------------
 
   const prompt = `
@@ -225,119 +221,113 @@ You are the facial-analysis engine for FaceBot.
 
 Analyze ONLY the visible facial geometry in the supplied photograph.
 
-IMPORTANT:
+IMPORTANT RULES:
+
+- Analyze only what is visibly present.
 - Do not identify the person.
 - Do not infer race or ethnicity.
 - Do not infer health or medical conditions.
-- Do not infer personality, intelligence, sexuality, criminality, or other sensitive traits.
-- Analyze only visible facial structure.
+- Do not infer personality, intelligence, sexuality, criminality,
+  or other sensitive traits.
 - Do not claim to have run MediaPipe.
 - Do not claim to have run ExtraTrees.
-- Do not invent measurements that cannot be reliably observed.
-- Do not provide medical diagnosis.
+- Do not invent exact physical measurements in millimeters.
+- Do not invent landmarks that cannot be seen.
+- If the image is unclear, say so through lower confidence.
 - Return ONLY valid JSON.
-
-If there is no clearly usable face:
-- face_count must be 0
-- score must be null
-- metrics may be empty
-- production_features may be empty
-
-The score must be a number from 0 to 10 or null.
-
-Keep the score internally consistent with the visible observations.
+- All scores must be numeric values from 0 to 10.
+- Scores should not automatically be high.
+- If no usable face is visible, return face_count = 0
+  and score = null.
 
 Return this structure:
 
 {
-  "face_count": 1,
-  "score": 0,
+  "face_count": number,
+  "score": number|null,
+
   "metrics": {
     "face_geometry": {
-      "face_aspect_ratio": "medium",
-      "facial_width_height": "balanced",
-      "midface_proportion": "medium"
+      "face_aspect_ratio": number|string,
+      "facial_width_height": number|string,
+      "midface_proportion": number|string
     },
+
     "symmetry": {
-      "overall_symmetry": "medium"
+      "overall_symmetry": number|string,
+      "left_right_balance": number|string
     },
+
     "eyes": {
-      "eye_spacing": "balanced",
-      "eye_aspect_ratio": "medium"
+      "eye_spacing": number|string,
+      "eye_aspect_ratio": number|string,
+      "eye_alignment": number|string
     },
+
     "eyebrows": {
-      "brow_position": "medium",
-      "brow_shape": "medium"
+      "brow_position": number|string,
+      "brow_shape": number|string
     },
+
     "nose": {
-      "nose_width": "medium",
-      "nose_length": "medium"
+      "nose_width": number|string,
+      "nose_length": number|string,
+      "nose_proportion": number|string
     },
+
     "jaw": {
-      "jaw_width": "medium",
-      "jaw_definition": "medium"
+      "jaw_width": number|string,
+      "jaw_definition": number|string,
+      "jaw_shape": number|string
     },
+
     "chin": {
-      "chin_projection": "medium",
-      "chin_width": "medium"
+      "chin_prominence": number|string,
+      "chin_proportion": number|string
     },
+
     "cheeks": {
-      "cheek_prominence": "medium"
+      "cheek_prominence": number|string,
+      "cheek_definition": number|string
     },
+
     "lips_mouth": {
-      "mouth_width": "medium",
-      "lip_proportion": "balanced"
+      "mouth_width": number|string,
+      "lip_proportion": number|string
+    },
+
+    "midface": {
+      "midface_balance": number|string
     }
   },
 
   "production_features": {
-    "facial_width": "medium",
-    "facial_height": "medium",
-    "jaw_width": "medium",
-    "chin_projection": "medium",
-    "cheek_prominence": "medium",
-    "eye_spacing": "balanced",
-    "nose_width": "medium",
-    "nose_length": "medium",
-    "mouth_width": "medium",
-    "midface_length": "medium",
-    "symmetry": "medium"
+    "overall_harmony": number|string,
+    "frontal_harmony": number|string,
+    "facial_definition": number|string,
+    "angularity": number|string,
+    "proportions": number|string,
+    "symmetry": number|string,
+    "confidence": number|string
   }
 }
 
 Use approximately 20-35 useful feature values.
 
-Use concise metric names.
+For uncertain observations use:
+"low", "medium", "high", "balanced", or "uncertain".
 
-Qualitative values may include:
-"low"
-"medium"
-"high"
-"narrow"
-"wide"
-"short"
-"long"
-"balanced"
-"asymmetric"
-"uncertain"
-
-Do not fabricate exact physical measurements in millimeters.
-
-The score should reflect only visible facial geometry and should not automatically be high.
+Do not fabricate exact millimeter measurements.
 `;
 
   // --------------------------------------------------
-  // Gemini endpoint
+  // GEMINI REQUEST
   // --------------------------------------------------
 
   const endpoint =
     `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
       model
     )}:generateContent`;
-
-  // --------------------------------------------------
-  // Gemini request
-  // --------------------------------------------------
 
   const body = {
     contents: [
@@ -383,12 +373,12 @@ The score should reflect only visible facial geometry and should not automatical
       }
     );
 
+  // --------------------------------------------------
+  // GEMINI ERROR
+  // --------------------------------------------------
+
   const geminiData =
     await geminiResponse.json();
-
-  // --------------------------------------------------
-  // Gemini error
-  // --------------------------------------------------
 
   if (!geminiResponse.ok) {
     console.error(
@@ -400,11 +390,17 @@ The score should reflect only visible facial geometry and should not automatical
       geminiData?.error?.message ||
       `Gemini API error (${geminiResponse.status})`;
 
-    throw new Error(message);
+    return json(
+      {
+        success: false,
+        detail: message
+      },
+      geminiResponse.status
+    );
   }
 
   // --------------------------------------------------
-  // Extract text
+  // EXTRACT TEXT
   // --------------------------------------------------
 
   const text =
@@ -413,20 +409,43 @@ The score should reflect only visible facial geometry and should not automatical
     );
 
   if (!text) {
-    throw new Error(
-      "Gemini returned an empty response."
+    return json(
+      {
+        success: false,
+        detail:
+          "Gemini returned an empty response."
+      },
+      502
     );
   }
 
   // --------------------------------------------------
-  // Parse JSON
+  // PARSE JSON
   // --------------------------------------------------
 
-  const parsed =
-    parseJsonResponse(text);
+  let parsed;
+
+  try {
+    parsed =
+      parseJsonResponse(text);
+  } catch (error) {
+    console.error(
+      "Gemini invalid JSON:",
+      text
+    );
+
+    return json(
+      {
+        success: false,
+        detail:
+          "Gemini returned invalid JSON."
+      },
+      502
+    );
+  }
 
   // --------------------------------------------------
-  // Normalize
+  // NORMALIZE
   // --------------------------------------------------
 
   const normalized =
@@ -450,7 +469,9 @@ function extractGeminiText(data) {
   const candidates =
     data?.candidates;
 
-  if (!Array.isArray(candidates)) {
+  if (
+    !Array.isArray(candidates)
+  ) {
     return "";
   }
 
@@ -459,14 +480,17 @@ function extractGeminiText(data) {
       ?.content
       ?.parts;
 
-  if (!Array.isArray(parts)) {
+  if (
+    !Array.isArray(parts)
+  ) {
     return "";
   }
 
   return parts
     .filter(
       (part) =>
-        typeof part?.text === "string"
+        typeof part?.text ===
+        "string"
     )
     .map(
       (part) =>
@@ -486,42 +510,34 @@ function parseJsonResponse(text) {
     String(text).trim();
 
   // Remove ```json
-  if (
-    cleaned.startsWith("```json")
-  ) {
-    cleaned =
-      cleaned.slice(7);
-  }
+  cleaned =
+    cleaned.replace(
+      /^```json\s*/i,
+      ""
+    );
 
   // Remove ```
-  if (
-    cleaned.startsWith("```")
-  ) {
-    cleaned =
-      cleaned.slice(3);
-  }
-
-  if (
-    cleaned.endsWith("```")
-  ) {
-    cleaned =
-      cleaned.slice(
-        0,
-        -3
-      );
-  }
+  cleaned =
+    cleaned.replace(
+      /^```\s*/i,
+      ""
+    );
 
   cleaned =
-    cleaned.trim();
+    cleaned.replace(
+      /\s*```$/i,
+      ""
+    );
 
-  // Direct parse
   try {
     return JSON.parse(
       cleaned
     );
-  } catch (_) {}
+  } catch (_) {
+    // continue
+  }
 
-  // Try to recover JSON object
+  // Recover JSON object
   const start =
     cleaned.indexOf("{");
 
@@ -542,7 +558,9 @@ function parseJsonResponse(text) {
       return JSON.parse(
         candidate
       );
-    } catch (_) {}
+    } catch (_) {
+      // continue
+    }
   }
 
   throw new Error(
@@ -590,10 +608,6 @@ function normalizeAnalysis(
       )
     );
 
-  // --------------------------------------------------
-  // Score
-  // --------------------------------------------------
-
   let score =
     data.score;
 
@@ -608,7 +622,9 @@ function normalizeAnalysis(
       Number(score);
 
     if (
-      !Number.isFinite(score)
+      !Number.isFinite(
+        score
+      )
     ) {
       score = null;
     } else {
@@ -626,20 +642,12 @@ function normalizeAnalysis(
     }
   }
 
-  // --------------------------------------------------
-  // Metrics
-  // --------------------------------------------------
-
   const metrics =
     isPlainObject(
       data.metrics
     )
       ? data.metrics
       : {};
-
-  // --------------------------------------------------
-  // Production features
-  // --------------------------------------------------
 
   const production =
     isPlainObject(
@@ -657,10 +665,6 @@ function normalizeAnalysis(
     countLeaves(
       production
     );
-
-  // --------------------------------------------------
-  // Final response
-  // --------------------------------------------------
 
   return {
     success: true,
@@ -767,9 +771,10 @@ function uint8ToBase64(bytes) {
         )
       );
 
-    binary += String.fromCharCode(
-      ...chunk
-    );
+    binary +=
+      String.fromCharCode(
+        ...chunk
+      );
   }
 
   return btoa(
@@ -779,7 +784,7 @@ function uint8ToBase64(bytes) {
 
 
 // ======================================================
-// RESPONSE
+// CORS
 // ======================================================
 
 function corsHeaders() {
@@ -791,13 +796,17 @@ function corsHeaders() {
       "GET, POST, OPTIONS",
 
     "Access-Control-Allow-Headers":
-      "Content-Type",
+      "Content-Type, Accept",
 
     "Cache-Control":
       "no-store"
   };
 }
 
+
+// ======================================================
+// JSON RESPONSE
+// ======================================================
 
 function json(
   data,
