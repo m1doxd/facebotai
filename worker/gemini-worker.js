@@ -6,13 +6,16 @@ const ALLOWED_TYPES = new Set([
   "image/webp"
 ]);
 
-const DEFAULT_MODEL = "gemini-2.5-flash";
+const DEFAULT_MODEL = "gemini-3.6-flash";
 
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
+    // ==================================================
     // CORS
+    // ==================================================
+
     if (request.method === "OPTIONS") {
       return new Response(null, {
         status: 204,
@@ -20,7 +23,10 @@ export default {
       });
     }
 
-    // Health check
+    // ==================================================
+    // HEALTH
+    // ==================================================
+
     if (url.pathname === "/api/health") {
       return json({
         success: true,
@@ -30,7 +36,10 @@ export default {
       });
     }
 
-    // Analyze
+    // ==================================================
+    // ANALYZE
+    // ==================================================
+
     if (url.pathname === "/api/analyze") {
       if (request.method !== "POST") {
         return json(
@@ -45,17 +54,23 @@ export default {
       try {
         return await analyze(request, env);
       } catch (error) {
-        console.error("Worker error:", error);
+        console.error("FaceBot Worker error:", error);
 
         return json(
           {
             success: false,
-            detail: error?.message || "Internal server error."
+            detail:
+              error?.message ||
+              "Internal analysis error."
           },
           500
         );
       }
     }
+
+    // ==================================================
+    // DEFAULT
+    // ==================================================
 
     return new Response(
       "FaceBot Gemini Worker is running.",
@@ -63,7 +78,8 @@ export default {
         status: 200,
         headers: {
           ...corsHeaders(),
-          "Content-Type": "text/plain; charset=UTF-8"
+          "Content-Type":
+            "text/plain; charset=UTF-8"
         }
       }
     );
@@ -82,44 +98,50 @@ async function analyze(request, env) {
     return json(
       {
         success: false,
-        detail: "GEMINI_API_KEY is not configured."
+        detail:
+          "GEMINI_API_KEY is not configured in Worker secrets."
       },
       500
     );
   }
 
-  // --------------------------------------------------
-  // CHECK CONTENT TYPE
-  // --------------------------------------------------
+  // ==================================================
+  // MULTIPART
+  // ==================================================
 
   const contentType =
     request.headers.get("content-type") || "";
 
-  if (!contentType.toLowerCase().includes("multipart/form-data")) {
+  if (
+    !contentType
+      .toLowerCase()
+      .includes("multipart/form-data")
+  ) {
     return json(
       {
         success: false,
-        detail: "Expected multipart/form-data."
+        detail:
+          "Expected multipart/form-data."
       },
       400
     );
   }
-
-  // --------------------------------------------------
-  // READ FORM DATA
-  // --------------------------------------------------
 
   let formData;
 
   try {
     formData = await request.formData();
   } catch (error) {
-    console.error("FormData error:", error);
+    console.error(
+      "Multipart parsing error:",
+      error
+    );
 
     return json(
       {
         success: false,
-        detail: "Could not read multipart/form-data."
+        detail:
+          "Could not parse multipart/form-data."
       },
       400
     );
@@ -134,24 +156,27 @@ async function analyze(request, env) {
     return json(
       {
         success: false,
-        detail: "No image file was provided. Expected field: file"
+        detail:
+          "No image file was provided. Expected field: file"
       },
       400
     );
   }
 
-  // --------------------------------------------------
-  // VALIDATE FILE
-  // --------------------------------------------------
+  // ==================================================
+  // FILE VALIDATION
+  // ==================================================
 
   const mimeType =
-    file.type || "application/octet-stream";
+    file.type ||
+    "application/octet-stream";
 
   if (!ALLOWED_TYPES.has(mimeType)) {
     return json(
       {
         success: false,
-        detail: "Only JPG, PNG and WEBP images are supported."
+        detail:
+          "Only JPG, PNG and WEBP images are supported."
       },
       400
     );
@@ -161,7 +186,8 @@ async function analyze(request, env) {
     return json(
       {
         success: false,
-        detail: "Image is too large. Maximum size is 15 MB."
+        detail:
+          "Image is too large. Maximum size is 15 MB."
       },
       413
     );
@@ -171,130 +197,151 @@ async function analyze(request, env) {
     return json(
       {
         success: false,
-        detail: "The image file is empty."
+        detail:
+          "The image file is empty."
       },
       400
     );
   }
 
-  // --------------------------------------------------
-  // CONVERT IMAGE TO BASE64
-  // --------------------------------------------------
+  // ==================================================
+  // FILE -> BASE64
+  // ==================================================
 
-  const arrayBuffer = await file.arrayBuffer();
-  const bytes = new Uint8Array(arrayBuffer);
-  const base64Image = uint8ToBase64(bytes);
+  const bytes =
+    new Uint8Array(
+      await file.arrayBuffer()
+    );
 
-  // --------------------------------------------------
+  const base64 =
+    uint8ToBase64(bytes);
+
+  // ==================================================
   // MODEL
-  // --------------------------------------------------
+  // ==================================================
 
   const model =
-    env.GEMINI_MODEL || DEFAULT_MODEL;
+    env.GEMINI_MODEL ||
+    DEFAULT_MODEL;
 
-  // --------------------------------------------------
+  // ==================================================
   // PROMPT
-  // --------------------------------------------------
+  // ==================================================
 
   const prompt = `
 You are the facial-analysis engine for FaceBot.
 
-Analyze ONLY visible facial geometry in the supplied photograph.
+Analyze ONLY the visible facial geometry in the supplied photograph.
 
-Rules:
+IMPORTANT RULES:
 
-- Analyze only visible facial structure.
+- Analyze only what is visibly present.
 - Do not identify the person.
 - Do not infer race or ethnicity.
 - Do not infer health or medical conditions.
-- Do not infer personality, intelligence, sexuality, criminality, or other sensitive traits.
-- Do not claim to have used MediaPipe.
-- Do not claim to have used ExtraTrees.
-- Do not invent exact measurements in millimeters.
-- Do not invent invisible landmarks.
-- If the image is unclear, use lower confidence.
-- If there is no usable face, face_count must be 0 and score must be null.
+- Do not infer personality, intelligence, sexuality,
+  criminality, or other sensitive traits.
+- Do not claim to have run MediaPipe.
+- Do not claim to have run ExtraTrees.
+- Do not invent exact physical measurements in millimeters.
+- Do not invent landmarks that cannot be seen.
+- If the image is unclear, say so through lower confidence.
 - Return ONLY valid JSON.
-- All numeric scores must be between 0 and 10.
-- Do not automatically give high scores.
+- All scores must be numeric values from 0 to 10.
+- Scores should not automatically be high.
+- If no usable face is visible, return face_count = 0
+  and score = null.
 
-Return exactly this JSON structure:
+Return this structure:
 
 {
-  "face_count": 1,
-  "score": 0,
+  "face_count": number,
+  "score": number|null,
+
   "metrics": {
     "face_geometry": {
-      "face_aspect_ratio": 0,
-      "facial_width_height": 0,
-      "midface_proportion": 0
+      "face_aspect_ratio": number|string,
+      "facial_width_height": number|string,
+      "midface_proportion": number|string
     },
+
     "symmetry": {
-      "overall_symmetry": 0,
-      "left_right_balance": 0
+      "overall_symmetry": number|string,
+      "left_right_balance": number|string
     },
+
     "eyes": {
-      "eye_spacing": 0,
-      "eye_aspect_ratio": 0,
-      "eye_alignment": 0
+      "eye_spacing": number|string,
+      "eye_aspect_ratio": number|string,
+      "eye_alignment": number|string
     },
+
     "eyebrows": {
-      "brow_position": 0,
-      "brow_shape": 0
+      "brow_position": number|string,
+      "brow_shape": number|string
     },
+
     "nose": {
-      "nose_width": 0,
-      "nose_length": 0,
-      "nose_proportion": 0
+      "nose_width": number|string,
+      "nose_length": number|string,
+      "nose_proportion": number|string
     },
+
     "jaw": {
-      "jaw_width": 0,
-      "jaw_definition": 0,
-      "jaw_shape": 0
+      "jaw_width": number|string,
+      "jaw_definition": number|string,
+      "jaw_shape": number|string
     },
+
     "chin": {
-      "chin_prominence": 0,
-      "chin_proportion": 0
+      "chin_prominence": number|string,
+      "chin_proportion": number|string
     },
+
     "cheeks": {
-      "cheek_prominence": 0,
-      "cheek_definition": 0
+      "cheek_prominence": number|string,
+      "cheek_definition": number|string
     },
+
     "lips_mouth": {
-      "mouth_width": 0,
-      "lip_proportion": 0
+      "mouth_width": number|string,
+      "lip_proportion": number|string
     },
+
     "midface": {
-      "midface_balance": 0
+      "midface_balance": number|string
     }
   },
+
   "production_features": {
-    "overall_harmony": 0,
-    "frontal_harmony": 0,
-    "facial_definition": 0,
-    "angularity": 0,
-    "proportions": 0,
-    "symmetry": 0,
-    "confidence": 0
+    "overall_harmony": number|string,
+    "frontal_harmony": number|string,
+    "facial_definition": number|string,
+    "angularity": number|string,
+    "proportions": number|string,
+    "symmetry": number|string,
+    "confidence": number|string
   }
 }
 
 Use approximately 20-35 useful feature values.
 
-For observations that cannot reasonably be expressed as a number, you may use:
+For uncertain observations use:
 "low", "medium", "high", "balanced", or "uncertain".
 
-Do not fabricate exact physical measurements.
+Do not fabricate exact millimeter measurements.
 `;
 
-  // --------------------------------------------------
-  // GEMINI ENDPOINT
-  // --------------------------------------------------
+  // ==================================================
+  // GEMINI REQUEST
+  // ==================================================
 
   const endpoint =
-    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
+    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
+      model
+    )}:generateContent`;
 
-  const requestBody = {
+  const body = {
     contents: [
       {
         role: "user",
@@ -302,7 +349,7 @@ Do not fabricate exact physical measurements.
           {
             inline_data: {
               mime_type: mimeType,
-              data: base64Image
+              data: base64
             }
           },
           {
@@ -311,15 +358,12 @@ Do not fabricate exact physical measurements.
         ]
       }
     ],
+
     generationConfig: {
       temperature: 0.15,
-      responseMimeType: "application/json"
+      response_mime_type: "application/json"
     }
   };
-
-  // --------------------------------------------------
-  // CALL GEMINI
-  // --------------------------------------------------
 
   let geminiResponse;
 
@@ -328,128 +372,148 @@ Do not fabricate exact physical measurements.
       endpoint,
       {
         method: "POST",
+
         headers: {
           "Content-Type": "application/json",
           "x-goog-api-key": apiKey
         },
-        body: JSON.stringify(requestBody)
+
+        body: JSON.stringify(body)
       }
     );
   } catch (error) {
-    console.error("Gemini fetch error:", error);
+    console.error(
+      "Gemini network error:",
+      error
+    );
 
     return json(
       {
         success: false,
-        detail: "Could not connect to Gemini API.",
-        error: error?.message || "Network error"
+        detail:
+          `Could not connect to Gemini API: ${
+            error?.message || "network error"
+          }`
       },
       502
     );
   }
 
-  // --------------------------------------------------
-  // READ GEMINI RESPONSE SAFELY
-  // --------------------------------------------------
+  // ==================================================
+  // IMPORTANT:
+  // DO NOT USE geminiResponse.json()
+  //
+  // We read text first so an empty/non-JSON Gemini
+  // response cannot cause:
+  //
+  // Unexpected end of JSON input
+  // ==================================================
 
   const rawGeminiResponse =
     await geminiResponse.text();
 
   console.log(
-    "Gemini status:",
+    "Gemini HTTP status:",
     geminiResponse.status
   );
 
   console.log(
-    "Gemini response:",
-    rawGeminiResponse.slice(0, 5000)
+    "Gemini raw response length:",
+    rawGeminiResponse.length
   );
 
-  let geminiData = null;
-
-  if (rawGeminiResponse.trim()) {
-    try {
-      geminiData =
-        JSON.parse(rawGeminiResponse);
-    } catch (error) {
-      console.error(
-        "Gemini response JSON parse error:",
-        error
-      );
-
-      return json(
-        {
-          success: false,
-          detail: "Gemini returned invalid API JSON.",
-          gemini_status: geminiResponse.status,
-          raw: rawGeminiResponse.slice(0, 2000)
-        },
-        502
-      );
-    }
-  }
-
-  // --------------------------------------------------
-  // GEMINI HTTP ERROR
-  // --------------------------------------------------
-
-  if (!geminiResponse.ok) {
-    const message =
-      geminiData?.error?.message ||
-      `Gemini API error (${geminiResponse.status}).`;
+  if (!rawGeminiResponse.trim()) {
+    console.error(
+      "Gemini returned an empty response."
+    );
 
     return json(
       {
         success: false,
-        detail: message,
-        gemini_status: geminiResponse.status
+        detail:
+          `Gemini returned an empty response (HTTP ${geminiResponse.status}).`
+      },
+      502
+    );
+  }
+
+  let geminiData = null;
+
+  try {
+    geminiData =
+      JSON.parse(rawGeminiResponse);
+  } catch (error) {
+    console.error(
+      "Gemini returned non-JSON response:",
+      rawGeminiResponse.slice(0, 2000)
+    );
+
+    return json(
+      {
+        success: false,
+        detail:
+          `Gemini returned invalid JSON (HTTP ${geminiResponse.status}).`
+      },
+      502
+    );
+  }
+
+  // ==================================================
+  // GEMINI API ERROR
+  // ==================================================
+
+  if (!geminiResponse.ok) {
+    console.error(
+      "Gemini API response:",
+      geminiData
+    );
+
+    const message =
+      geminiData?.error?.message ||
+      `Gemini API error (${geminiResponse.status})`;
+
+    return json(
+      {
+        success: false,
+        detail: message
       },
       geminiResponse.status
     );
   }
 
-  if (!geminiData) {
-    return json(
-      {
-        success: false,
-        detail: "Gemini returned an empty response.",
-        gemini_status: geminiResponse.status
-      },
-      502
-    );
-  }
-
-  // --------------------------------------------------
-  // EXTRACT MODEL TEXT
-  // --------------------------------------------------
+  // ==================================================
+  // EXTRACT TEXT
+  // ==================================================
 
   const text =
-    extractGeminiText(geminiData);
+    extractGeminiText(
+      geminiData
+    );
 
   if (!text) {
     console.error(
-      "Gemini response had no text:",
-      JSON.stringify(geminiData)
+      "Gemini response contained no text:",
+      JSON.stringify(geminiData).slice(0, 4000)
     );
 
     return json(
       {
         success: false,
-        detail: "Gemini returned no analysis text.",
-        gemini_status: geminiResponse.status
+        detail:
+          "Gemini returned no analysis text."
       },
       502
     );
   }
 
-  // --------------------------------------------------
-  // PARSE MODEL JSON
-  // --------------------------------------------------
+  // ==================================================
+  // PARSE GEMINI JSON
+  // ==================================================
 
-  let analysis;
+  let parsed;
 
   try {
-    analysis =
+    parsed =
       parseJsonResponse(text);
   } catch (error) {
     console.error(
@@ -458,36 +522,58 @@ Do not fabricate exact physical measurements.
     );
 
     console.error(
-      "Gemini text:",
-      text
+      "Gemini analysis text:",
+      text.slice(0, 5000)
     );
 
     return json(
       {
         success: false,
-        detail: "Gemini returned invalid analysis JSON.",
-        raw: text.slice(0, 5000)
+        detail:
+          "Gemini returned invalid analysis JSON."
       },
       502
     );
   }
 
-  // --------------------------------------------------
+  // ==================================================
   // NORMALIZE
-  // --------------------------------------------------
+  // ==================================================
+
+  let normalized;
+
+  try {
+    normalized =
+      normalizeAnalysis(
+        parsed,
+        model
+      );
+  } catch (error) {
+    console.error(
+      "Normalization error:",
+      error
+    );
+
+    return json(
+      {
+        success: false,
+        detail:
+          error?.message ||
+          "Could not normalize analysis."
+      },
+      502
+    );
+  }
 
   return json(
-    normalizeAnalysis(
-      analysis,
-      model
-    ),
+    normalized,
     200
   );
 }
 
 
 // ======================================================
-// EXTRACT GEMINI TEXT
+// GEMINI RESPONSE TEXT
 // ======================================================
 
 function extractGeminiText(data) {
@@ -498,69 +584,65 @@ function extractGeminiText(data) {
     return "";
   }
 
-  let output = "";
+  const parts =
+    candidates[0]
+      ?.content
+      ?.parts;
 
-  for (const candidate of candidates) {
-    const parts =
-      candidate?.content?.parts;
-
-    if (!Array.isArray(parts)) {
-      continue;
-    }
-
-    for (const part of parts) {
-      if (
-        typeof part?.text === "string"
-      ) {
-        output += part.text;
-      }
-    }
+  if (!Array.isArray(parts)) {
+    return "";
   }
 
-  return output.trim();
+  return parts
+    .filter(
+      (part) =>
+        typeof part?.text === "string"
+    )
+    .map(
+      (part) =>
+        part.text
+    )
+    .join("\n")
+    .trim();
 }
 
 
 // ======================================================
-// PARSE JSON
+// JSON PARSER
 // ======================================================
 
 function parseJsonResponse(text) {
   let cleaned =
-    String(text || "").trim();
+    String(text).trim();
 
-  if (!cleaned) {
-    throw new Error(
-      "Empty Gemini response."
+  // Remove ```json
+  cleaned =
+    cleaned.replace(
+      /^```json\s*/i,
+      ""
     );
-  }
 
-  // Remove markdown code fences
-  cleaned = cleaned.replace(
-    /^```json\s*/i,
-    ""
-  );
+  // Remove ```
+  cleaned =
+    cleaned.replace(
+      /^```\s*/i,
+      ""
+    );
 
-  cleaned = cleaned.replace(
-    /^```\s*/i,
-    ""
-  );
+  cleaned =
+    cleaned.replace(
+      /\s*```$/i,
+      ""
+    );
 
-  cleaned = cleaned.replace(
-    /\s*```$/i,
-    ""
-  );
-
-  cleaned = cleaned.trim();
-
-  // Direct JSON
+  // First attempt
   try {
     return JSON.parse(cleaned);
-  } catch (error) {
-    // Continue to recovery
+  } catch (_) {
+    // continue
   }
 
-  // Find first JSON object
+  // Recover JSON object
   const start =
     cleaned.indexOf("{");
 
@@ -568,8 +650,7 @@ function parseJsonResponse(text) {
     cleaned.lastIndexOf("}");
 
   if (
-    start !== -1 &&
-    end !== -1 &&
+    start >= 0 &&
     end > start
   ) {
     const candidate =
@@ -580,19 +661,19 @@ function parseJsonResponse(text) {
 
     try {
       return JSON.parse(candidate);
-    } catch (error) {
-      // Continue
+    } catch (_) {
+      // continue
     }
   }
 
   throw new Error(
-    "Could not parse Gemini JSON."
+    "Gemini returned invalid JSON."
   );
 }
 
 
 // ======================================================
-// NORMALIZE ANALYSIS
+// NORMALIZATION
 // ======================================================
 
 function normalizeAnalysis(
@@ -610,7 +691,9 @@ function normalizeAnalysis(
   }
 
   let faceCount =
-    Number(data.face_count);
+    Number(
+      data.face_count
+    );
 
   if (!Number.isFinite(faceCount)) {
     faceCount = 1;
@@ -622,30 +705,39 @@ function normalizeAnalysis(
       Math.round(faceCount)
     );
 
-  let score = null;
+  let score =
+    data.score;
 
   if (
-    data.score !== null &&
-    data.score !== undefined &&
-    data.score !== ""
+    score === null ||
+    score === undefined ||
+    score === ""
   ) {
-    const numericScore =
-      Number(data.score);
+    score = null;
+  } else {
+    score = Number(score);
 
-    if (Number.isFinite(numericScore)) {
+    if (!Number.isFinite(score)) {
+      score = null;
+    } else {
+      score =
+        clamp(
+          score,
+          0,
+          10
+        );
+
       score =
         Math.round(
-          clamp(
-            numericScore,
-            0,
-            10
-          ) * 100
+          score * 100
         ) / 100;
     }
   }
 
   const metrics =
-    isPlainObject(data.metrics)
+    isPlainObject(
+      data.metrics
+    )
       ? data.metrics
       : {};
 
@@ -664,14 +756,28 @@ function normalizeAnalysis(
 
   return {
     success: true,
+
     score,
-    face_count: faceCount,
-    landmarks_count: null,
-    detected_features: detectedFeatures,
-    feature_count: featureCount,
+
+    face_count:
+      faceCount,
+
+    landmarks_count:
+      null,
+
+    detected_features:
+      detectedFeatures,
+
+    feature_count:
+      featureCount,
+
     model,
+
     metrics,
-    production_features: production,
+
+    production_features:
+      production,
+
     generated_at:
       new Date().toISOString()
   };
@@ -700,7 +806,8 @@ function countLeaves(object) {
 
   for (const value of Object.values(object)) {
     if (isPlainObject(value)) {
-      count += countLeaves(value);
+      count +=
+        countLeaves(value);
     } else {
       count += 1;
     }
@@ -726,7 +833,8 @@ function clamp(
 
 
 function uint8ToBase64(bytes) {
-  const chunkSize = 0x8000;
+  const chunkSize =
+    0x8000;
 
   let binary = "";
 
@@ -744,9 +852,10 @@ function uint8ToBase64(bytes) {
         )
       );
 
-    binary += String.fromCharCode(
-      ...chunk
-    );
+    binary +=
+      String.fromCharCode(
+        ...chunk
+      );
   }
 
   return btoa(binary);
@@ -760,10 +869,13 @@ function uint8ToBase64(bytes) {
 function corsHeaders() {
   return {
     "Access-Control-Allow-Origin": "*",
+
     "Access-Control-Allow-Methods":
       "GET, POST, OPTIONS",
+
     "Access-Control-Allow-Headers":
       "Content-Type, Accept",
+
     "Cache-Control":
       "no-store"
   };
@@ -786,8 +898,10 @@ function json(
     ),
     {
       status,
+
       headers: {
         ...corsHeaders(),
+
         "Content-Type":
           "application/json; charset=UTF-8"
       }
