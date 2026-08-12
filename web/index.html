@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#08090b"><meta name="color-scheme" content="dark">
+<title>FaceBot — PSL AI Analyzer</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<div class="app">
+<header class="topbar"><div class="brand"><div class="brand-mark">F</div><div><div class="brand-name">FaceBot</div><div class="brand-subtitle">PSL AI Analyzer</div></div></div><div class="status"><span class="status-dot"></span><span>AI READY</span></div></header>
+<main>
+<section class="screen active" data-screen="home">
+<div class="hero-copy"><div class="eyebrow">FACIAL ANALYSIS</div><h1>Read your<br><span>facial geometry.</span></h1><p>Upload a clear front-facing photo and let the FaceBot AI analyzer inspect the visible facial structure.</p></div>
+<button class="upload-card" id="choosePhotoBtn" type="button"><div class="upload-icon"><span>+</span></div><div class="upload-copy"><strong>Start an analysis</strong><span>JPG, PNG or WEBP · up to 15 MB</span></div><span class="chevron">↗</span></button>
+<div class="home-grid"><button class="mini-card" data-go="history" type="button"><span class="mini-label">HISTORY</span><strong id="historyCount">0 analyses</strong><span class="mini-arrow">↗</span><span class="mini-line"></span></button><button class="mini-card" data-go="about" type="button"><span class="mini-label">ENGINE</span><strong>How it works</strong><span class="mini-arrow">↗</span><span class="mini-line"></span></button></div>
+<div class="trust-row"><span>AI ANALYSIS</span><i></i><span>VISIBLE FEATURES</span><i></i><span>LOCAL HISTORY</span></div>
+<div class="home-footnote"><span class="home-footnote__index">01</span><div><strong>Production endpoint</strong><p>The interface displays the real response returned by the configured FaceBot Gemini Worker.</p></div></div>
+</section>
+
+<section class="screen" data-screen="photo">
+<div class="screen-title"><button class="back-btn" data-back type="button">←</button><div><div class="eyebrow">NEW ANALYSIS</div><h2>Photo</h2></div></div>
+<div class="preview-card"><div class="preview-frame"><img id="previewImage" alt="Selected photo preview"><div class="preview-corners"><span></span><span></span><span></span><span></span></div><div class="preview-overlay">FACE PREVIEW</div></div><div class="file-info"><div><span>FORMAT</span><strong id="fileFormat">—</strong></div><div><span>SIZE</span><strong id="fileSize">—</strong></div></div></div>
+<div class="photo-note"><span class="photo-note__mark">i</span><p>Use one visible face, front-facing when possible, with enough light and minimal obstruction.</p></div>
+<button class="primary-btn" id="analyzeBtn" type="button"><span>Analyze photo</span><span>→</span></button>
+<button class="secondary-btn" id="chooseAnotherBtn" type="button">Choose another photo</button>
+<input id="fileInput" type="file" accept="image/jpeg,image/png,image/webp" hidden>
+</section>
+
+<section class="screen" data-screen="loading">
+<div class="loading-screen"><div class="scan-orb"><div class="scan-ring"></div><div class="scan-ring scan-ring--outer"></div><span>F</span></div><div class="eyebrow">FACEBOT ENGINE</div><h2>Analyzing photo</h2><p id="loadingSubtitle">Uploading image…</p><div class="loading-steps">
+<div class="loading-step active" data-step="1"><span></span><b>01</b> Uploading image</div><div class="loading-step" data-step="2"><span></span><b>02</b> Inspecting visible face</div><div class="loading-step" data-step="3"><span></span><b>03</b> Extracting feature values</div><div class="loading-step" data-step="4"><span></span><b>04</b> Preparing report</div>
+</div></div>
+</section>
+
+<section class="screen" data-screen="result">
+<div class="screen-title result-title"><div><div class="eyebrow">ANALYSIS COMPLETE</div><h2>Face Report</h2></div><button class="icon-btn" id="newAnalysisBtn" type="button">+</button></div>
+<div class="result-hero"><div class="result-score-label">PSL AI SCORE</div><div class="result-score"><span id="resultScore">—</span><small>/10</small></div><div class="score-track"><div id="resultProgress"></div></div><div class="score-meta"><span id="resultCaption">Gemini visual analysis</span><span>REAL RESULT</span></div></div>
+<div class="stats-grid"><div class="stat"><span>FACES</span><strong id="statFaces">—</strong><small>detected</small></div><div class="stat"><span>LANDMARKS</span><strong id="statLandmarks">—</strong><small>returned</small></div><div class="stat"><span>FEATURES</span><strong id="statFeatures">—</strong><small>production</small></div><div class="stat"><span>MODEL</span><strong id="statModel">—</strong><small>inference</small></div></div>
+<div class="report-section"><div class="section-header"><div><div class="eyebrow">ANALYSIS OVERVIEW</div><h3>Measured structure</h3></div><span id="metricCount">0</span></div><div class="overview-grid" id="overviewGrid"></div></div>
+<div class="report-section"><div class="section-header"><div><div class="eyebrow">FACE ANALYZER</div><h3>Measurements</h3></div><span id="analyzerCount">0</span></div><div class="metrics" id="metrics"></div></div>
+<div class="report-section"><div class="section-header"><div><div class="eyebrow">AI FEATURES</div><h3>Feature matrix</h3></div><span id="featureCount">0</span></div><div class="feature-groups" id="featureGroups"></div></div>
+<div class="note-card"><span class="note-icon">i</span><p>The score and feature values shown here are returned by the configured Gemini analysis endpoint. The UI does not invent additional category scores.</p></div>
+</section>
+
+<section class="screen" data-screen="history">
+<div class="screen-title"><button class="back-btn" data-back type="button">←</button><div><div class="eyebrow">LOCAL ARCHIVE</div><h2>History</h2></div></div>
+<div class="history-summary"><span class="eyebrow">SAVED LOCALLY</span><strong id="historySummaryCount">0</strong><span>analyses</span></div><div id="historyList" class="history-list"></div>
+</section>
+
+<section class="screen" data-screen="about">
+<div class="screen-title"><button class="back-btn" data-back type="button">←</button><div><div class="eyebrow">FACEBOT</div><h2>How it works</h2></div></div>
+<div class="about-intro"><div class="eyebrow">AI PIPELINE</div><p>One photo is sent to the FaceBot Gemini Worker, which validates the upload, analyzes the visible face and returns structured JSON.</p></div>
+<div class="about-stack"><article class="about-card"><span>01</span><div><strong>Photo upload</strong><p>The Mini App validates JPG, PNG and WEBP files up to 15 MB.</p></div></article><article class="about-card"><span>02</span><div><strong>Gemini analysis</strong><p>The Worker sends the image to the configured Gemini model using the server-side API key.</p></div></article><article class="about-card"><span>03</span><div><strong>Structured result</strong><p>The Worker normalizes the score, metrics and feature groups into a stable API response.</p></div></article><article class="about-card"><span>04</span><div><strong>Face Report</strong><p>The Mini App renders the returned values and saves a compact history locally.</p></div></article></div>
+</section>
+</main>
+<nav class="bottom-nav"><button class="nav-item active" data-go="home" type="button"><span>⌂</span><small>Home</small></button><button class="nav-item" data-go="history" type="button"><span>◷</span><small>History</small></button><button class="nav-item" data-go="about" type="button"><span>i</span><small>About</small></button></nav>
+</div>
+<div class="toast" id="toast"></div><script src="./app.js"></script>
+</body>
+</html>
