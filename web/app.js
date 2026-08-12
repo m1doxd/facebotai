@@ -28,7 +28,7 @@ const ALLOWED_TYPES = new Set([
   "image/webp"
 ]);
 
-const API_ENDPOINT = "/api/analyze";
+const API_ENDPOINT = "https://facebotpsl.snow4lyt.workers.dev/api/analyze";
 const HISTORY_KEY = "facebot_history_v1";
 
 const tg =
