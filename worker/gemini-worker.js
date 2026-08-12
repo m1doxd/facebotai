@@ -12,20 +12,12 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
-    // --------------------------------------------------
-    // CORS
-    // --------------------------------------------------
-
     if (request.method === "OPTIONS") {
       return new Response(null, {
         status: 204,
         headers: corsHeaders()
       });
     }
-
-    // --------------------------------------------------
-    // HEALTH
-    // --------------------------------------------------
 
     if (url.pathname === "/api/health") {
       return json({
@@ -35,10 +27,6 @@ export default {
         model: env.GEMINI_MODEL || DEFAULT_MODEL
       });
     }
-
-    // --------------------------------------------------
-    // ANALYZE
-    // --------------------------------------------------
 
     if (url.pathname === "/api/analyze") {
       if (request.method !== "POST") {
@@ -68,28 +56,18 @@ export default {
       }
     }
 
-    // --------------------------------------------------
-    // DEFAULT
-    // --------------------------------------------------
-
     return new Response(
       "FaceBot Gemini Worker is running.",
       {
         status: 200,
         headers: {
           ...corsHeaders(),
-          "Content-Type":
-            "text/plain; charset=UTF-8"
+          "Content-Type": "text/plain; charset=UTF-8"
         }
       }
     );
   }
 };
-
-
-// ======================================================
-// ANALYZE
-// ======================================================
 
 async function analyze(request, env) {
   const apiKey = env.GEMINI_API_KEY;
@@ -105,53 +83,30 @@ async function analyze(request, env) {
     );
   }
 
-  // --------------------------------------------------
-  // READ MULTIPART FORM DATA
-  // --------------------------------------------------
+  const contentType =
+    request.headers.get("content-type") || "";
 
-const contentType =
-  request.headers.get("content-type") || "";
-
-console.log("ANALYZE REQUEST:", {
-  method: request.method,
-  contentType,
-  url: request.url
-});
-
-if (
-  !contentType.toLowerCase().includes(
-    "multipart/form-data"
-  )
-) {
-  return json(
-    {
-      success: false,
-      detail:
-        "Expected multipart/form-data.",
-      debug: {
-        method: request.method,
-        contentType: contentType,
-        url: request.url
-      }
-    },
-    400
-  );
-}
+  if (
+    !contentType
+      .toLowerCase()
+      .includes("multipart/form-data")
+  ) {
     return json(
       {
         success: false,
-        detail:
-          "Expected multipart/form-data."
+        detail: "Expected multipart/form-data.",
+        debug: {
+          method: request.method,
+          contentType,
+          url: request.url
+        }
       },
       400
     );
   }
 
-  const formData =
-    await request.formData();
-
-  const file =
-    formData.get("file");
+  const formData = await request.formData();
+  const file = formData.get("file");
 
   if (
     !file ||
@@ -167,17 +122,10 @@ if (
     );
   }
 
-  // --------------------------------------------------
-  // VALIDATE FILE
-  // --------------------------------------------------
-
   const mimeType =
-    file.type ||
-    "application/octet-stream";
+    file.type || "application/octet-stream";
 
-  if (
-    !ALLOWED_TYPES.has(mimeType)
-  ) {
+  if (!ALLOWED_TYPES.has(mimeType)) {
     return json(
       {
         success: false,
@@ -188,9 +136,7 @@ if (
     );
   }
 
-  if (
-    file.size > MAX_FILE_SIZE
-  ) {
+  if (file.size > MAX_FILE_SIZE) {
     return json(
       {
         success: false,
@@ -205,36 +151,21 @@ if (
     return json(
       {
         success: false,
-        detail:
-          "The image file is empty."
+        detail: "The image file is empty."
       },
       400
     );
   }
-
-  // --------------------------------------------------
-  // FILE -> BASE64
-  // --------------------------------------------------
 
   const bytes =
     new Uint8Array(
       await file.arrayBuffer()
     );
 
-  const base64 =
-    uint8ToBase64(bytes);
-
-  // --------------------------------------------------
-  // MODEL
-  // --------------------------------------------------
+  const base64 = uint8ToBase64(bytes);
 
   const model =
-    env.GEMINI_MODEL ||
-    DEFAULT_MODEL;
-
-  // --------------------------------------------------
-  // PROMPT
-  // --------------------------------------------------
+    env.GEMINI_MODEL || DEFAULT_MODEL;
 
   const prompt = `
 You are the facial-analysis engine for FaceBot.
@@ -247,80 +178,67 @@ IMPORTANT RULES:
 - Do not identify the person.
 - Do not infer race or ethnicity.
 - Do not infer health or medical conditions.
-- Do not infer personality, intelligence, sexuality, criminality,
-  or other sensitive traits.
+- Do not infer personality, intelligence, sexuality, criminality, or other sensitive traits.
 - Do not claim to have run MediaPipe.
 - Do not claim to have run ExtraTrees.
 - Do not invent exact physical measurements in millimeters.
 - Do not invent landmarks that cannot be seen.
-- If the image is unclear, say so through lower confidence.
+- If the image is unclear, reduce confidence.
 - Return ONLY valid JSON.
 - All scores must be numeric values from 0 to 10.
 - Scores should not automatically be high.
-- If no usable face is visible, return face_count = 0
-  and score = null.
+- If no usable face is visible, return face_count = 0 and score = null.
 
-Return this structure:
+Return exactly this general structure:
 
 {
   "face_count": number,
   "score": number|null,
-
   "metrics": {
     "face_geometry": {
       "face_aspect_ratio": number|string,
       "facial_width_height": number|string,
       "midface_proportion": number|string
     },
-
     "symmetry": {
       "overall_symmetry": number|string,
       "left_right_balance": number|string
     },
-
     "eyes": {
       "eye_spacing": number|string,
       "eye_aspect_ratio": number|string,
       "eye_alignment": number|string
     },
-
     "eyebrows": {
       "brow_position": number|string,
       "brow_shape": number|string
     },
-
     "nose": {
       "nose_width": number|string,
       "nose_length": number|string,
       "nose_proportion": number|string
     },
-
     "jaw": {
       "jaw_width": number|string,
       "jaw_definition": number|string,
       "jaw_shape": number|string
     },
-
     "chin": {
       "chin_prominence": number|string,
       "chin_proportion": number|string
     },
-
     "cheeks": {
       "cheek_prominence": number|string,
       "cheek_definition": number|string
     },
-
     "lips_mouth": {
       "mouth_width": number|string,
       "lip_proportion": number|string
     },
-
     "midface": {
       "midface_balance": number|string
     }
   },
-
   "production_features": {
     "overall_harmony": number|string,
     "frontal_harmony": number|string,
@@ -340,14 +258,8 @@ For uncertain observations use:
 Do not fabricate exact millimeter measurements.
 `;
 
-  // --------------------------------------------------
-  // GEMINI REQUEST
-  // --------------------------------------------------
-
   const endpoint =
-    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
-      model
-    )}:generateContent`;
+    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
 
   const body = {
     contents: [
@@ -366,11 +278,9 @@ Do not fabricate exact millimeter measurements.
         ]
       }
     ],
-
     generationConfig: {
       temperature: 0.15,
-      response_mime_type:
-        "application/json"
+      response_mime_type: "application/json"
     }
   };
 
@@ -379,26 +289,33 @@ Do not fabricate exact millimeter measurements.
       endpoint,
       {
         method: "POST",
-
         headers: {
-          "Content-Type":
-            "application/json",
-
-          "x-goog-api-key":
-            apiKey
+          "Content-Type": "application/json",
+          "x-goog-api-key": apiKey
         },
-
-        body:
-          JSON.stringify(body)
+        body: JSON.stringify(body)
       }
     );
 
-  // --------------------------------------------------
-  // GEMINI ERROR
-  // --------------------------------------------------
+  const geminiText =
+    await geminiResponse.text();
 
-  const geminiData =
-    await geminiResponse.json();
+  let geminiData;
+
+  try {
+    geminiData =
+      JSON.parse(geminiText);
+  } catch {
+    return json(
+      {
+        success: false,
+        detail:
+          "Gemini returned a non-JSON response.",
+        raw: geminiText.slice(0, 2000)
+      },
+      502
+    );
+  }
 
   if (!geminiResponse.ok) {
     console.error(
@@ -419,36 +336,27 @@ Do not fabricate exact millimeter measurements.
     );
   }
 
-  // --------------------------------------------------
-  // EXTRACT TEXT
-  // --------------------------------------------------
-
   const text =
-    extractGeminiText(
-      geminiData
-    );
+    extractGeminiText(geminiData);
 
   if (!text) {
     return json(
       {
         success: false,
         detail:
-          "Gemini returned an empty response."
+          "Gemini returned an empty response.",
+        raw: geminiData
       },
       502
     );
   }
-
-  // --------------------------------------------------
-  // PARSE JSON
-  // --------------------------------------------------
 
   let parsed;
 
   try {
     parsed =
       parseJsonResponse(text);
-  } catch (error) {
+  } catch {
     console.error(
       "Gemini invalid JSON:",
       text
@@ -458,85 +366,59 @@ Do not fabricate exact millimeter measurements.
       {
         success: false,
         detail:
-          "Gemini returned invalid JSON."
+          "Gemini returned invalid JSON.",
+        raw: text
       },
       502
     );
   }
 
-  // --------------------------------------------------
-  // NORMALIZE
-  // --------------------------------------------------
-
-  const normalized =
+  return json(
     normalizeAnalysis(
       parsed,
       model
-    );
-
-  return json(
-    normalized,
+    ),
     200
   );
 }
-
-
-// ======================================================
-// GEMINI RESPONSE
-// ======================================================
 
 function extractGeminiText(data) {
   const candidates =
     data?.candidates;
 
-  if (
-    !Array.isArray(candidates)
-  ) {
+  if (!Array.isArray(candidates)) {
     return "";
   }
 
   const parts =
-    candidates[0]
-      ?.content
-      ?.parts;
+    candidates[0]?.content?.parts;
 
-  if (
-    !Array.isArray(parts)
-  ) {
+  if (!Array.isArray(parts)) {
     return "";
   }
 
   return parts
     .filter(
       (part) =>
-        typeof part?.text ===
-        "string"
+        typeof part?.text === "string"
     )
     .map(
-      (part) =>
-        part.text
+      (part) => part.text
     )
     .join("\n")
     .trim();
 }
 
-
-// ======================================================
-// JSON PARSER
-// ======================================================
-
 function parseJsonResponse(text) {
   let cleaned =
     String(text).trim();
 
-  // Remove ```json
   cleaned =
     cleaned.replace(
       /^```json\s*/i,
       ""
     );
 
-  // Remove ```
   cleaned =
     cleaned.replace(
       /^```\s*/i,
@@ -550,14 +432,9 @@ function parseJsonResponse(text) {
     );
 
   try {
-    return JSON.parse(
-      cleaned
-    );
-  } catch (_) {
-    // continue
-  }
+    return JSON.parse(cleaned);
+  } catch {}
 
-  // Recover JSON object
   const start =
     cleaned.indexOf("{");
 
@@ -574,24 +451,13 @@ function parseJsonResponse(text) {
         end + 1
       );
 
-    try {
-      return JSON.parse(
-        candidate
-      );
-    } catch (_) {
-      // continue
-    }
+    return JSON.parse(candidate);
   }
 
   throw new Error(
     "Gemini returned invalid JSON."
   );
 }
-
-
-// ======================================================
-// NORMALIZATION
-// ======================================================
 
 function normalizeAnalysis(
   data,
@@ -608,24 +474,16 @@ function normalizeAnalysis(
   }
 
   let faceCount =
-    Number(
-      data.face_count
-    );
+    Number(data.face_count);
 
-  if (
-    !Number.isFinite(
-      faceCount
-    )
-  ) {
+  if (!Number.isFinite(faceCount)) {
     faceCount = 1;
   }
 
   faceCount =
     Math.max(
       0,
-      Math.round(
-        faceCount
-      )
+      Math.round(faceCount)
     );
 
   let score =
@@ -638,34 +496,20 @@ function normalizeAnalysis(
   ) {
     score = null;
   } else {
-    score =
-      Number(score);
+    score = Number(score);
 
-    if (
-      !Number.isFinite(
-        score
-      )
-    ) {
+    if (!Number.isFinite(score)) {
       score = null;
     } else {
       score =
-        clamp(
-          score,
-          0,
-          10
-        );
-
-      score =
         Math.round(
-          score * 100
+          clamp(score, 0, 10) * 100
         ) / 100;
     }
   }
 
   const metrics =
-    isPlainObject(
-      data.metrics
-    )
+    isPlainObject(data.metrics)
       ? data.metrics
       : {};
 
@@ -677,48 +521,25 @@ function normalizeAnalysis(
       : {};
 
   const detectedFeatures =
-    countLeaves(
-      metrics
-    );
+    countLeaves(metrics);
 
   const featureCount =
-    countLeaves(
-      production
-    );
+    countLeaves(production);
 
   return {
     success: true,
-
     score,
-
-    face_count:
-      faceCount,
-
-    landmarks_count:
-      null,
-
-    detected_features:
-      detectedFeatures,
-
-    feature_count:
-      featureCount,
-
+    face_count: faceCount,
+    landmarks_count: null,
+    detected_features: detectedFeatures,
+    feature_count: featureCount,
     model,
-
     metrics,
-
-    production_features:
-      production,
-
+    production_features: production,
     generated_at:
       new Date().toISOString()
   };
 }
-
-
-// ======================================================
-// HELPERS
-// ======================================================
 
 function isPlainObject(value) {
   return (
@@ -728,25 +549,18 @@ function isPlainObject(value) {
   );
 }
 
-
 function countLeaves(object) {
-  if (
-    !isPlainObject(object)
-  ) {
+  if (!isPlainObject(object)) {
     return 0;
   }
 
   let count = 0;
 
   for (
-    const value of
-    Object.values(object)
+    const value of Object.values(object)
   ) {
-    if (
-      isPlainObject(value)
-    ) {
-      count +=
-        countLeaves(value);
+    if (isPlainObject(value)) {
+      count += countLeaves(value);
     } else {
       count += 1;
     }
@@ -754,7 +568,6 @@ function countLeaves(object) {
 
   return count;
 }
-
 
 function clamp(
   value,
@@ -770,11 +583,8 @@ function clamp(
   );
 }
 
-
 function uint8ToBase64(bytes) {
-  const chunkSize =
-    0x8000;
-
+  const chunkSize = 0x8000;
   let binary = "";
 
   for (
@@ -791,42 +601,25 @@ function uint8ToBase64(bytes) {
         )
       );
 
-    binary +=
-      String.fromCharCode(
-        ...chunk
-      );
+    binary += String.fromCharCode(
+      ...chunk
+    );
   }
 
-  return btoa(
-    binary
-  );
+  return btoa(binary);
 }
-
-
-// ======================================================
-// CORS
-// ======================================================
 
 function corsHeaders() {
   return {
-    "Access-Control-Allow-Origin":
-      "*",
-
+    "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods":
       "GET, POST, OPTIONS",
-
     "Access-Control-Allow-Headers":
       "Content-Type, Accept",
-
     "Cache-Control":
       "no-store"
   };
 }
-
-
-// ======================================================
-// JSON RESPONSE
-// ======================================================
 
 function json(
   data,
@@ -840,10 +633,8 @@ function json(
     ),
     {
       status,
-
       headers: {
         ...corsHeaders(),
-
         "Content-Type":
           "application/json; charset=UTF-8"
       }
