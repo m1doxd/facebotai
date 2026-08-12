@@ -2,21 +2,14 @@
 
 /*
  * FaceBot — Telegram Mini App
- * Frontend for:
- *   POST /api/analyze
  *
- * Expected backend response:
+ * Frontend for:
+ *   POST https://facebot-gemini.snow4lyt.workers.dev/api/analyze
+ *
+ * Gemini Worker expects JSON:
  * {
- *   success: true,
- *   score: number|null,
- *   face_count: number,
- *   landmarks_count: number|null,
- *   detected_features: number,
- *   feature_count: number,
- *   model: string,
- *   metrics: object,
- *   production_features: object,
- *   generated_at: string
+ *   image: "base64...",
+ *   mimeType: "image/jpeg"
  * }
  */
 
@@ -30,7 +23,9 @@ const ALLOWED_TYPES = new Set([
 
 const API_ENDPOINT =
   "https://facebot-gemini.snow4lyt.workers.dev/api/analyze";
-const HISTORY_KEY = "facebot_history_v1";
+
+const HISTORY_KEY =
+  "facebot_history_v1";
 
 const tg =
   window.Telegram &&
@@ -43,16 +38,29 @@ const tg =
 // DOM
 // ======================================================
 
-const screens = document.querySelectorAll(".screen");
+const screens =
+  document.querySelectorAll(".screen");
 
-const fileInput = document.getElementById("fileInput");
-const choosePhotoBtn = document.getElementById("choosePhotoBtn");
-const chooseAnotherBtn = document.getElementById("chooseAnotherBtn");
-const analyzeBtn = document.getElementById("analyzeBtn");
+const fileInput =
+  document.getElementById("fileInput");
 
-const previewImage = document.getElementById("previewImage");
-const fileFormat = document.getElementById("fileFormat");
-const fileSize = document.getElementById("fileSize");
+const choosePhotoBtn =
+  document.getElementById("choosePhotoBtn");
+
+const chooseAnotherBtn =
+  document.getElementById("chooseAnotherBtn");
+
+const analyzeBtn =
+  document.getElementById("analyzeBtn");
+
+const previewImage =
+  document.getElementById("previewImage");
+
+const fileFormat =
+  document.getElementById("fileFormat");
+
+const fileSize =
+  document.getElementById("fileSize");
 
 const loadingTitle =
   document.getElementById("loadingTitle");
@@ -143,15 +151,21 @@ function initTelegram() {
     tg.ready();
     tg.expand();
 
-    if (typeof tg.setHeaderColor === "function") {
+    if (
+      typeof tg.setHeaderColor === "function"
+    ) {
       tg.setHeaderColor("#08090b");
     }
 
-    if (typeof tg.setBackgroundColor === "function") {
+    if (
+      typeof tg.setBackgroundColor === "function"
+    ) {
       tg.setBackgroundColor("#08090b");
     }
 
-    if (typeof tg.enableClosingConfirmation === "function") {
+    if (
+      typeof tg.enableClosingConfirmation === "function"
+    ) {
       tg.enableClosingConfirmation();
     }
   } catch (error) {
@@ -168,9 +182,10 @@ function initTelegram() {
 // ======================================================
 
 function showScreen(name) {
-  const target = document.querySelector(
-    `.screen[data-screen="${CSS.escape(name)}"]`
-  );
+  const target =
+    document.querySelector(
+      `.screen[data-screen="${CSS.escape(name)}"]`
+    );
 
   if (!target) {
     return;
@@ -308,9 +323,7 @@ function handleFileSelected(file) {
 
 function validateFile(file) {
   if (
-    !ALLOWED_TYPES.has(
-      file.type
-    )
+    !ALLOWED_TYPES.has(file.type)
   ) {
     return {
       valid: false,
@@ -320,8 +333,7 @@ function validateFile(file) {
   }
 
   if (
-    file.size >
-    MAX_FILE_SIZE
+    file.size > MAX_FILE_SIZE
   ) {
     return {
       valid: false,
@@ -386,16 +398,18 @@ async function startAnalysis() {
   resetLoadingSteps();
 
   try {
+    const analysisPromise =
+      analyzePhoto(selectedFile);
+
     await runLoadingSequence();
 
     const result =
-      await analyzePhoto(
-        selectedFile
-      );
+      await analysisPromise;
 
     if (!result.success) {
       throw new Error(
         result.detail ||
+        result.error ||
         "Analysis failed."
       );
     }
@@ -435,48 +449,354 @@ async function startAnalysis() {
 }
 
 
-async function analyzePhoto(file) {
-  const formData =
-    new FormData();
+// ======================================================
+// FILE -> BASE64
+// ======================================================
 
-  formData.append(
-    "file",
-    file,
-    file.name || "photo.jpg"
+function fileToBase64(file) {
+  return new Promise(
+    (resolve, reject) => {
+      const reader =
+        new FileReader();
+
+      reader.onload = () => {
+        try {
+          const result =
+            String(
+              reader.result || ""
+            );
+
+          const commaIndex =
+            result.indexOf(",");
+
+          if (commaIndex === -1) {
+            reject(
+              new Error(
+                "Could not encode the image."
+              )
+            );
+
+            return;
+          }
+
+          resolve(
+            result.slice(
+              commaIndex + 1
+            )
+          );
+
+        } catch (error) {
+          reject(error);
+        }
+      };
+
+      reader.onerror = () => {
+        reject(
+          new Error(
+            "Could not read the selected image."
+          )
+        );
+      };
+
+      reader.readAsDataURL(file);
+    }
   );
+}
+
+
+// ======================================================
+// API REQUEST
+// ======================================================
+
+async function analyzePhoto(file) {
+  const base64Image =
+    await fileToBase64(file);
 
   const response =
     await fetch(
       API_ENDPOINT,
       {
         method: "POST",
-        body: formData,
+
         headers: {
+          "Content-Type":
+            "application/json",
+
           "Accept":
             "application/json"
-        }
+        },
+
+        body: JSON.stringify({
+          image: base64Image,
+          mimeType:
+            file.type || "image/jpeg"
+        })
       }
     );
 
+  const responseText =
+    await response.text();
+
   let data = null;
 
-  try {
-    data =
-      await response.json();
-  } catch (error) {
-    throw new Error(
-      `Server returned an invalid response (${response.status}).`
-    );
+  if (responseText.trim()) {
+    try {
+      data =
+        JSON.parse(
+          responseText
+        );
+    } catch (error) {
+      console.error(
+        "Invalid JSON from Worker:",
+        responseText
+      );
+
+      throw new Error(
+        `Server returned invalid JSON (${response.status}).`
+      );
+    }
   }
 
   if (!response.ok) {
     throw new Error(
       data?.detail ||
+      data?.error ||
+      data?.details ||
       `Analysis request failed (${response.status}).`
     );
   }
 
-  return data;
+  if (!data) {
+    throw new Error(
+      "Server returned an empty response."
+    );
+  }
+
+  return convertWorkerResponse(
+    data
+  );
+}
+
+
+// ======================================================
+// WORKER RESPONSE ADAPTER
+// ======================================================
+//
+// Your current Gemini Worker returns:
+//
+// {
+//   success: true,
+//   analysis: {
+//     overall_harmony: 0-100,
+//     frontal_harmony: 0-100,
+//     profile_harmony: 0-100,
+//     facial_features: 0-100,
+//     angularity: 0-100,
+//     facial_definition: 0-100,
+//     proportions: 0-100,
+//     symmetry: 0-100,
+//     strengths: [],
+//     weaknesses: [],
+//     summary: "",
+//     confidence: 0-100
+//   }
+// }
+//
+// The existing UI expects the older normalized structure.
+// This function converts the new Worker response to it.
+//
+
+function convertWorkerResponse(data) {
+  if (
+    !data ||
+    typeof data !== "object"
+  ) {
+    throw new Error(
+      "Worker returned an invalid response."
+    );
+  }
+
+  if (
+    data.success !== true
+  ) {
+    return data;
+  }
+
+  const analysis =
+    isObject(data.analysis)
+      ? data.analysis
+      : {};
+
+  const score =
+    calculateOverallScore(
+      analysis
+    );
+
+  const metrics = {
+    harmony: {
+      overall:
+        safeNumber(
+          analysis.overall_harmony
+        ),
+
+      frontal:
+        safeNumber(
+          analysis.frontal_harmony
+        ),
+
+      profile:
+        safeNumber(
+          analysis.profile_harmony
+        )
+    },
+
+    facial_features: {
+      score:
+        safeNumber(
+          analysis.facial_features
+        )
+    },
+
+    angularity: {
+      score:
+        safeNumber(
+          analysis.angularity
+        )
+    },
+
+    facial_definition: {
+      score:
+        safeNumber(
+          analysis.facial_definition
+        )
+    },
+
+    proportions: {
+      score:
+        safeNumber(
+          analysis.proportions
+        )
+    },
+
+    symmetry: {
+      score:
+        safeNumber(
+          analysis.symmetry
+        )
+    }
+  };
+
+  const production_features = {
+    strengths:
+      Array.isArray(
+        analysis.strengths
+      )
+        ? analysis.strengths
+        : [],
+
+    weaknesses:
+      Array.isArray(
+        analysis.weaknesses
+      )
+        ? analysis.weaknesses
+        : [],
+
+    summary:
+      cleanText(
+        analysis.summary
+      ),
+
+    confidence:
+      safeNumber(
+        analysis.confidence
+      )
+  };
+
+  return {
+    success: true,
+
+    score,
+
+    face_count: 1,
+
+    landmarks_count: null,
+
+    detected_features:
+      countLeaves(metrics),
+
+    feature_count:
+      countLeaves(
+        production_features
+      ),
+
+    model:
+      "Gemini 2.5 Flash",
+
+    metrics,
+
+    production_features,
+
+    generated_at:
+      new Date().toISOString()
+  };
+}
+
+
+function calculateOverallScore(
+  analysis
+) {
+  const values = [
+    analysis.overall_harmony,
+    analysis.frontal_harmony,
+    analysis.profile_harmony,
+    analysis.facial_features,
+    analysis.angularity,
+    analysis.facial_definition,
+    analysis.proportions,
+    analysis.symmetry
+  ]
+    .map(
+      (value) =>
+        Number(value)
+    )
+    .filter(
+      (value) =>
+        Number.isFinite(value)
+    );
+
+  if (!values.length) {
+    return null;
+  }
+
+  const average =
+    values.reduce(
+      (sum, value) =>
+        sum + value,
+      0
+    ) / values.length;
+
+  /*
+   * Worker scores are 0-100.
+   * UI score is 0-10.
+   */
+
+  return Math.round(
+    clamp(
+      average / 10,
+      0,
+      10
+    ) * 100
+  ) / 100;
+}
+
+
+function safeNumber(value) {
+  const number =
+    Number(value);
+
+  return Number.isFinite(number)
+    ? number
+    : null;
 }
 
 
@@ -538,11 +858,6 @@ async function runLoadingSequence() {
         step.subtitle;
     }
 
-    /*
-     * This animation is only UI feedback.
-     * The actual API request happens after
-     * the sequence completes.
-     */
     await sleep(
       index === steps.length - 1
         ? 250
@@ -771,7 +1086,11 @@ function renderScore(score) {
 
   if (resultProgress) {
     resultProgress.style.width =
-      `${clamp(score * 10, 0, 100)}%`;
+      `${clamp(
+        score * 10,
+        0,
+        100
+      )}%`;
   }
 
   if (resultCaption) {
@@ -819,10 +1138,11 @@ function renderOverview(metrics) {
   }
 
   if (!entries.length) {
-    overviewGrid.innerHTML =
+    overviewGrid.appendChild(
       emptyBlock(
         "No measured structure returned."
-      );
+      )
+    );
 
     return;
   }
@@ -913,10 +1233,11 @@ function renderMetrics(metrics) {
   }
 
   if (!groups.length) {
-    metricsContainer.innerHTML =
+    metricsContainer.appendChild(
       emptyBlock(
         "No measurements returned."
-      );
+      )
+    );
 
     return;
   }
@@ -1151,10 +1472,11 @@ function renderProductionFeatures(
   }
 
   if (!groups.length) {
-    featureGroups.innerHTML =
+    featureGroups.appendChild(
       emptyBlock(
         "No production features returned."
-      );
+      )
+    );
 
     return;
   }
@@ -1202,7 +1524,9 @@ function renderProductionFeatures(
         "feature-group__count";
 
       count.textContent =
-        `${countLeaves(groupValue)} VALUES`;
+        `${countLeaves(
+          groupValue
+        )} VALUES`;
 
       const arrow =
         document.createElement(
@@ -1739,7 +2063,10 @@ function formatBytes(bytes) {
     return `${bytes} B`;
   }
 
-  if (bytes < 1024 * 1024) {
+  if (
+    bytes <
+    1024 * 1024
+  ) {
     return `${(
       bytes / 1024
     ).toFixed(1)} KB`;
@@ -1860,7 +2187,7 @@ function prettifyKey(key) {
     key || ""
   )
     .replace(
-      /[_-]+/g,
+      /[\_-]+/g,
       " "
     )
     .replace(
@@ -2118,9 +2445,7 @@ function bindEvents() {
             const target =
               element.dataset.go;
 
-            if (
-              target
-            ) {
+            if (target) {
               showScreen(
                 target
               );
