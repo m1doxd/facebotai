@@ -2,15 +2,7 @@
 
 /*
  * FaceBot — Telegram Mini App
- *
- * Frontend for:
- *   POST https://facebot-gemini.snow4lyt.workers.dev/api/analyze
- *
- * Gemini Worker expects JSON:
- * {
- *   image: "base64...",
- *   mimeType: "image/jpeg"
- * }
+ * Frontend for FaceBot Gemini Worker
  */
 
 const MAX_FILE_SIZE = 15 * 1024 * 1024;
@@ -24,8 +16,7 @@ const ALLOWED_TYPES = new Set([
 const API_ENDPOINT =
   "https://facebot-gemini.snow4lyt.workers.dev/api/analyze";
 
-const HISTORY_KEY =
-  "facebot_history_v1";
+const HISTORY_KEY = "facebot_history_v1";
 
 const tg =
   window.Telegram &&
@@ -139,7 +130,7 @@ let toastTimer = null;
 
 
 // ======================================================
-// TELEGRAM MINI APP
+// TELEGRAM
 // ======================================================
 
 function initTelegram() {
@@ -151,21 +142,15 @@ function initTelegram() {
     tg.ready();
     tg.expand();
 
-    if (
-      typeof tg.setHeaderColor === "function"
-    ) {
+    if (typeof tg.setHeaderColor === "function") {
       tg.setHeaderColor("#08090b");
     }
 
-    if (
-      typeof tg.setBackgroundColor === "function"
-    ) {
+    if (typeof tg.setBackgroundColor === "function") {
       tg.setBackgroundColor("#08090b");
     }
 
-    if (
-      typeof tg.enableClosingConfirmation === "function"
-    ) {
+    if (typeof tg.enableClosingConfirmation === "function") {
       tg.enableClosingConfirmation();
     }
   } catch (error) {
@@ -218,8 +203,7 @@ function updateNavigation(name) {
     document.querySelectorAll(".nav-item");
 
   navItems.forEach((item) => {
-    const target =
-      item.dataset.go;
+    const target = item.dataset.go;
 
     const active =
       target === name ||
@@ -322,9 +306,7 @@ function handleFileSelected(file) {
 
 
 function validateFile(file) {
-  if (
-    !ALLOWED_TYPES.has(file.type)
-  ) {
+  if (!ALLOWED_TYPES.has(file.type)) {
     return {
       valid: false,
       message:
@@ -332,9 +314,7 @@ function validateFile(file) {
     };
   }
 
-  if (
-    file.size > MAX_FILE_SIZE
-  ) {
+  if (file.size > MAX_FILE_SIZE) {
     return {
       valid: false,
       message:
@@ -383,9 +363,7 @@ async function startAnalysis() {
   }
 
   if (!selectedFile) {
-    showToast(
-      "Choose a photo first."
-    );
+    showToast("Choose a photo first.");
     return;
   }
 
@@ -398,34 +376,24 @@ async function startAnalysis() {
   resetLoadingSteps();
 
   try {
-    const analysisPromise =
-      analyzePhoto(selectedFile);
-
     await runLoadingSequence();
 
     const result =
-      await analysisPromise;
+      await analyzePhoto(selectedFile);
 
     if (!result.success) {
       throw new Error(
         result.detail ||
-        result.error ||
         "Analysis failed."
       );
     }
 
     currentAnalysis =
-      normalizeClientResult(
-        result
-      );
+      normalizeClientResult(result);
 
-    saveHistory(
-      currentAnalysis
-    );
+    saveHistory(currentAnalysis);
 
-    renderResult(
-      currentAnalysis
-    );
+    renderResult(currentAnalysis);
 
     showScreen("result");
 
@@ -450,67 +418,28 @@ async function startAnalysis() {
 
 
 // ======================================================
-// FILE -> BASE64
-// ======================================================
-
-function fileToBase64(file) {
-  return new Promise(
-    (resolve, reject) => {
-      const reader =
-        new FileReader();
-
-      reader.onload = () => {
-        try {
-          const result =
-            String(
-              reader.result || ""
-            );
-
-          const commaIndex =
-            result.indexOf(",");
-
-          if (commaIndex === -1) {
-            reject(
-              new Error(
-                "Could not encode the image."
-              )
-            );
-
-            return;
-          }
-
-          resolve(
-            result.slice(
-              commaIndex + 1
-            )
-          );
-
-        } catch (error) {
-          reject(error);
-        }
-      };
-
-      reader.onerror = () => {
-        reject(
-          new Error(
-            "Could not read the selected image."
-          )
-        );
-      };
-
-      reader.readAsDataURL(file);
-    }
-  );
-}
-
-
-// ======================================================
 // API REQUEST
 // ======================================================
 
 async function analyzePhoto(file) {
-  const base64Image =
-    await fileToBase64(file);
+  /*
+   * IMPORTANT:
+   * We intentionally use FormData.
+   *
+   * Do NOT manually set Content-Type.
+   * The browser adds:
+   *
+   * multipart/form-data; boundary=...
+   */
+
+  const formData =
+    new FormData();
+
+  formData.append(
+    "file",
+    file,
+    file.name || "photo.jpg"
+  );
 
   const response =
     await fetch(
@@ -518,19 +447,12 @@ async function analyzePhoto(file) {
       {
         method: "POST",
 
-        headers: {
-          "Content-Type":
-            "application/json",
+        body: formData,
 
+        headers: {
           "Accept":
             "application/json"
-        },
-
-        body: JSON.stringify({
-          image: base64Image,
-          mimeType:
-            file.type || "image/jpeg"
-        })
+        }
       }
     );
 
@@ -539,29 +461,20 @@ async function analyzePhoto(file) {
 
   let data = null;
 
-  if (responseText.trim()) {
-    try {
-      data =
-        JSON.parse(
-          responseText
-        );
-    } catch (error) {
-      console.error(
-        "Invalid JSON from Worker:",
-        responseText
-      );
-
-      throw new Error(
-        `Server returned invalid JSON (${response.status}).`
-      );
-    }
+  try {
+    data =
+      responseText
+        ? JSON.parse(responseText)
+        : null;
+  } catch (error) {
+    throw new Error(
+      `Server returned invalid JSON (${response.status}): ${responseText}`
+    );
   }
 
   if (!response.ok) {
     throw new Error(
       data?.detail ||
-      data?.error ||
-      data?.details ||
       `Analysis request failed (${response.status}).`
     );
   }
@@ -572,265 +485,37 @@ async function analyzePhoto(file) {
     );
   }
 
-  return convertWorkerResponse(
-    data
-  );
+  return data;
 }
 
 
 // ======================================================
-// WORKER RESPONSE ADAPTER
-// ======================================================
-//
-// Your current Gemini Worker returns:
-//
-// {
-//   success: true,
-//   analysis: {
-//     overall_harmony: 0-100,
-//     frontal_harmony: 0-100,
-//     profile_harmony: 0-100,
-//     facial_features: 0-100,
-//     angularity: 0-100,
-//     facial_definition: 0-100,
-//     proportions: 0-100,
-//     symmetry: 0-100,
-//     strengths: [],
-//     weaknesses: [],
-//     summary: "",
-//     confidence: 0-100
-//   }
-// }
-//
-// The existing UI expects the older normalized structure.
-// This function converts the new Worker response to it.
-//
-
-function convertWorkerResponse(data) {
-  if (
-    !data ||
-    typeof data !== "object"
-  ) {
-    throw new Error(
-      "Worker returned an invalid response."
-    );
-  }
-
-  if (
-    data.success !== true
-  ) {
-    return data;
-  }
-
-  const analysis =
-    isObject(data.analysis)
-      ? data.analysis
-      : {};
-
-  const score =
-    calculateOverallScore(
-      analysis
-    );
-
-  const metrics = {
-    harmony: {
-      overall:
-        safeNumber(
-          analysis.overall_harmony
-        ),
-
-      frontal:
-        safeNumber(
-          analysis.frontal_harmony
-        ),
-
-      profile:
-        safeNumber(
-          analysis.profile_harmony
-        )
-    },
-
-    facial_features: {
-      score:
-        safeNumber(
-          analysis.facial_features
-        )
-    },
-
-    angularity: {
-      score:
-        safeNumber(
-          analysis.angularity
-        )
-    },
-
-    facial_definition: {
-      score:
-        safeNumber(
-          analysis.facial_definition
-        )
-    },
-
-    proportions: {
-      score:
-        safeNumber(
-          analysis.proportions
-        )
-    },
-
-    symmetry: {
-      score:
-        safeNumber(
-          analysis.symmetry
-        )
-    }
-  };
-
-  const production_features = {
-    strengths:
-      Array.isArray(
-        analysis.strengths
-      )
-        ? analysis.strengths
-        : [],
-
-    weaknesses:
-      Array.isArray(
-        analysis.weaknesses
-      )
-        ? analysis.weaknesses
-        : [],
-
-    summary:
-      cleanText(
-        analysis.summary
-      ),
-
-    confidence:
-      safeNumber(
-        analysis.confidence
-      )
-  };
-
-  return {
-    success: true,
-
-    score,
-
-    face_count: 1,
-
-    landmarks_count: null,
-
-    detected_features:
-      countLeaves(metrics),
-
-    feature_count:
-      countLeaves(
-        production_features
-      ),
-
-    model:
-      "Gemini 2.5 Flash",
-
-    metrics,
-
-    production_features,
-
-    generated_at:
-      new Date().toISOString()
-  };
-}
-
-
-function calculateOverallScore(
-  analysis
-) {
-  const values = [
-    analysis.overall_harmony,
-    analysis.frontal_harmony,
-    analysis.profile_harmony,
-    analysis.facial_features,
-    analysis.angularity,
-    analysis.facial_definition,
-    analysis.proportions,
-    analysis.symmetry
-  ]
-    .map(
-      (value) =>
-        Number(value)
-    )
-    .filter(
-      (value) =>
-        Number.isFinite(value)
-    );
-
-  if (!values.length) {
-    return null;
-  }
-
-  const average =
-    values.reduce(
-      (sum, value) =>
-        sum + value,
-      0
-    ) / values.length;
-
-  /*
-   * Worker scores are 0-100.
-   * UI score is 0-10.
-   */
-
-  return Math.round(
-    clamp(
-      average / 10,
-      0,
-      10
-    ) * 100
-  ) / 100;
-}
-
-
-function safeNumber(value) {
-  const number =
-    Number(value);
-
-  return Number.isFinite(number)
-    ? number
-    : null;
-}
-
-
-// ======================================================
-// LOADING ANIMATION
+// LOADING
 // ======================================================
 
 async function runLoadingSequence() {
   const steps = [
     {
       number: 1,
-      title:
-        "Analyzing photo",
+      title: "Analyzing photo",
       subtitle:
         "Detecting the visible face…"
     },
     {
       number: 2,
-      title:
-        "Reading facial structure",
+      title: "Reading facial structure",
       subtitle:
         "Extracting visible geometry…"
     },
     {
       number: 3,
-      title:
-        "Preparing feature set",
+      title: "Preparing feature set",
       subtitle:
         "Organizing the analyzer response…"
     },
     {
       number: 4,
-      title:
-        "Running production analysis",
+      title: "Running production analysis",
       subtitle:
         "Generating the final report…"
     }
@@ -844,9 +529,7 @@ async function runLoadingSequence() {
     const step =
       steps[index];
 
-    setLoadingStep(
-      step.number
-    );
+    setLoadingStep(step.number);
 
     if (loadingTitle) {
       loadingTitle.textContent =
@@ -886,9 +569,7 @@ function resetLoadingSteps() {
     );
 
   if (first) {
-    first.classList.add(
-      "active"
-    );
+    first.classList.add("active");
   }
 
   if (loadingTitle) {
@@ -911,9 +592,7 @@ function setLoadingStep(number) {
 
   steps.forEach((step) => {
     const stepNumber =
-      Number(
-        step.dataset.step
-      );
+      Number(step.dataset.step);
 
     step.classList.toggle(
       "active",
@@ -931,10 +610,7 @@ function setLoadingStep(number) {
 function sleep(ms) {
   return new Promise(
     (resolve) =>
-      setTimeout(
-        resolve,
-        ms
-      )
+      setTimeout(resolve, ms)
   );
 }
 
@@ -944,23 +620,17 @@ function sleep(ms) {
 // ======================================================
 
 function normalizeClientResult(data) {
-  const result = {
+  return {
     success: true,
 
     score:
-      normalizeScore(
-        data.score
-      ),
+      normalizeScore(data.score),
 
     face_count:
-      toNumberOrZero(
-        data.face_count
-      ),
+      toNumberOrZero(data.face_count),
 
     landmarks_count:
-      nullableNumber(
-        data.landmarks_count
-      ),
+      nullableNumber(data.landmarks_count),
 
     detected_features:
       toNumberOrZero(
@@ -973,21 +643,16 @@ function normalizeClientResult(data) {
       ),
 
     model:
-      cleanText(
-        data.model
-      ) || "Gemini",
+      cleanText(data.model) ||
+      "Gemini",
 
     metrics:
-      isObject(
-        data.metrics
-      )
+      isObject(data.metrics)
         ? data.metrics
         : {},
 
     production_features:
-      isObject(
-        data.production_features
-      )
+      isObject(data.production_features)
         ? data.production_features
         : {},
 
@@ -995,21 +660,15 @@ function normalizeClientResult(data) {
       data.generated_at ||
       new Date().toISOString()
   };
-
-  return result;
 }
 
 
 function renderResult(result) {
-  renderScore(
-    result.score
-  );
+  renderScore(result.score);
 
   if (statFaces) {
     statFaces.textContent =
-      String(
-        result.face_count
-      );
+      String(result.face_count);
   }
 
   if (statLandmarks) {
@@ -1040,13 +699,9 @@ function renderResult(result) {
       );
   }
 
-  renderOverview(
-    result.metrics
-  );
+  renderOverview(result.metrics);
 
-  renderMetrics(
-    result.metrics
-  );
+  renderMetrics(result.metrics);
 
   renderProductionFeatures(
     result.production_features
@@ -1057,13 +712,11 @@ function renderResult(result) {
 function renderScore(score) {
   if (score === null) {
     if (resultScore) {
-      resultScore.textContent =
-        "—";
+      resultScore.textContent = "—";
     }
 
     if (resultProgress) {
-      resultProgress.style.width =
-        "0%";
+      resultProgress.style.width = "0%";
     }
 
     if (resultCaption) {
@@ -1086,11 +739,7 @@ function renderScore(score) {
 
   if (resultProgress) {
     resultProgress.style.width =
-      `${clamp(
-        score * 10,
-        0,
-        100
-      )}%`;
+      `${clamp(score * 10, 0, 100)}%`;
   }
 
   if (resultCaption) {
@@ -1105,6 +754,10 @@ function renderScore(score) {
 }
 
 
+// ======================================================
+// OVERVIEW
+// ======================================================
+
 function renderOverview(metrics) {
   if (!overviewGrid) {
     return;
@@ -1113,28 +766,19 @@ function renderOverview(metrics) {
   overviewGrid.innerHTML = "";
 
   const leaves =
-    flattenObject(
-      metrics
-    );
+    flattenObject(metrics);
 
   const entries =
-    leaves.slice(
-      0,
-      8
-    );
+    leaves.slice(0, 8);
 
   if (metricCount) {
     metricCount.textContent =
-      String(
-        leaves.length
-      );
+      String(leaves.length);
   }
 
   if (analyzerCount) {
     analyzerCount.textContent =
-      String(
-        leaves.length
-      );
+      String(leaves.length);
   }
 
   if (!entries.length) {
@@ -1166,9 +810,7 @@ function renderOverview(metrics) {
         "overview-card__label";
 
       label.textContent =
-        prettifyKey(
-          key
-        );
+        prettifyKey(key);
 
       const valueElement =
         document.createElement(
@@ -1179,9 +821,7 @@ function renderOverview(metrics) {
         "overview-card__value";
 
       valueElement.textContent =
-        formatValue(
-          value
-        );
+        formatValue(value);
 
       const source =
         document.createElement(
@@ -1200,13 +840,15 @@ function renderOverview(metrics) {
         source
       );
 
-      overviewGrid.appendChild(
-        card
-      );
+      overviewGrid.appendChild(card);
     }
   );
 }
 
+
+// ======================================================
+// METRICS
+// ======================================================
 
 function renderMetrics(metrics) {
   if (!metricsContainer) {
@@ -1216,20 +858,14 @@ function renderMetrics(metrics) {
   metricsContainer.innerHTML = "";
 
   const groups =
-    Object.entries(
-      metrics || {}
-    );
+    Object.entries(metrics || {});
 
   const leaves =
-    flattenObject(
-      metrics
-    );
+    flattenObject(metrics);
 
   if (analyzerCount) {
     analyzerCount.textContent =
-      String(
-        leaves.length
-      );
+      String(leaves.length);
   }
 
   if (!groups.length) {
@@ -1244,24 +880,19 @@ function renderMetrics(metrics) {
 
   groups.forEach(
     ([groupName, groupValue]) => {
-      if (
-        isObject(
-          groupValue
-        )
-      ) {
-        Object.entries(
-          groupValue
-        ).forEach(
-          ([key, value]) => {
-            metricsContainer.appendChild(
-              createMetricCard(
-                groupName,
-                key,
-                value
-              )
-            );
-          }
-        );
+      if (isObject(groupValue)) {
+        Object.entries(groupValue)
+          .forEach(
+            ([key, value]) => {
+              metricsContainer.appendChild(
+                createMetricCard(
+                  groupName,
+                  key,
+                  value
+                )
+              );
+            }
+          );
       } else {
         metricsContainer.appendChild(
           createMetricCard(
@@ -1294,9 +925,7 @@ function createMetricCard(
       "button"
     );
 
-  header.type =
-    "button";
-
+  header.type = "button";
   header.className =
     "metric-header";
 
@@ -1317,9 +946,7 @@ function createMetricCard(
     "metric-name";
 
   name.textContent =
-    prettifyKey(
-      key
-    );
+    prettifyKey(key);
 
   const metricKey =
     document.createElement(
@@ -1348,9 +975,7 @@ function createMetricCard(
     "metric-value";
 
   metricValue.textContent =
-    formatValue(
-      value
-    );
+    formatValue(value);
 
   const arrow =
     document.createElement(
@@ -1360,8 +985,7 @@ function createMetricCard(
   arrow.className =
     "metric-arrow";
 
-  arrow.textContent =
-    "+";
+  arrow.textContent = "+";
 
   header.append(
     main,
@@ -1397,9 +1021,7 @@ function createMetricCard(
 
   detailLabel.textContent =
     groupName
-      ? prettifyKey(
-          groupName
-        )
+      ? prettifyKey(groupName)
       : "VALUE";
 
   const detailValue =
@@ -1408,22 +1030,16 @@ function createMetricCard(
     );
 
   detailValue.textContent =
-    formatValue(
-      value
-    );
+    formatValue(value);
 
   detail.append(
     detailLabel,
     detailValue
   );
 
-  contentInner.append(
-    detail
-  );
+  contentInner.appendChild(detail);
 
-  content.append(
-    contentInner
-  );
+  content.appendChild(contentInner);
 
   card.append(
     header,
@@ -1433,9 +1049,7 @@ function createMetricCard(
   header.addEventListener(
     "click",
     () => {
-      card.classList.toggle(
-        "open"
-      );
+      card.classList.toggle("open");
     }
   );
 
@@ -1462,9 +1076,7 @@ function renderProductionFeatures(
     );
 
   const total =
-    countLeaves(
-      production
-    );
+    countLeaves(production);
 
   if (featureCount) {
     featureCount.textContent =
@@ -1496,8 +1108,7 @@ function renderProductionFeatures(
           "button"
         );
 
-      header.type =
-        "button";
+      header.type = "button";
 
       header.className =
         "feature-group__header";
@@ -1511,9 +1122,7 @@ function renderProductionFeatures(
         "feature-group__title";
 
       title.textContent =
-        prettifyKey(
-          groupName
-        );
+        prettifyKey(groupName);
 
       const count =
         document.createElement(
@@ -1524,9 +1133,7 @@ function renderProductionFeatures(
         "feature-group__count";
 
       count.textContent =
-        `${countLeaves(
-          groupValue
-        )} VALUES`;
+        `${countLeaves(groupValue)} VALUES`;
 
       const arrow =
         document.createElement(
@@ -1536,8 +1143,7 @@ function renderProductionFeatures(
       arrow.className =
         "feature-group__arrow";
 
-      arrow.textContent =
-        "+";
+      arrow.textContent = "+";
 
       header.append(
         title,
@@ -1567,15 +1173,9 @@ function renderProductionFeatures(
         "feature-list-inner";
 
       const leaves =
-        flattenObject(
-          groupValue
-        );
+        flattenObject(groupValue);
 
-      if (
-        isObject(
-          groupValue
-        )
-      ) {
+      if (isObject(groupValue)) {
         leaves.forEach(
           ([key, value]) => {
             const row =
@@ -1595,9 +1195,7 @@ function renderProductionFeatures(
               "feature-row__name";
 
             name.textContent =
-              prettifyKey(
-                key
-              );
+              prettifyKey(key);
 
             const valueElement =
               document.createElement(
@@ -1608,18 +1206,14 @@ function renderProductionFeatures(
               "feature-row__value";
 
             valueElement.textContent =
-              formatValue(
-                value
-              );
+              formatValue(value);
 
             row.append(
               name,
               valueElement
             );
 
-            inner.appendChild(
-              row
-            );
+            inner.appendChild(row);
           }
         );
       } else {
@@ -1640,9 +1234,7 @@ function renderProductionFeatures(
           "feature-row__name";
 
         name.textContent =
-          prettifyKey(
-            groupName
-          );
+          prettifyKey(groupName);
 
         const value =
           document.createElement(
@@ -1653,27 +1245,19 @@ function renderProductionFeatures(
           "feature-row__value";
 
         value.textContent =
-          formatValue(
-            groupValue
-          );
+          formatValue(groupValue);
 
         row.append(
           name,
           value
         );
 
-        inner.appendChild(
-          row
-        );
+        inner.appendChild(row);
       }
 
-      listWrapper.append(
-        inner
-      );
+      listWrapper.appendChild(inner);
 
-      list.append(
-        listWrapper
-      );
+      list.appendChild(listWrapper);
 
       group.append(
         header,
@@ -1683,15 +1267,11 @@ function renderProductionFeatures(
       header.addEventListener(
         "click",
         () => {
-          group.classList.toggle(
-            "open"
-          );
+          group.classList.toggle("open");
         }
       );
 
-      featureGroups.appendChild(
-        group
-      );
+      featureGroups.appendChild(group);
     }
   );
 }
@@ -1713,13 +1293,9 @@ function getHistory() {
     }
 
     const parsed =
-      JSON.parse(
-        raw
-      );
+      JSON.parse(raw);
 
-    return Array.isArray(
-      parsed
-    )
+    return Array.isArray(parsed)
       ? parsed
       : [];
 
@@ -1765,21 +1341,14 @@ function saveHistory(result) {
         result.model
     };
 
-    history.unshift(
-      entry
-    );
+    history.unshift(entry);
 
     const limited =
-      history.slice(
-        0,
-        50
-      );
+      history.slice(0, 50);
 
     localStorage.setItem(
       HISTORY_KEY,
-      JSON.stringify(
-        limited
-      )
+      JSON.stringify(limited)
     );
 
     updateHistoryCounters();
@@ -1837,8 +1406,7 @@ function renderHistory() {
           "div"
         );
 
-      date.className =
-        "date";
+      date.className = "date";
 
       date.textContent =
         formatDate(
@@ -1850,8 +1418,7 @@ function renderHistory() {
           "div"
         );
 
-      meta.className =
-        "meta";
+      meta.className = "meta";
 
       meta.textContent =
         `${entry.face_count || 0} face · ` +
@@ -1867,8 +1434,7 @@ function renderHistory() {
           "div"
         );
 
-      score.className =
-        "score";
+      score.className = "score";
 
       score.textContent =
         entry.score === null ||
@@ -1883,9 +1449,7 @@ function renderHistory() {
         score
       );
 
-      historyList.appendChild(
-        item
-      );
+      historyList.appendChild(item);
     }
   );
 }
@@ -1916,7 +1480,7 @@ function updateHistoryCounters(
 
 
 // ======================================================
-// NEW ANALYSIS / RESET
+// RESET
 // ======================================================
 
 function startNewAnalysis() {
@@ -1936,19 +1500,15 @@ function startNewAnalysis() {
   }
 
   if (previewImage) {
-    previewImage.removeAttribute(
-      "src"
-    );
+    previewImage.removeAttribute("src");
   }
 
   if (fileFormat) {
-    fileFormat.textContent =
-      "—";
+    fileFormat.textContent = "—";
   }
 
   if (fileSize) {
-    fileSize.textContent =
-      "—";
+    fileSize.textContent = "—";
   }
 
   showScreen("home");
@@ -1956,7 +1516,7 @@ function startNewAnalysis() {
 
 
 // ======================================================
-// UI HELPERS
+// UI
 // ======================================================
 
 function setAnalyzeButtonLoading(
@@ -1970,14 +1530,10 @@ function setAnalyzeButtonLoading(
     loading;
 
   analyzeBtn.style.opacity =
-    loading
-      ? "0.6"
-      : "";
+    loading ? "0.6" : "";
 
   const spans =
-    analyzeBtn.querySelectorAll(
-      "span"
-    );
+    analyzeBtn.querySelectorAll("span");
 
   if (!spans.length) {
     return;
@@ -1988,17 +1544,14 @@ function setAnalyzeButtonLoading(
       "Analyzing…";
 
     if (spans[1]) {
-      spans[1].textContent =
-        "…";
+      spans[1].textContent = "…";
     }
-
   } else {
     spans[0].textContent =
       "Analyze photo";
 
     if (spans[1]) {
-      spans[1].textContent =
-        "→";
+      spans[1].textContent = "→";
     }
   }
 }
@@ -2010,24 +1563,16 @@ function showToast(message) {
   }
 
   toast.textContent =
-    String(
-      message
-    );
+    String(message);
 
-  toast.classList.add(
-    "show"
-  );
+  toast.classList.add("show");
 
-  clearTimeout(
-    toastTimer
-  );
+  clearTimeout(toastTimer);
 
   toastTimer =
     setTimeout(
       () => {
-        toast.classList.remove(
-          "show"
-        );
+        toast.classList.remove("show");
       },
       3000
     );
@@ -2036,9 +1581,7 @@ function showToast(message) {
 
 function emptyBlock(message) {
   const div =
-    document.createElement(
-      "div"
-    );
+    document.createElement("div");
 
   div.className =
     "history-empty";
@@ -2063,10 +1606,7 @@ function formatBytes(bytes) {
     return `${bytes} B`;
   }
 
-  if (
-    bytes <
-    1024 * 1024
-  ) {
+  if (bytes < 1024 * 1024) {
     return `${(
       bytes / 1024
     ).toFixed(1)} KB`;
@@ -2089,10 +1629,7 @@ function formatScore(score) {
 
   return number
     .toFixed(2)
-    .replace(
-      /\.00$/,
-      ""
-    );
+    .replace(/\.00$/, "");
 }
 
 
@@ -2105,67 +1642,41 @@ function formatValue(value) {
     return "—";
   }
 
-  if (
-    typeof value === "number"
-  ) {
-    if (
-      !Number.isFinite(
-        value
-      )
-    ) {
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) {
       return "—";
     }
 
-    if (
-      Number.isInteger(
-        value
-      )
-    ) {
-      return String(
-        value
-      );
+    if (Number.isInteger(value)) {
+      return String(value);
     }
 
     return String(
-      Math.round(
-        value * 100
-      ) / 100
+      Math.round(value * 100) / 100
     );
   }
 
-  if (
-    typeof value === "boolean"
-  ) {
-    return value
-      ? "Yes"
-      : "No";
+  if (typeof value === "boolean") {
+    return value ? "Yes" : "No";
   }
 
-  if (
-    typeof value === "object"
-  ) {
-    return JSON.stringify(
-      value
-    );
+  if (typeof value === "object") {
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return "—";
+    }
   }
 
-  return String(
-    value
-  );
+  return String(value);
 }
 
 
 function formatDate(value) {
   const date =
-    new Date(
-      value
-    );
+    new Date(value);
 
-  if (
-    Number.isNaN(
-      date.getTime()
-    )
-  ) {
+  if (Number.isNaN(date.getTime())) {
     return "Unknown date";
   }
 
@@ -2183,21 +1694,13 @@ function formatDate(value) {
 
 
 function prettifyKey(key) {
-  return String(
-    key || ""
-  )
-    .replace(
-      /[\_-]+/g,
-      " "
-    )
+  return String(key || "")
+    .replace(/[\_-]+/g, " ")
     .replace(
       /([a-z])([A-Z])/g,
       "$1 $2"
     )
-    .replace(
-      /\s+/g,
-      " "
-    )
+    .replace(/\s+/g, " ")
     .trim()
     .replace(
       /^./,
@@ -2209,20 +1712,13 @@ function prettifyKey(key) {
 
 function shortenModelName(model) {
   const value =
-    String(
-      model || ""
-    );
+    String(model || "");
 
-  if (
-    value.length <= 18
-  ) {
+  if (value.length <= 18) {
     return value;
   }
 
-  return `${value.slice(
-    0,
-    16
-  )}…`;
+  return `${value.slice(0, 16)}…`;
 }
 
 
@@ -2249,20 +1745,14 @@ function flattenObject(
     return result;
   }
 
-  Object.entries(
-    object
-  ).forEach(
+  Object.entries(object).forEach(
     ([key, value]) => {
       const path =
         prefix
           ? `${prefix}.${key}`
           : key;
 
-      if (
-        isObject(
-          value
-        )
-      ) {
+      if (isObject(value)) {
         result.push(
           ...flattenObject(
             value,
@@ -2283,21 +1773,15 @@ function flattenObject(
 
 
 function countLeaves(object) {
-  return flattenObject(
-    object
-  ).length;
+  return flattenObject(object).length;
 }
 
 
 function toNumberOrZero(value) {
   const number =
-    Number(
-      value
-    );
+    Number(value);
 
-  return Number.isFinite(
-    number
-  )
+  return Number.isFinite(number)
     ? number
     : 0;
 }
@@ -2313,13 +1797,9 @@ function nullableNumber(value) {
   }
 
   const number =
-    Number(
-      value
-    );
+    Number(value);
 
-  return Number.isFinite(
-    number
-  )
+  return Number.isFinite(number)
     ? number
     : null;
 }
@@ -2335,25 +1815,21 @@ function normalizeScore(value) {
   }
 
   const number =
-    Number(
-      value
-    );
+    Number(value);
 
-  if (
-    !Number.isFinite(
-      number
-    )
-  ) {
+  if (!Number.isFinite(number)) {
     return null;
   }
 
-  return Math.round(
-    clamp(
-      number,
-      0,
-      10
-    ) * 100
-  ) / 100;
+  return (
+    Math.round(
+      clamp(
+        number,
+        0,
+        10
+      ) * 100
+    ) / 100
+  );
 }
 
 
@@ -2365,9 +1841,7 @@ function cleanText(value) {
     return "";
   }
 
-  return String(
-    value
-  ).trim();
+  return String(value).trim();
 }
 
 
@@ -2412,9 +1886,7 @@ function bindEvents() {
         const file =
           fileInput.files?.[0];
 
-        handleFileSelected(
-          file
-        );
+        handleFileSelected(file);
       }
     );
   }
@@ -2434,9 +1906,7 @@ function bindEvents() {
   }
 
   document
-    .querySelectorAll(
-      "[data-go]"
-    )
+    .querySelectorAll("[data-go]")
     .forEach(
       (element) => {
         element.addEventListener(
@@ -2446,9 +1916,7 @@ function bindEvents() {
               element.dataset.go;
 
             if (target) {
-              showScreen(
-                target
-              );
+              showScreen(target);
             }
           }
         );
@@ -2456,9 +1924,7 @@ function bindEvents() {
     );
 
   document
-    .querySelectorAll(
-      "[data-back]"
-    )
+    .querySelectorAll("[data-back]")
     .forEach(
       (element) => {
         element.addEventListener(
@@ -2471,7 +1937,7 @@ function bindEvents() {
 
 
 // ======================================================
-// STARTUP
+// START
 // ======================================================
 
 function init() {
@@ -2481,10 +1947,7 @@ function init() {
 
   updateHistoryCounters();
 
-  showScreen(
-    "home"
-  );
+  showScreen("home");
 }
-
 
 init();
