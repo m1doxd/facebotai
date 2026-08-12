@@ -13,8 +13,7 @@ const ALLOWED_TYPES = new Set([
   "image/webp"
 ]);
 
-const API_ENDPOINT =
-  "https://facebot-gemini.snow4lyt.workers.dev/api/analyze";
+const API_ENDPOINT = "https://facebot-gemini.snow4lyt.workers.dev/api/analyze";
 
 const HISTORY_KEY = "facebot_history_v1";
 
