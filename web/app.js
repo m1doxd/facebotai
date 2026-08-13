@@ -1,930 +1,924 @@
-const $ = (s, root = document) => root.querySelector(s);
-const $$ = (s, root = document) => [...root.querySelectorAll(s)];
+(() => {
+  "use strict";
 
-const state = {
-  image: null,
-  file: null,
-  result: null
-};
+  const $ = (selector, root = document) =>
+    root.querySelector(selector);
 
-const historyKey = "sub5-history-v1";
+  const $$ = (selector, root = document) =>
+    [...root.querySelectorAll(selector)];
 
-
-/* =========================
-   NAVIGATION
-========================= */
-
-function go(screen) {
-
-  $$(".screen").forEach(el => {
-
-    const active = el.id === screen;
-
-    el.classList.toggle("active", active);
-
-    if (active) {
-
-      el.classList.remove("screen-enter");
-
-      requestAnimationFrame(() => {
-        el.classList.add("screen-enter");
-      });
-
-    }
-
-  });
-
-  $$(".nav-item").forEach(btn => {
-    btn.classList.toggle(
-      "active",
-      btn.dataset.screen === screen
-    );
-  });
-
-  window.scrollTo({
-    top: 0,
-    behavior: "smooth"
-  });
-
-  if (screen === "history") {
-    renderHistory();
-  }
-
-}
-
-
-/* =========================
-   TOAST
-========================= */
-
-function toast(text) {
-
-  const el = $("#toast");
-
-  el.textContent = text;
-
-  el.classList.add("show");
-
-  clearTimeout(toast.timer);
-
-  toast.timer = setTimeout(() => {
-    el.classList.remove("show");
-  }, 2400);
-
-}
-
-
-/* =========================
-   SCREEN BUTTONS
-========================= */
-
-$$("[data-screen]").forEach(btn => {
-
-  btn.addEventListener("click", () => {
-    go(btn.dataset.screen);
-  });
-
-});
-
-
-/* =========================
-   FILE UPLOAD
-========================= */
-
-$("#uploadBtn").addEventListener("click", () => {
-  $("#fileInput").click();
-});
-
-
-$("#fileInput").addEventListener("change", e => {
-
-  const file = e.target.files?.[0];
-
-  if (!file) return;
-
-  if (!file.type.startsWith("image/")) {
-    return toast("Выбери изображение.");
-  }
-
-  if (file.size > 20 * 1024 * 1024) {
-    return toast("Файл слишком большой — максимум 20 MB.");
-  }
-
-  state.file = file;
-
-  const reader = new FileReader();
-
-  reader.onload = () => {
-
-    state.image = reader.result;
-
-    $("#previewImage").src = state.image;
-
-    $("#fileName").textContent =
-      file.name;
-
-    $("#fileSize").textContent =
-      formatBytes(file.size);
-
-    go("photo");
-
+  const state = {
+    file: null,
+    objectUrl: null,
+    result: null,
+    analysisTimer: null
   };
 
-  reader.readAsDataURL(file);
+  const screens = {
+    home: $("#screen-home"),
+    analysis: $("#screen-analysis"),
+    result: $("#screen-result"),
+    history: $("#screen-history"),
+    about: $("#screen-about")
+  };
 
-});
+  const fileInput = $("#file-input");
+  const uploadBtn = $("#upload-btn");
+  const uploadName = $("#upload-name");
 
+  const analysisImage = $("#analysis-image");
+  const canvas = $("#landmark-canvas");
+  const ctx = canvas.getContext("2d");
 
-/* =========================
-   FILE SIZE
-========================= */
+  const loadingTitle = $("#loading-title");
+  const loadingText = $("#loading-text");
+  const analysisState = $("#analysis-state");
 
-function formatBytes(bytes) {
+  const analysisScore = $("#analysis-score");
+  const analysisScoreValue =
+    $("#analysis-score strong");
 
-  if (bytes < 1024 * 1024) {
-    return `${Math.max(
-      1,
-      Math.round(bytes / 1024)
-    )} KB`;
+  const resultScore = $("#result-score");
+  const scoreProgress = $("#score-progress");
+
+  const toast = $("#toast");
+
+  /* ---------------- NAVIGATION ---------------- */
+
+  function showScreen(name) {
+    const target = screens[name];
+
+    if (!target) return;
+
+    Object.values(screens).forEach(screen => {
+      screen.classList.remove("active", "screen-enter");
+    });
+
+    target.classList.add("active");
+
+    requestAnimationFrame(() => {
+      target.classList.add("screen-enter");
+    });
+
+    $$(".nav-item").forEach(button => {
+      button.classList.toggle(
+        "active",
+        button.dataset.screen === name
+      );
+    });
+
+    window.scrollTo({
+      top: 0,
+      behavior: "smooth"
+    });
   }
 
-  return `${(
-    bytes /
-    1024 /
-    1024
-  ).toFixed(1)} MB`;
+  $$("[data-screen]").forEach(button => {
+    button.addEventListener("click", () => {
+      showScreen(button.dataset.screen);
+    });
+  });
 
-}
+  /* ---------------- UPLOAD ---------------- */
 
+  uploadBtn.addEventListener("click", () => {
+    fileInput.click();
+  });
 
-/* =========================
-   ANALYSIS
-========================= */
+  fileInput.addEventListener("change", () => {
+    const file = fileInput.files?.[0];
 
-$("#analyzeBtn").addEventListener(
-  "click",
-  runAnalysis
-);
+    if (!file) return;
 
+    if (!file.type.startsWith("image/")) {
+      notify("Выбери изображение.");
+      return;
+    }
 
-$("#newAnalysis").addEventListener(
-  "click",
-  () => {
+    if (file.size > 15 * 1024 * 1024) {
+      notify("Файл слишком большой. Максимум 15 MB.");
+      return;
+    }
 
-    $("#fileInput").value = "";
+    startAnalysis(file);
+  });
 
-    state.file = null;
-    state.image = null;
+  function setPreview(file) {
+    if (state.objectUrl) {
+      URL.revokeObjectURL(state.objectUrl);
+    }
 
-    go("home");
+    state.objectUrl = URL.createObjectURL(file);
 
+    analysisImage.src = state.objectUrl;
+
+    analysisImage.onload = () => {
+      resizeCanvas();
+      drawScanningLandmarks();
+    };
   }
-);
 
+  /* ---------------- ANALYSIS ---------------- */
 
-async function runAnalysis() {
+  async function startAnalysis(file) {
+    state.file = file;
+    state.result = null;
 
-  if (!state.image || !state.file) {
-    return toast("Сначала выбери фотографию.");
+    uploadName.textContent = file.name;
+
+    setPreview(file);
+
+    resetAnalysisUI();
+
+    showScreen("analysis");
+
+    await runLoadingAnimation();
+
+    try {
+      const result = await analyzeImage(file);
+
+      state.result = result;
+
+      finishAnalysis(result);
+    } catch (error) {
+      console.error(error);
+
+      notify(
+        error?.message ||
+        "Не удалось выполнить анализ."
+      );
+
+      showScreen("home");
+    }
   }
 
-  const btn = $("#analyzeBtn");
+  function resetAnalysisUI() {
+    analysisScore.classList.remove(
+      "show",
+      "float"
+    );
 
-  btn.disabled = true;
+    analysisScoreValue.textContent = "—";
 
-  go("loading");
+    analysisState.textContent = "ANALYZING";
 
+    loadingTitle.textContent = "Анализируем";
+    loadingText.textContent =
+      "Подготавливаем изображение";
 
-  const steps =
-    $$(".loading-step");
+    $$(".loading-step").forEach((step, index) => {
+      step.classList.toggle("active", index === 0);
+      step.classList.remove("done");
+    });
 
+    clearCanvas();
+  }
 
-  const messages = [
+  async function runLoadingAnimation() {
+    const steps = $$(".loading-step");
 
-    "Подготовка изображения…",
+    const messages = [
+      "Подготавливаем изображение",
+      "Определяем landmarks",
+      "Измеряем пропорции",
+      "Сравниваем стороны лица",
+      "Собираем результат"
+    ];
 
-    "Проверка композиции…",
+    for (let i = 0; i < steps.length; i++) {
+      loadingText.textContent = messages[i];
 
-    "Расчёт визуальных метрик…",
-
-    "Формирование отчёта…"
-
-  ];
-
-
-  for (
-    let i = 0;
-    i < steps.length;
-    i++
-  ) {
-
-    steps.forEach(
-      (step, index) => {
-
+      steps.forEach((step, index) => {
         step.classList.toggle(
           "active",
           index === i
         );
 
-        step.classList.toggle(
-          "done",
-          index < i
-        );
+        if (index < i) {
+          step.classList.add("done");
+        }
+      });
 
-      }
-    );
+      await delay(420);
+    }
 
-    $("#loadingText").textContent =
-      messages[i];
-
-    await wait(
-      650 +
-      Math.random() * 300
-    );
-
+    steps.forEach(step => {
+      step.classList.remove("active");
+      step.classList.add("done");
+    });
   }
 
+  async function analyzeImage(file) {
+    /*
+     * app.js не придумывает score.
+     *
+     * Backend должен вернуть реальные измерения.
+     * Например:
+     *
+     * {
+     *   score: 78.4,
+     *   stats: [...],
+     *   overview: [...],
+     *   metrics: [...],
+     *   harmony: {...},
+     *   angularity: {...},
+     *   symmetry: {...},
+     *   dimorphism: {...},
+     *   health: {...},
+     *   landmarks: [...]
+     * }
+     *
+     * Gemini может использоваться backend'ом
+     * для qualitative notes, но score сюда должен
+     * приходить из measurement pipeline.
+     */
 
-  const result =
-    await calculateVisualMetrics(
-      state.image
-    );
+    const form = new FormData();
 
+    form.append("image", file);
 
-  state.result = result;
-
-  populateResult(result);
-
-  saveHistory(result);
-
-  go("result");
-
-  btn.disabled = false;
-
-}
-
-
-/* =========================
-   WAIT
-========================= */
-
-function wait(ms) {
-
-  return new Promise(resolve =>
-    setTimeout(resolve, ms)
-  );
-
-}
-
-
-/* =========================
-   IMAGE ANALYSIS
-========================= */
-
-async function calculateVisualMetrics(src) {
-
-  const img = new Image();
-
-  img.src = src;
-
-  await img.decode();
-
-
-  const canvas =
-    document.createElement("canvas");
-
-
-  const max = 700;
-
-
-  const scale = Math.min(
-    1,
-    max /
-    Math.max(
-      img.naturalWidth,
-      img.naturalHeight
-    )
-  );
-
-
-  canvas.width =
-    Math.max(
-      1,
-      Math.round(
-        img.naturalWidth * scale
-      )
-    );
-
-
-  canvas.height =
-    Math.max(
-      1,
-      Math.round(
-        img.naturalHeight * scale
-      )
-    );
-
-
-  const ctx =
-    canvas.getContext(
-      "2d",
+    const response = await fetch(
+      "/api/analyze",
       {
-        willReadFrequently: true
+        method: "POST",
+        body: form
       }
     );
 
+    if (!response.ok) {
+      let message = "Ошибка анализа.";
 
-  ctx.drawImage(
-    img,
-    0,
-    0,
-    canvas.width,
-    canvas.height
-  );
+      try {
+        const data = await response.json();
 
+        if (data?.error) {
+          message = data.error;
+        }
+      } catch {}
 
-  const data =
-    ctx.getImageData(
-      0,
-      0,
-      canvas.width,
-      canvas.height
-    ).data;
+      throw new Error(message);
+    }
 
+    const data = await response.json();
 
-  let sum = 0;
-  let sumSq = 0;
+    validateResult(data);
 
-  let left = 0;
-  let right = 0;
+    return data;
+  }
 
-  const count =
-    data.length / 4;
-
-
-  const gray =
-    new Float32Array(count);
-
-
-  /* =========================
-     GRAYSCALE / BRIGHTNESS
-  ========================= */
-
-  for (
-    let i = 0, p = 0;
-    i < data.length;
-    i += 4, p++
-  ) {
-
-    const g =
-      (
-        0.2126 * data[i] +
-        0.7152 * data[i + 1] +
-        0.0722 * data[i + 2]
-      ) / 255;
-
-
-    gray[p] = g;
-
-    sum += g;
-
-    sumSq += g * g;
-
-
-    const x =
-      p % canvas.width;
-
+  function validateResult(data) {
+    if (!data || typeof data !== "object") {
+      throw new Error(
+        "Сервер вернул некорректный результат."
+      );
+    }
 
     if (
-      x <
-      canvas.width / 2
+      typeof data.score !== "number" ||
+      !Number.isFinite(data.score)
     ) {
-
-      left += g;
-
-    } else {
-
-      right += g;
-
+      throw new Error(
+        "Числовой score не получен из измерений."
+      );
     }
-
   }
 
+  /* ---------------- RESULT ---------------- */
 
-  /* =========================
-     STATISTICS
-  ========================= */
+  function finishAnalysis(result) {
+    analysisState.textContent = "COMPLETE";
 
-  const mean =
-    sum / count;
+    analysisScoreValue.textContent =
+      formatNumber(result.score);
 
+    analysisScore.classList.add("show");
 
-  const variance =
-    Math.max(
-      0,
-      sumSq / count -
-      mean * mean
+    drawLandmarks(result.landmarks || []);
+
+    setTimeout(() => {
+      analysisScore.classList.add("float");
+    }, 950);
+
+    setTimeout(() => {
+      renderResult(result);
+      showScreen("result");
+    }, 1650);
+  }
+
+  function renderResult(result) {
+    resultScore.textContent =
+      formatNumber(result.score);
+
+    requestAnimationFrame(() => {
+      scoreProgress.style.width =
+        `${clamp(result.score, 0, 100)}%`;
+    });
+
+    renderStats(result.stats || []);
+    renderOverview(result.overview || []);
+
+    renderGroup(
+      $("#harmony-content"),
+      result.harmony
     );
 
+    renderMetrics(
+      result.metrics || []
+    );
 
-  const std =
-    Math.sqrt(variance);
+    renderGroup(
+      $("#angularity-content"),
+      result.angularity
+    );
 
+    renderGroup(
+      $("#symmetry-content"),
+      result.symmetry
+    );
 
-  /* =========================
-     EDGE / SHARPNESS
-  ========================= */
+    renderGroup(
+      $("#dimorphism-content"),
+      result.dimorphism
+    );
 
-  let edge = 0;
+    renderHealth(result.health);
 
+    saveHistory(result);
 
-  for (
-    let y = 1;
-    y < canvas.height;
-    y += 2
-  ) {
+    bindExpandableCards();
+  }
 
-    for (
-      let x = 1;
-      x < canvas.width;
-      x += 2
-    ) {
+  function renderStats(stats) {
+    const container = $("#stats-grid");
 
-      const idx =
-        y * canvas.width + x;
+    container.innerHTML = "";
 
+    stats.slice(0, 4).forEach(stat => {
+      const element = document.createElement("div");
 
-      edge +=
-        Math.abs(
-          gray[idx] -
-          gray[idx - 1]
-        ) +
-        Math.abs(
-          gray[idx] -
-          gray[idx - canvas.width]
+      element.className = "stat";
+
+      element.innerHTML = `
+        <span>${escapeHtml(stat.label || "")}</span>
+        <strong>${escapeHtml(formatValue(stat.value))}</strong>
+        <small>${escapeHtml(stat.unit || "")}</small>
+      `;
+
+      container.appendChild(element);
+    });
+  }
+
+  function renderOverview(items) {
+    const container = $("#overview-grid");
+
+    container.innerHTML = "";
+
+    items.forEach(item => {
+      const element =
+        document.createElement("div");
+
+      element.className = "overview-card";
+
+      element.innerHTML = `
+        <div class="overview-card__label">
+          ${escapeHtml(item.label || "")}
+        </div>
+
+        <div class="overview-card__value">
+          ${escapeHtml(formatValue(item.value))}
+        </div>
+
+        <div class="overview-card__source">
+          ${escapeHtml(item.source || "measured")}
+        </div>
+      `;
+
+      container.appendChild(element);
+    });
+  }
+
+  function renderMetrics(metrics) {
+    const container = $("#metrics-content");
+
+    container.innerHTML = "";
+
+    metrics.forEach(metric => {
+      const card =
+        document.createElement("article");
+
+      card.className = "metric-card";
+
+      card.innerHTML = `
+        <button class="metric-header">
+          <div class="metric-main">
+            <div class="metric-name">
+              ${escapeHtml(metric.name || "")}
+            </div>
+
+            <div class="metric-key">
+              ${escapeHtml(metric.key || "")}
+            </div>
+          </div>
+
+          <div class="metric-value">
+            ${escapeHtml(formatValue(metric.value))}
+          </div>
+
+          <div class="metric-arrow">+</div>
+        </button>
+
+        <div class="metric-content">
+          <div>
+            <div class="metric-detail">
+              <span>Источник</span>
+              <strong>
+                ${escapeHtml(
+                  metric.source || "measured"
+                )}
+              </strong>
+            </div>
+
+            ${
+              metric.description
+                ? `
+                  <div class="metric-detail">
+                    <span>Описание</span>
+                    <strong>
+                      ${escapeHtml(metric.description)}
+                    </strong>
+                  </div>
+                `
+                : ""
+            }
+          </div>
+        </div>
+      `;
+
+      container.appendChild(card);
+    });
+  }
+
+  function renderGroup(container, data) {
+    if (!container) return;
+
+    container.innerHTML = "";
+
+    if (!data) {
+      container.innerHTML =
+        emptyMessage("Нет данных.");
+      return;
+    }
+
+    const groups = Array.isArray(data)
+      ? data
+      : Object.entries(data).map(
+          ([title, values]) => ({
+            title,
+            values
+          })
         );
 
-    }
-
-  }
-
-
-  const edgeNorm =
-    Math.min(
-      1,
-      edge /
-      (
-        canvas.width *
-        canvas.height *
-        0.045
-      )
-    );
-
-
-  /* =========================
-     METRICS
-  ========================= */
-
-  const symmetry =
-    Math.max(
-      0,
-      Math.min(
-        100,
-        Math.round(
-          100 -
-          Math.abs(
-            left - right
-          ) /
-          Math.max(
-            0.001,
-            left + right
-          ) *
-          100
-        )
-      )
-    );
-
-
-  const contrast =
-    Math.max(
-      0,
-      Math.min(
-        100,
-        Math.round(
-          std * 210
-        )
-      )
-    );
-
-
-  const lighting =
-    Math.max(
-      0,
-      Math.min(
-        100,
-        Math.round(
-          (
-            1 -
-            Math.abs(
-              mean - 0.52
-            ) *
-            1.65
-          ) *
-          100
-        )
-      )
-    );
-
-
-  const sharpness =
-    Math.max(
-      0,
-      Math.min(
-        100,
-        Math.round(
-          edgeNorm * 100
-        )
-      )
-    );
-
-
-  const exposure =
-    mean < 0.28
-      ? "Тёмная"
-      : mean > 0.78
-        ? "Светлая"
-        : "Сбаланс.";
-
-
-  const composition =
-    Math.round(
-      (
-        symmetry * 0.35 +
-        contrast * 0.25 +
-        lighting * 0.2 +
-        sharpness * 0.2
-      ) /
-      10 *
-      10
-    ) / 10;
-
-
-  const score =
-    Math.max(
-      1,
-      Math.min(
-        9.9,
-        composition / 10
-      )
-    );
-
-
-  const angle =
-    canvas.width /
-      canvas.height >
-      1.55
-
-      ? "Широкий"
-
-      : canvas.width /
-          canvas.height <
-          0.72
-
-        ? "Вертикальный"
-
-        : "Нейтральный";
-
-
-  const centering =
-    symmetry > 88
-      ? "Высокая"
-      : symmetry > 72
-        ? "Средняя"
-        : "Низкая";
-
-
-  return {
-
-    score:
-      Number(
-        score.toFixed(1)
-      ),
-
-    symmetry,
-
-    contrast,
-
-    lighting,
-
-    sharpness,
-
-    exposure,
-
-    composition:
-      Number(
-        composition.toFixed(1)
-      ),
-
-    centering,
-
-    angle,
-
-    aspect:
-      `${img.naturalWidth}×${img.naturalHeight}`,
-
-    date:
-      new Date().toLocaleString(
-        "ru-RU",
-        {
-          day:"2-digit",
-          month:"2-digit",
-          hour:"2-digit",
-          minute:"2-digit"
-        }
-      )
-
-  };
-
-}
-
-
-/* =========================
-   RESULT UI
-========================= */
-
-function populateResult(r) {
-
-  $("#score").textContent =
-    r.score.toFixed(1);
-
-
-  requestAnimationFrame(() => {
-
-    $("#scoreBar").style.width =
-      `${r.score * 10}%`;
-
-  });
-
-
-  $("#scoreText").textContent =
-    r.score >= 8
-
-      ? "Сильный визуальный баланс"
-
-      : r.score >= 6
-
-        ? "Сбалансированный кадр"
-
-        : "Есть пространство для улучшения кадра";
-
-
-  $("#symmetry").textContent =
-    `${r.symmetry}%`;
-
-  $("#contrast").textContent =
-    `${r.contrast}%`;
-
-  $("#lighting").textContent =
-    `${r.lighting}%`;
-
-  $("#angle").textContent =
-    r.angle;
-
-
-  $("#composition").textContent =
-    `${r.composition}`;
-
-  $("#sharpness").textContent =
-    `${r.sharpness}%`;
-
-  $("#exposure").textContent =
-    r.exposure;
-
-  $("#centering").textContent =
-    r.centering;
-
-
-  $("#mSym").textContent =
-    `${r.symmetry}%`;
-
-  $("#mContrast").textContent =
-    `${r.contrast}%`;
-
-  $("#mLight").textContent =
-    `${r.lighting}%`;
-
-
-  $("#aspect").textContent =
-    r.aspect;
-
-  $("#centerDetail").textContent =
-    r.centering;
-
-  $("#contrastDetail").textContent =
-    `${r.contrast}%`;
-
-  $("#brightnessDetail").textContent =
-    r.exposure;
-
-
-  $("#tipLight").textContent =
-    r.lighting < 65
-
-      ? "Добавить мягкий фронтальный свет"
-
-      : "Свет уже достаточно ровный";
-
-
-  $("#tipAngle").textContent =
-    r.symmetry < 75
-
-      ? "Попробовать более фронтальный ракурс"
-
-      : "Ракурс выглядит стабильным";
-
-}
-
-
-/* =========================
-   ACCORDIONS
-========================= */
-
-$$(".metric-header").forEach(btn => {
-
-  btn.addEventListener(
-    "click",
-    () => {
-
-      btn
-        .closest(".metric-card")
-        .classList
-        .toggle("open");
-
-    }
-  );
-
-});
-
-
-$$(".feature-group__header").forEach(btn => {
-
-  btn.addEventListener(
-    "click",
-    () => {
-
-      btn
-        .closest(".feature-group")
-        .classList
-        .toggle("open");
-
-    }
-  );
-
-});
-
-
-/* =========================
-   HISTORY
-========================= */
-
-function getHistory() {
-
-  try {
-
-    return JSON.parse(
-      localStorage.getItem(
-        historyKey
-      ) || "[]"
-    );
-
-  } catch {
-
-    return [];
-
-  }
-
-}
-
-
-function saveHistory(result) {
-
-  const items =
-    getHistory();
-
-
-  items.unshift({
-
-    score:
-      result.score,
-
-    date:
-      result.date,
-
-    file:
-      state.file?.name ||
-      "image"
-
-  });
-
-
-  localStorage.setItem(
-
-    historyKey,
-
-    JSON.stringify(
-      items.slice(0, 20)
-    )
-
-  );
-
-}
-
-
-function renderHistory() {
-
-  const items =
-    getHistory();
-
-
-  $("#historyCount").textContent =
-    items.length;
-
-
-  const list =
-    $("#historyList");
-
-
-  if (!items.length) {
-
-    list.innerHTML = `
-      <div class="history-empty">
-        Здесь пока ничего нет.<br>
-        После первого анализа результат
-        появится автоматически.
-      </div>
-    `;
-
-    return;
-
-  }
-
-
-  list.innerHTML =
-    items
-      .map(item => `
-
-        <div class="history-item">
-
+    groups.forEach(group => {
+      const values = Array.isArray(group.values)
+        ? group.values
+        : Object.entries(group.values || {})
+            .map(([name, value]) => ({
+              name,
+              value
+            }));
+
+      const element =
+        document.createElement("article");
+
+      element.className = "feature-group";
+
+      element.innerHTML = `
+        <button class="feature-group__header">
+          <span class="feature-group__title">
+            ${escapeHtml(group.title || "")}
+          </span>
+
+          <span class="feature-group__count">
+            ${values.length}
+          </span>
+
+          <span class="feature-group__arrow">
+            +
+          </span>
+        </button>
+
+        <div class="feature-list">
           <div>
+            <div class="feature-list-inner">
+              ${values.map(item => `
+                <div class="feature-row">
+                  <span class="feature-row__name">
+                    ${escapeHtml(item.name || item.label || "")}
+                  </span>
 
+                  <span class="feature-row__value">
+                    ${escapeHtml(formatValue(item.value))}
+                  </span>
+                </div>
+              `).join("")}
+            </div>
+          </div>
+        </div>
+      `;
+
+      container.appendChild(element);
+    });
+  }
+
+  function renderHealth(data) {
+    const container = $("#health-content");
+
+    if (!data) {
+      return;
+    }
+
+    const text =
+      typeof data === "string"
+        ? data
+        : data.note || data.description;
+
+    if (!text) return;
+
+    container.innerHTML = `
+      <div class="note-icon">i</div>
+      <p>${escapeHtml(text)}</p>
+    `;
+  }
+
+  /* ---------------- TABS ---------------- */
+
+  $$(".tab").forEach(tab => {
+    tab.addEventListener("click", () => {
+      const target = tab.dataset.tab;
+
+      $$(".tab").forEach(item => {
+        item.classList.toggle(
+          "active",
+          item === tab
+        );
+      });
+
+      $$(".tab-panel").forEach(panel => {
+        panel.classList.toggle(
+          "active",
+          panel.dataset.panel === target
+        );
+      });
+    });
+  });
+
+  /* ---------------- EXPANDABLE ---------------- */
+
+  function bindExpandableCards() {
+    $$(".metric-header").forEach(button => {
+      button.onclick = () => {
+        button
+          .closest(".metric-card")
+          .classList.toggle("open");
+      };
+    });
+
+    $$(".feature-group__header").forEach(button => {
+      button.onclick = () => {
+        button
+          .closest(".feature-group")
+          .classList.toggle("open");
+      };
+    });
+  }
+
+  /* ---------------- LANDMARKS ---------------- */
+
+  function resizeCanvas() {
+    if (!analysisImage.naturalWidth) return;
+
+    const rect =
+      analysisImage.getBoundingClientRect();
+
+    const ratio = window.devicePixelRatio || 1;
+
+    canvas.width = rect.width * ratio;
+    canvas.height = rect.height * ratio;
+
+    canvas.style.width = `${rect.width}px`;
+    canvas.style.height = `${rect.height}px`;
+
+    ctx.setTransform(
+      ratio,
+      0,
+      0,
+      ratio,
+      0,
+      0
+    );
+  }
+
+  window.addEventListener(
+    "resize",
+    resizeCanvas
+  );
+
+  function clearCanvas() {
+    ctx.clearRect(
+      0,
+      0,
+      canvas.clientWidth,
+      canvas.clientHeight
+    );
+  }
+
+  function drawScanningLandmarks() {
+    clearCanvas();
+
+    const width = canvas.clientWidth;
+    const height = canvas.clientHeight;
+
+    if (!width || !height) return;
+
+    const points = [
+      [.50,.18],
+      [.42,.27],
+      [.58,.27],
+      [.38,.37],
+      [.62,.37],
+      [.50,.42],
+      [.44,.52],
+      [.56,.52],
+      [.39,.62],
+      [.61,.62],
+      [.50,.70]
+    ];
+
+    ctx.save();
+
+    ctx.strokeStyle =
+      "rgba(255,255,255,.22)";
+
+    ctx.lineWidth = 1;
+
+    ctx.beginPath();
+
+    points.forEach(([x,y], index) => {
+      const px = x * width;
+      const py = y * height;
+
+      if (index === 0) {
+        ctx.moveTo(px, py);
+      } else {
+        ctx.lineTo(px, py);
+      }
+    });
+
+    ctx.stroke();
+
+    points.forEach(([x,y]) => {
+      ctx.beginPath();
+
+      ctx.arc(
+        x * width,
+        y * height,
+        2,
+        0,
+        Math.PI * 2
+      );
+
+      ctx.fillStyle =
+        "rgba(255,255,255,.75)";
+
+      ctx.fill();
+    });
+
+    ctx.restore();
+  }
+
+  function drawLandmarks(points) {
+    clearCanvas();
+
+    if (!points?.length) return;
+
+    const width = canvas.clientWidth;
+    const height = canvas.clientHeight;
+
+    ctx.save();
+
+    ctx.fillStyle =
+      "rgba(255,255,255,.85)";
+
+    ctx.strokeStyle =
+      "rgba(255,255,255,.32)";
+
+    ctx.lineWidth = 1;
+
+    points.forEach(point => {
+      const x =
+        typeof point.x === "number"
+          ? point.x * width
+          : point[0] * width;
+
+      const y =
+        typeof point.y === "number"
+          ? point.y * height
+          : point[1] * height;
+
+      ctx.beginPath();
+
+      ctx.arc(
+        x,
+        y,
+        2,
+        0,
+        Math.PI * 2
+      );
+
+      ctx.fill();
+    });
+
+    ctx.restore();
+  }
+
+  /* ---------------- HISTORY ---------------- */
+
+  function saveHistory(result) {
+    const history =
+      getHistory();
+
+    history.unshift({
+      date: new Date().toISOString(),
+      score: result.score,
+      fileName:
+        state.file?.name || "photo"
+    });
+
+    localStorage.setItem(
+      "facemetric-history",
+      JSON.stringify(history.slice(0, 30))
+    );
+  }
+
+  function getHistory() {
+    try {
+      return JSON.parse(
+        localStorage.getItem(
+          "facemetric-history"
+        )
+      ) || [];
+    } catch {
+      return [];
+    }
+  }
+
+  function renderHistory() {
+    const history = getHistory();
+
+    $("#history-count").textContent =
+      history.length;
+
+    const container = $("#history-list");
+
+    if (!history.length) {
+      container.innerHTML = `
+        <div class="history-empty">
+          Анализов пока нет.
+        </div>
+      `;
+
+      return;
+    }
+
+    container.innerHTML =
+      history.map(item => `
+        <div class="history-item">
+          <div>
             <div class="date">
-              ${escapeHtml(item.date)}
+              ${formatDate(item.date)}
             </div>
 
             <div class="meta">
-              ${escapeHtml(item.file)}
+              ${escapeHtml(item.fileName)}
             </div>
-
           </div>
 
           <div class="score">
-            ${Number(item.score).toFixed(1)}
+            ${formatNumber(item.score)}
           </div>
-
         </div>
+      `).join("");
+  }
 
-      `)
-      .join("");
+  /* ---------------- NEW ANALYSIS ---------------- */
 
-}
+  $("#new-analysis").addEventListener(
+    "click",
+    () => {
+      fileInput.value = "";
+      state.result = null;
 
-
-/* =========================
-   HTML ESCAPE
-========================= */
-
-function escapeHtml(str) {
-
-  return String(str).replace(
-    /[&<>"']/g,
-
-    c => ({
-
-      "&":"&amp;",
-      "<":"&lt;",
-      ">":"&gt;",
-      '"':"&quot;",
-      "'":"&#039;"
-
-    }[c])
-
+      showScreen("home");
+    }
   );
 
-}
+  /* ---------------- HELPERS ---------------- */
 
+  function formatNumber(value) {
+    if (
+      typeof value !== "number" ||
+      !Number.isFinite(value)
+    ) {
+      return "—";
+    }
 
-/* =========================
-   INIT
-========================= */
+    return Number.isInteger(value)
+      ? String(value)
+      : value.toFixed(1);
+  }
 
-renderHistory();
+  function formatValue(value) {
+    if (
+      value === null ||
+      value === undefined
+    ) {
+      return "—";
+    }
+
+    if (typeof value === "number") {
+      return formatNumber(value);
+    }
+
+    return String(value);
+  }
+
+  function formatDate(date) {
+    return new Intl.DateTimeFormat(
+      "ru-RU",
+      {
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric"
+      }
+    ).format(new Date(date));
+  }
+
+  function clamp(value, min, max) {
+    return Math.min(
+      max,
+      Math.max(min, value)
+    );
+  }
+
+  function delay(ms) {
+    return new Promise(resolve =>
+      setTimeout(resolve, ms)
+    );
+  }
+
+  function notify(message) {
+    toast.textContent = message;
+
+    toast.classList.add("show");
+
+    clearTimeout(
+      notify.timer
+    );
+
+    notify.timer = setTimeout(() => {
+      toast.classList.remove("show");
+    }, 2600);
+  }
+
+  function emptyMessage(text) {
+    return `
+      <div class="history-empty">
+        ${escapeHtml(text)}
+      </div>
+    `;
+  }
+
+  function escapeHtml(value) {
+    return String(value ?? "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+  }
+
+  /* ---------------- INIT ---------------- */
+
+  renderHistory();
+
+  window.addEventListener(
+    "beforeunload",
+    () => {
+      if (state.objectUrl) {
+        URL.revokeObjectURL(
+          state.objectUrl
+        );
+      }
+    }
+  );
+})();
