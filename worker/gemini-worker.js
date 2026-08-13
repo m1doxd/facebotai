@@ -10,6 +10,11 @@ const ALLOWED_TYPES = new Set([
 
 const DEFAULT_MODEL = "gemini-3.6-flash";
 
+// Deployment marker: 2026-08-13-cors-fix-v2
+// This intentionally changes the Worker source so Git/Cloudflare
+// detects a new deployment.
+const WORKER_BUILD = "2026-08-13-cors-fix-v2";
+
 const SCORE_MIN = 0;
 const SCORE_MAX = 10;
 
@@ -34,7 +39,9 @@ export default {
         success: true,
         service: "facebot-gemini",
         status: "ok",
-        model: env.GEMINI_MODEL || DEFAULT_MODEL
+        model: env.GEMINI_MODEL || DEFAULT_MODEL,
+        build: WORKER_BUILD,
+        cors_headers: "Content-Type,Accept,X-Gemini-Key"
       });
     }
 
@@ -2476,7 +2483,7 @@ function corsHeaders() {
       "GET,POST,OPTIONS",
 
     "Access-Control-Allow-Headers":
-      "Content-Type,Accept,X-Gemini-Key"
+      "Content-Type, Accept, X-Gemini-Key"
   };
 }
 
