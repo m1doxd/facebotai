@@ -18,7 +18,7 @@
     content="FaceMetric — измерительный анализ пропорций, симметрии и структуры лица."
   >
 
-  <title>FACEMETRIC CLOUD TEST 123</title>
+  <title>FaceMetric — Facial Analysis</title>
 
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <link rel="stylesheet" href="./style.css">
@@ -98,6 +98,13 @@
 
         <input
           id="file-input"
+          type="file"
+          accept="image/jpeg,image/png,image/webp"
+          hidden
+        >
+
+        <input
+          id="profile-file-input"
           type="file"
           accept="image/jpeg,image/png,image/webp"
           hidden
@@ -420,6 +427,29 @@
 
           </div>
 
+        </div>
+
+
+        <div class="analysis-actions">
+          <div class="profile-upload-card" id="profile-upload-card">
+            <button
+              class="profile-upload-card__button"
+              id="profile-upload-btn"
+              type="button"
+            >
+              <span class="profile-upload-card__icon">＋</span>
+              <span>
+                <strong>Добавить фото профиля</strong>
+                <small id="profile-upload-name">Необязательно · профиль войдёт в общий рейтинг</small>
+              </span>
+              <span class="chevron">↗</span>
+            </button>
+          </div>
+
+          <button class="primary-btn analysis-start-btn" id="start-analysis-btn" type="button" disabled>
+            <span>Начать анализ</span>
+            <span>↗</span>
+          </button>
         </div>
 
 
