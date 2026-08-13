@@ -3,6 +3,27 @@
 /*
  * FaceBot — Telegram Mini App
  * Frontend for FaceBot Gemini Worker
+ *
+ * IMPORTANT:
+ * - Uses the real Gemini Worker response.
+ * - Does not create fake scores.
+ * - Supports both:
+ *
+ *   {
+ *     success: true,
+ *     score: 8.8,
+ *     metrics: {...}
+ *   }
+ *
+ *   and:
+ *
+ *   {
+ *     success: true,
+ *     analysis: {
+ *       score: 8.8,
+ *       metrics: {...}
+ *     }
+ *   }
  */
 
 const MAX_FILE_SIZE = 15 * 1024 * 1024;
@@ -16,7 +37,8 @@ const ALLOWED_TYPES = new Set([
 const API_ENDPOINT =
   "https://facebot-gemini.snow4lyt.workers.dev/api/analyze";
 
-const HISTORY_KEY = "facebot_history_v1";
+const HISTORY_KEY =
+  "facebot_history_v1";
 
 const tg =
   window.Telegram &&
@@ -29,7 +51,8 @@ const tg =
 // DOM
 // ======================================================
 
-const screens = document.querySelectorAll(".screen");
+const screens =
+  document.querySelectorAll(".screen");
 
 const fileInput =
   document.getElementById("fileInput");
@@ -141,22 +164,30 @@ function initTelegram() {
     tg.ready();
     tg.expand();
 
-    if (typeof tg.setHeaderColor === "function") {
+    if (
+      typeof tg.setHeaderColor ===
+      "function"
+    ) {
       tg.setHeaderColor("#08090b");
     }
 
-    if (typeof tg.setBackgroundColor === "function") {
+    if (
+      typeof tg.setBackgroundColor ===
+      "function"
+    ) {
       tg.setBackgroundColor("#08090b");
     }
 
     if (
-      typeof tg.enableClosingConfirmation === "function"
+      typeof tg.enableClosingConfirmation ===
+      "function"
     ) {
       tg.enableClosingConfirmation();
     }
+
   } catch (error) {
     console.warn(
-      "Telegram WebApp initialization warning:",
+      "Telegram initialization warning:",
       error
     );
   }
@@ -168,24 +199,42 @@ function initTelegram() {
 // ======================================================
 
 function showScreen(name) {
-  const target = document.querySelector(
-    `.screen[data-screen="${CSS.escape(name)}"]`
-  );
+  const target =
+    document.querySelector(
+      `.screen[data-screen="${CSS.escape(name)}"]`
+    );
 
   if (!target) {
     return;
   }
 
-  screens.forEach((screen) => {
-    screen.classList.toggle(
-      "active",
-      screen === target
+  const previous =
+    document.querySelector(
+      `.screen[data-screen="${CSS.escape(currentScreen)}"]`
     );
-  });
+
+  if (previous && previous !== target) {
+    previous.classList.remove("screen-enter");
+  }
+
+  screens.forEach(
+    (screen) => {
+      screen.classList.toggle(
+        "active",
+        screen === target
+      );
+    }
+  );
 
   currentScreen = name;
 
   updateNavigation(name);
+
+  requestAnimationFrame(() => {
+    target.classList.remove("screen-enter");
+    void target.offsetWidth;
+    target.classList.add("screen-enter");
+  });
 
   window.scrollTo({
     top: 0,
@@ -200,43 +249,38 @@ function showScreen(name) {
 
 function updateNavigation(name) {
   const navItems =
-    document.querySelectorAll(".nav-item");
-
-  navItems.forEach((item) => {
-    const target = item.dataset.go;
-
-    const active =
-      target === name ||
-      (
-        name === "result" &&
-        target === "home"
-      );
-
-    item.classList.toggle(
-      "active",
-      active
+    document.querySelectorAll(
+      ".nav-item"
     );
-  });
+
+  navItems.forEach(
+    (item) => {
+      const target =
+        item.dataset.go;
+
+      const active =
+        target === name ||
+        (
+          name === "result" &&
+          target === "home"
+        );
+
+      item.classList.toggle(
+        "active",
+        active
+      );
+    }
+  );
 }
 
 
 function goBack() {
-  if (currentScreen === "photo") {
-    showScreen("home");
-    return;
-  }
-
-  if (currentScreen === "history") {
-    showScreen("home");
-    return;
-  }
-
-  if (currentScreen === "about") {
-    showScreen("home");
-    return;
-  }
-
-  if (currentScreen === "result") {
+  if (
+    currentScreen === "photo" ||
+    currentScreen === "history" ||
+    currentScreen === "about" ||
+    currentScreen === "result"
+  ) {
     showScreen("home");
     return;
   }
@@ -264,7 +308,8 @@ function handleFileSelected(file) {
     return;
   }
 
-  const validation = validateFile(file);
+  const validation =
+    validateFile(file);
 
   if (!validation.valid) {
     showToast(validation.message);
@@ -274,7 +319,9 @@ function handleFileSelected(file) {
   selectedFile = file;
 
   if (selectedObjectUrl) {
-    URL.revokeObjectURL(selectedObjectUrl);
+    URL.revokeObjectURL(
+      selectedObjectUrl
+    );
   }
 
   selectedObjectUrl =
@@ -360,7 +407,9 @@ async function startAnalysis() {
   }
 
   if (!selectedFile) {
-    showToast("Choose a photo first.");
+    showToast(
+      "Choose a photo first."
+    );
     return;
   }
 
@@ -373,10 +422,24 @@ async function startAnalysis() {
   resetLoadingSteps();
 
   try {
-    await runLoadingSequence();
+    /*
+     * Run the visual loading sequence while
+     * the actual API request happens.
+     *
+     * The sequence is only UI feedback.
+     * It does NOT create fake analysis data.
+     */
+
+    const loadingPromise =
+      runLoadingSequence();
+
+    const analysisPromise =
+      analyzePhoto(selectedFile);
 
     const result =
-      await analyzePhoto(selectedFile);
+      await analysisPromise;
+
+    await loadingPromise;
 
     if (!result.success) {
       throw new Error(
@@ -385,14 +448,42 @@ async function startAnalysis() {
       );
     }
 
+    /*
+     * IMPORTANT FIX
+     *
+     * Gemini Worker currently returns:
+     *
+     * {
+     *   success: true,
+     *   model: "...",
+     *   analysis: {
+     *     score: 8.8,
+     *     face_count: 1,
+     *     metrics: {...}
+     *   }
+     * }
+     *
+     * The old frontend expected score directly
+     * on the root object.
+     *
+     * normalizeClientResult() now unwraps
+     * result.analysis automatically.
+     */
+
     currentAnalysis =
       normalizeClientResult(result);
 
-    saveHistory(currentAnalysis);
+    saveHistory(
+      currentAnalysis
+    );
 
-    renderResult(currentAnalysis);
+    renderResult(
+      currentAnalysis
+    );
 
     showScreen("result");
+
+    animateResultEntrance();
 
   } catch (error) {
     console.error(
@@ -428,17 +519,27 @@ async function analyzePhoto(file) {
     file.name || "photo.jpg"
   );
 
-  const response =
-    await fetch(
-      API_ENDPOINT,
-      {
-        method: "POST",
-        body: formData,
-        headers: {
-          Accept: "application/json"
+  let response;
+
+  try {
+    response =
+      await fetch(
+        API_ENDPOINT,
+        {
+          method: "POST",
+          body: formData,
+          headers: {
+            Accept:
+              "application/json"
+          }
         }
-      }
+      );
+
+  } catch (error) {
+    throw new Error(
+      "Could not connect to FaceBot analysis server."
     );
+  }
 
   const responseText =
     await response.text();
@@ -450,9 +551,10 @@ async function analyzePhoto(file) {
       responseText
         ? JSON.parse(responseText)
         : null;
+
   } catch (error) {
     throw new Error(
-      `Server returned invalid JSON (${response.status}): ${responseText}`
+      `Server returned invalid JSON (${response.status}).`
     );
   }
 
@@ -481,27 +583,31 @@ async function runLoadingSequence() {
   const steps = [
     {
       number: 1,
-      title: "Analyzing photo",
+      title:
+        "Analyzing photo",
       subtitle:
-        "Detecting the visible face…"
+        "Uploading the image…"
     },
     {
       number: 2,
-      title: "Reading facial structure",
+      title:
+        "Reading facial structure",
       subtitle:
-        "Extracting visible geometry…"
+        "Inspecting the visible face…"
     },
     {
       number: 3,
-      title: "Preparing feature set",
+      title:
+        "Preparing feature set",
       subtitle:
-        "Organizing the analyzer response…"
+        "Organizing returned measurements…"
     },
     {
       number: 4,
-      title: "Running production analysis",
+      title:
+        "Preparing report",
       subtitle:
-        "Generating the final report…"
+        "Rendering the real analysis…"
     }
   ];
 
@@ -510,9 +616,12 @@ async function runLoadingSequence() {
     index < steps.length;
     index++
   ) {
-    const step = steps[index];
+    const step =
+      steps[index];
 
-    setLoadingStep(step.number);
+    setLoadingStep(
+      step.number
+    );
 
     if (loadingTitle) {
       loadingTitle.textContent =
@@ -526,8 +635,8 @@ async function runLoadingSequence() {
 
     await sleep(
       index === steps.length - 1
-        ? 250
-        : 420
+        ? 360
+        : 520
     );
   }
 }
@@ -539,12 +648,14 @@ function resetLoadingSteps() {
       ".loading-step"
     );
 
-  steps.forEach((step) => {
-    step.classList.remove(
-      "active",
-      "done"
-    );
-  });
+  steps.forEach(
+    (step) => {
+      step.classList.remove(
+        "active",
+        "done"
+      );
+    }
+  );
 
   const first =
     document.querySelector(
@@ -552,7 +663,9 @@ function resetLoadingSteps() {
     );
 
   if (first) {
-    first.classList.add("active");
+    first.classList.add(
+      "active"
+    );
   }
 
   if (loadingTitle) {
@@ -562,7 +675,7 @@ function resetLoadingSteps() {
 
   if (loadingSubtitle) {
     loadingSubtitle.textContent =
-      "Detecting the face…";
+      "Uploading the image…";
   }
 }
 
@@ -573,28 +686,136 @@ function setLoadingStep(number) {
       ".loading-step"
     );
 
-  steps.forEach((step) => {
-    const stepNumber =
-      Number(step.dataset.step);
+  steps.forEach(
+    (step) => {
+      const stepNumber =
+        Number(
+          step.dataset.step
+        );
 
-    step.classList.toggle(
-      "active",
-      stepNumber === number
-    );
+      step.classList.toggle(
+        "active",
+        stepNumber === number
+      );
 
-    step.classList.toggle(
-      "done",
-      stepNumber < number
-    );
-  });
+      step.classList.toggle(
+        "done",
+        stepNumber < number
+      );
+    }
+  );
 }
 
 
 function sleep(ms) {
   return new Promise(
     (resolve) =>
-      setTimeout(resolve, ms)
+      setTimeout(
+        resolve,
+        ms
+      )
   );
+}
+
+
+// ======================================================
+// RESULT NORMALIZATION
+// ======================================================
+
+function normalizeClientResult(data) {
+  /*
+   * FIX:
+   *
+   * The Worker returns:
+   *
+   * data.analysis
+   *
+   * so prefer analysis when it exists.
+   *
+   * We also support a flat response
+   * for compatibility.
+   */
+
+  const payload =
+    isObject(data?.analysis)
+      ? data.analysis
+      : data;
+
+  const score =
+    normalizeScore(
+      payload?.score
+    );
+
+  const faceCount =
+    toNumberOrZero(
+      payload?.face_count
+    );
+
+  const landmarksCount =
+    nullableNumber(
+      payload?.landmarks_count
+    );
+
+  const metrics =
+    isObject(
+      payload?.metrics
+    )
+      ? payload.metrics
+      : {};
+
+  const production =
+    isObject(
+      payload?.production_features
+    )
+      ? payload.production_features
+      : {};
+
+  const detectedFeatures =
+    toNumberOrZero(
+      payload?.detected_features
+    );
+
+  const featureCount =
+    toNumberOrZero(
+      payload?.feature_count
+    );
+
+  const model =
+    cleanText(
+      data?.model ||
+      payload?.model
+    ) ||
+    "Gemini";
+
+  return {
+    success: true,
+
+    score,
+
+    face_count:
+      faceCount,
+
+    landmarks_count:
+      landmarksCount,
+
+    detected_features:
+      detectedFeatures,
+
+    feature_count:
+      featureCount,
+
+    model,
+
+    metrics,
+
+    production_features:
+      production,
+
+    generated_at:
+      data?.generated_at ||
+      payload?.generated_at ||
+      new Date().toISOString()
+  };
 }
 
 
@@ -602,63 +823,16 @@ function sleep(ms) {
 // RESULT
 // ======================================================
 
-function normalizeClientResult(data) {
-  const analysis =
-    data?.analysis &&
-    typeof data.analysis === "object"
-      ? data.analysis
-      : data;
-
-  return {
-    success: true,
-
-    score:
-      normalizeScore(analysis.score),
-
-    face_count:
-      toNumberOrZero(analysis.face_count),
-
-    landmarks_count:
-      nullableNumber(analysis.landmarks_count),
-
-    detected_features:
-      toNumberOrZero(
-        analysis.detected_features
-      ),
-
-    feature_count:
-      toNumberOrZero(
-        analysis.feature_count
-      ),
-
-    model:
-      cleanText(data.model || analysis.model) ||
-      "Gemini",
-
-    metrics:
-      isObject(analysis.metrics)
-        ? analysis.metrics
-        : {},
-
-    production_features:
-      isObject(analysis.production_features)
-        ? analysis.production_features
-        : {},
-
-    generated_at:
-      data.generated_at ||
-      analysis.generated_at ||
-      new Date().toISOString()
-  };
-}
-
-
 function renderResult(result) {
-  renderScore(result.score);
+  renderScore(
+    result.score
+  );
 
   if (statFaces) {
     statFaces.textContent =
-      String(result.face_count);
+      String(
+        result.face_count
+      );
   }
 
   if (statLandmarks) {
@@ -689,9 +863,13 @@ function renderResult(result) {
       );
   }
 
-  renderOverview(result.metrics);
+  renderOverview(
+    result.metrics
+  );
 
-  renderMetrics(result.metrics);
+  renderMetrics(
+    result.metrics
+  );
 
   renderProductionFeatures(
     result.production_features
@@ -702,11 +880,13 @@ function renderResult(result) {
 function renderScore(score) {
   if (score === null) {
     if (resultScore) {
-      resultScore.textContent = "—";
+      resultScore.textContent =
+        "—";
     }
 
     if (resultProgress) {
-      resultProgress.style.width = "0%";
+      resultProgress.style.width =
+        "0%";
     }
 
     if (resultCaption) {
@@ -724,23 +904,128 @@ function renderScore(score) {
 
   if (resultScore) {
     resultScore.textContent =
-      formatScore(score);
+      "0";
   }
 
   if (resultProgress) {
     resultProgress.style.width =
-      `${clamp(score * 10, 0, 100)}%`;
+      "0%";
   }
 
   if (resultCaption) {
     resultCaption.textContent =
-      "Production analysis result";
+      "Real result returned by analyzer";
   }
 
   if (scoreRange) {
     scoreRange.textContent =
       "REAL RESULT";
   }
+
+  requestAnimationFrame(
+    () => {
+      animateScore(
+        score
+      );
+
+      if (resultProgress) {
+        resultProgress.style.width =
+          `${clamp(
+            score * 10,
+            0,
+            100
+          )}%`;
+      }
+    }
+  );
+}
+
+
+function animateScore(target) {
+  if (!resultScore) {
+    return;
+  }
+
+  const duration = 1000;
+  const startTime =
+    performance.now();
+
+  function frame(now) {
+    const progress =
+      clamp(
+        (now - startTime) /
+          duration,
+        0,
+        1
+      );
+
+    const eased =
+      1 -
+      Math.pow(
+        1 - progress,
+        4
+      );
+
+    const value =
+      target * eased;
+
+    resultScore.textContent =
+      formatScore(value);
+
+    if (progress < 1) {
+      requestAnimationFrame(
+        frame
+      );
+    } else {
+      resultScore.textContent =
+        formatScore(target);
+    }
+  }
+
+  requestAnimationFrame(
+    frame
+  );
+}
+
+
+// ======================================================
+// RESULT ENTRANCE ANIMATION
+// ======================================================
+
+function animateResultEntrance() {
+  const animatedGroups = [
+    ".result-hero",
+    ".stats-grid .stat",
+    ".report-section",
+    ".note-card"
+  ];
+
+  animatedGroups.forEach(
+    (selector) => {
+      document
+        .querySelectorAll(selector)
+        .forEach(
+          (element, index) => {
+            element.classList.remove(
+              "reveal"
+            );
+
+            element.style.setProperty(
+              "--reveal-delay",
+              `${index * 70}ms`
+            );
+
+            requestAnimationFrame(
+              () => {
+                element.classList.add(
+                  "reveal"
+                );
+              }
+            );
+          }
+        );
+    }
+  );
 }
 
 
@@ -756,19 +1041,28 @@ function renderOverview(metrics) {
   overviewGrid.innerHTML = "";
 
   const leaves =
-    flattenObject(metrics);
+    flattenObject(
+      metrics
+    );
 
   const entries =
-    leaves.slice(0, 8);
+    leaves.slice(
+      0,
+      8
+    );
 
   if (metricCount) {
     metricCount.textContent =
-      String(leaves.length);
+      String(
+        leaves.length
+      );
   }
 
   if (analyzerCount) {
     analyzerCount.textContent =
-      String(leaves.length);
+      String(
+        leaves.length
+      );
   }
 
   if (!entries.length) {
@@ -782,14 +1076,19 @@ function renderOverview(metrics) {
   }
 
   entries.forEach(
-    ([key, value]) => {
+    ([key, value], index) => {
       const card =
         document.createElement(
           "article"
         );
 
       card.className =
-        "overview-card";
+        "overview-card reveal";
+
+      card.style.setProperty(
+        "--reveal-delay",
+        `${index * 55}ms`
+      );
 
       const label =
         document.createElement(
@@ -830,7 +1129,9 @@ function renderOverview(metrics) {
         source
       );
 
-      overviewGrid.appendChild(card);
+      overviewGrid.appendChild(
+        card
+      );
     }
   );
 }
@@ -848,14 +1149,20 @@ function renderMetrics(metrics) {
   metricsContainer.innerHTML = "";
 
   const groups =
-    Object.entries(metrics || {});
+    Object.entries(
+      metrics || {}
+    );
 
   const leaves =
-    flattenObject(metrics);
+    flattenObject(
+      metrics
+    );
 
   if (analyzerCount) {
     analyzerCount.textContent =
-      String(leaves.length);
+      String(
+        leaves.length
+      );
   }
 
   if (!groups.length) {
@@ -868,29 +1175,61 @@ function renderMetrics(metrics) {
     return;
   }
 
+  let cardIndex = 0;
+
   groups.forEach(
     ([groupName, groupValue]) => {
       if (isObject(groupValue)) {
-        Object.entries(groupValue)
-          .forEach(
-            ([key, value]) => {
-              metricsContainer.appendChild(
-                createMetricCard(
-                  groupName,
-                  key,
-                  value
-                )
+        Object.entries(
+          groupValue
+        ).forEach(
+          ([key, value]) => {
+            const card =
+              createMetricCard(
+                groupName,
+                key,
+                value
               );
-            }
-          );
+
+            card.style.setProperty(
+              "--reveal-delay",
+              `${cardIndex * 45}ms`
+            );
+
+            card.classList.add(
+              "reveal"
+            );
+
+            metricsContainer.appendChild(
+              card
+            );
+
+            cardIndex++;
+          }
+        );
+
       } else {
-        metricsContainer.appendChild(
+        const card =
           createMetricCard(
             "",
             groupName,
             groupValue
-          )
+          );
+
+        card.style.setProperty(
+          "--reveal-delay",
+          `${cardIndex * 45}ms`
         );
+
+        card.classList.add(
+          "reveal"
+        );
+
+        metricsContainer.appendChild(
+          card
+        );
+
+        cardIndex++;
       }
     }
   );
@@ -916,6 +1255,7 @@ function createMetricCard(
     );
 
   header.type = "button";
+
   header.className =
     "metric-header";
 
@@ -975,7 +1315,8 @@ function createMetricCard(
   arrow.className =
     "metric-arrow";
 
-  arrow.textContent = "+";
+  arrow.textContent =
+    "+";
 
   header.append(
     main,
@@ -1027,9 +1368,13 @@ function createMetricCard(
     detailValue
   );
 
-  contentInner.appendChild(detail);
+  contentInner.appendChild(
+    detail
+  );
 
-  content.appendChild(contentInner);
+  content.appendChild(
+    contentInner
+  );
 
   card.append(
     header,
@@ -1039,7 +1384,9 @@ function createMetricCard(
   header.addEventListener(
     "click",
     () => {
-      card.classList.toggle("open");
+      card.classList.toggle(
+        "open"
+      );
     }
   );
 
@@ -1048,7 +1395,7 @@ function createMetricCard(
 
 
 // ======================================================
-// PRODUCTION FEATURES
+// PRODUCTION / AI FEATURES
 // ======================================================
 
 function renderProductionFeatures(
@@ -1066,7 +1413,9 @@ function renderProductionFeatures(
     );
 
   const total =
-    countLeaves(production);
+    countLeaves(
+      production
+    );
 
   if (featureCount) {
     featureCount.textContent =
@@ -1076,7 +1425,7 @@ function renderProductionFeatures(
   if (!groups.length) {
     featureGroups.appendChild(
       emptyBlock(
-        "No production features returned."
+        "No feature groups returned."
       )
     );
 
@@ -1084,14 +1433,22 @@ function renderProductionFeatures(
   }
 
   groups.forEach(
-    ([groupName, groupValue]) => {
+    (
+      [groupName, groupValue],
+      groupIndex
+    ) => {
       const group =
         document.createElement(
           "article"
         );
 
       group.className =
-        "feature-group";
+        "feature-group reveal";
+
+      group.style.setProperty(
+        "--reveal-delay",
+        `${groupIndex * 65}ms`
+      );
 
       const header =
         document.createElement(
@@ -1112,7 +1469,9 @@ function renderProductionFeatures(
         "feature-group__title";
 
       title.textContent =
-        prettifyKey(groupName);
+        prettifyKey(
+          groupName
+        );
 
       const count =
         document.createElement(
@@ -1122,9 +1481,10 @@ function renderProductionFeatures(
       count.className =
         "feature-group__count";
 
-      const valueCount = isObject(groupValue) ? countLeaves(groupValue) : 1; 
-      count.textContent = 
-        `${valueCount} ${valueCount === 1 ? "VALUE" : "VALUES"}`;
+      count.textContent =
+        `${countLeaves(
+          groupValue
+        )} VALUES`;
 
       const arrow =
         document.createElement(
@@ -1134,7 +1494,8 @@ function renderProductionFeatures(
       arrow.className =
         "feature-group__arrow";
 
-      arrow.textContent = "+";
+      arrow.textContent =
+        "+";
 
       header.append(
         title,
@@ -1164,7 +1525,9 @@ function renderProductionFeatures(
         "feature-list-inner";
 
       const leaves =
-        flattenObject(groupValue);
+        flattenObject(
+          groupValue
+        );
 
       if (isObject(groupValue)) {
         leaves.forEach(
@@ -1204,9 +1567,12 @@ function renderProductionFeatures(
               valueElement
             );
 
-            inner.appendChild(row);
+            inner.appendChild(
+              row
+            );
           }
         );
+
       } else {
         const row =
           document.createElement(
@@ -1225,7 +1591,9 @@ function renderProductionFeatures(
           "feature-row__name";
 
         name.textContent =
-          prettifyKey(groupName);
+          prettifyKey(
+            groupName
+          );
 
         const value =
           document.createElement(
@@ -1236,19 +1604,27 @@ function renderProductionFeatures(
           "feature-row__value";
 
         value.textContent =
-          formatValue(groupValue);
+          formatValue(
+            groupValue
+          );
 
         row.append(
           name,
           value
         );
 
-        inner.appendChild(row);
+        inner.appendChild(
+          row
+        );
       }
 
-      listWrapper.appendChild(inner);
+      listWrapper.appendChild(
+        inner
+      );
 
-      list.appendChild(listWrapper);
+      list.appendChild(
+        listWrapper
+      );
 
       group.append(
         header,
@@ -1258,11 +1634,15 @@ function renderProductionFeatures(
       header.addEventListener(
         "click",
         () => {
-          group.classList.toggle("open");
+          group.classList.toggle(
+            "open"
+          );
         }
       );
 
-      featureGroups.appendChild(group);
+      featureGroups.appendChild(
+        group
+      );
     }
   );
 }
@@ -1332,14 +1712,21 @@ function saveHistory(result) {
         result.model
     };
 
-    history.unshift(entry);
+    history.unshift(
+      entry
+    );
 
     const limited =
-      history.slice(0, 50);
+      history.slice(
+        0,
+        50
+      );
 
     localStorage.setItem(
       HISTORY_KEY,
-      JSON.stringify(limited)
+      JSON.stringify(
+        limited
+      )
     );
 
     updateHistoryCounters();
@@ -1378,14 +1765,19 @@ function renderHistory() {
   }
 
   history.forEach(
-    (entry) => {
+    (entry, index) => {
       const item =
         document.createElement(
           "article"
         );
 
       item.className =
-        "history-item";
+        "history-item reveal";
+
+      item.style.setProperty(
+        "--reveal-delay",
+        `${index * 55}ms`
+      );
 
       const left =
         document.createElement(
@@ -1397,7 +1789,8 @@ function renderHistory() {
           "div"
         );
 
-      date.className = "date";
+      date.className =
+        "date";
 
       date.textContent =
         formatDate(
@@ -1409,11 +1802,14 @@ function renderHistory() {
           "div"
         );
 
-      meta.className = "meta";
+      meta.className =
+        "meta";
 
       meta.textContent =
         `${entry.face_count || 0} face · ` +
-        `${entry.feature_count || entry.detected_features || 0} features`;
+        `${entry.feature_count ||
+          entry.detected_features ||
+          0} features`;
 
       left.append(
         date,
@@ -1425,7 +1821,8 @@ function renderHistory() {
           "div"
         );
 
-      score.className = "score";
+      score.className =
+        "score";
 
       score.textContent =
         entry.score === null ||
@@ -1440,7 +1837,9 @@ function renderHistory() {
         score
       );
 
-      historyList.appendChild(item);
+      historyList.appendChild(
+        item
+      );
     }
   );
 }
@@ -1491,15 +1890,19 @@ function startNewAnalysis() {
   }
 
   if (previewImage) {
-    previewImage.removeAttribute("src");
+    previewImage.removeAttribute(
+      "src"
+    );
   }
 
   if (fileFormat) {
-    fileFormat.textContent = "—";
+    fileFormat.textContent =
+      "—";
   }
 
   if (fileSize) {
-    fileSize.textContent = "—";
+    fileSize.textContent =
+      "—";
   }
 
   showScreen("home");
@@ -1520,11 +1923,15 @@ function setAnalyzeButtonLoading(
   analyzeBtn.disabled =
     loading;
 
-  analyzeBtn.style.opacity =
-    loading ? "0.6" : "";
+  analyzeBtn.classList.toggle(
+    "is-loading",
+    loading
+  );
 
   const spans =
-    analyzeBtn.querySelectorAll("span");
+    analyzeBtn.querySelectorAll(
+      "span"
+    );
 
   if (!spans.length) {
     return;
@@ -1535,14 +1942,17 @@ function setAnalyzeButtonLoading(
       "Analyzing…";
 
     if (spans[1]) {
-      spans[1].textContent = "…";
+      spans[1].textContent =
+        "◌";
     }
+
   } else {
     spans[0].textContent =
       "Analyze photo";
 
     if (spans[1]) {
-      spans[1].textContent = "→";
+      spans[1].textContent =
+        "→";
     }
   }
 }
@@ -1556,23 +1966,31 @@ function showToast(message) {
   toast.textContent =
     String(message);
 
-  toast.classList.add("show");
+  toast.classList.add(
+    "show"
+  );
 
-  clearTimeout(toastTimer);
+  clearTimeout(
+    toastTimer
+  );
 
   toastTimer =
     setTimeout(
       () => {
-        toast.classList.remove("show");
+        toast.classList.remove(
+          "show"
+        );
       },
-      3000
+      3200
     );
 }
 
 
 function emptyBlock(message) {
   const div =
-    document.createElement("div");
+    document.createElement(
+      "div"
+    );
 
   div.className =
     "history-empty";
@@ -1597,7 +2015,10 @@ function formatBytes(bytes) {
     return `${bytes} B`;
   }
 
-  if (bytes < 1024 * 1024) {
+  if (
+    bytes <
+    1024 * 1024
+  ) {
     return `${(
       bytes / 1024
     ).toFixed(1)} KB`;
@@ -1620,7 +2041,10 @@ function formatScore(score) {
 
   return number
     .toFixed(2)
-    .replace(/\.00$/, "");
+    .replace(
+      /\.00$/,
+      ""
+    );
 }
 
 
@@ -1633,27 +2057,46 @@ function formatValue(value) {
     return "—";
   }
 
-  if (typeof value === "number") {
-    if (!Number.isFinite(value)) {
+  if (
+    typeof value ===
+    "number"
+  ) {
+    if (
+      !Number.isFinite(value)
+    ) {
       return "—";
     }
 
-    if (Number.isInteger(value)) {
+    if (
+      Number.isInteger(value)
+    ) {
       return String(value);
     }
 
     return String(
-      Math.round(value * 100) / 100
+      Math.round(
+        value * 100
+      ) / 100
     );
   }
 
-  if (typeof value === "boolean") {
-    return value ? "Yes" : "No";
+  if (
+    typeof value ===
+    "boolean"
+  ) {
+    return value
+      ? "Yes"
+      : "No";
   }
 
-  if (typeof value === "object") {
+  if (
+    typeof value ===
+    "object"
+  ) {
     try {
-      return JSON.stringify(value);
+      return JSON.stringify(
+        value
+      );
     } catch {
       return "—";
     }
@@ -1689,13 +2132,21 @@ function formatDate(value) {
 
 
 function prettifyKey(key) {
-  return String(key || "")
-    .replace(/[_-]+/g, " ")
+  return String(
+    key || ""
+  )
+    .replace(
+      /[\_-]+/g,
+      " "
+    )
     .replace(
       /([a-z])([A-Z])/g,
       "$1 $2"
     )
-    .replace(/\s+/g, " ")
+    .replace(
+      /\s+/g,
+      " "
+    )
     .trim()
     .replace(
       /^./,
@@ -1707,13 +2158,20 @@ function prettifyKey(key) {
 
 function shortenModelName(model) {
   const value =
-    String(model || "");
+    String(
+      model || ""
+    );
 
-  if (value.length <= 18) {
+  if (
+    value.length <= 18
+  ) {
     return value;
   }
 
-  return `${value.slice(0, 16)}…`;
+  return `${value.slice(
+    0,
+    16
+  )}…`;
 }
 
 
@@ -1724,7 +2182,8 @@ function shortenModelName(model) {
 function isObject(value) {
   return (
     value !== null &&
-    typeof value === "object" &&
+    typeof value ===
+      "object" &&
     !Array.isArray(value)
   );
 }
@@ -1740,14 +2199,18 @@ function flattenObject(
     return result;
   }
 
-  Object.entries(object).forEach(
+  Object.entries(
+    object
+  ).forEach(
     ([key, value]) => {
       const path =
         prefix
           ? `${prefix}.${key}`
           : key;
 
-      if (isObject(value)) {
+      if (
+        isObject(value)
+      ) {
         result.push(
           ...flattenObject(
             value,
@@ -1768,7 +2231,9 @@ function flattenObject(
 
 
 function countLeaves(object) {
-  return flattenObject(object).length;
+  return flattenObject(
+    object
+  ).length;
 }
 
 
@@ -1776,7 +2241,9 @@ function toNumberOrZero(value) {
   const number =
     Number(value);
 
-  return Number.isFinite(number)
+  return Number.isFinite(
+    number
+  )
     ? number
     : 0;
 }
@@ -1794,7 +2261,9 @@ function nullableNumber(value) {
   const number =
     Number(value);
 
-  return Number.isFinite(number)
+  return Number.isFinite(
+    number
+  )
     ? number
     : null;
 }
@@ -1812,7 +2281,11 @@ function normalizeScore(value) {
   const number =
     Number(value);
 
-  if (!Number.isFinite(number)) {
+  if (
+    !Number.isFinite(
+      number
+    )
+  ) {
     return null;
   }
 
@@ -1836,7 +2309,9 @@ function cleanText(value) {
     return "";
   }
 
-  return String(value).trim();
+  return String(
+    value
+  ).trim();
 }
 
 
@@ -1881,7 +2356,9 @@ function bindEvents() {
         const file =
           fileInput.files?.[0];
 
-        handleFileSelected(file);
+        handleFileSelected(
+          file
+        );
       }
     );
   }
@@ -1901,7 +2378,9 @@ function bindEvents() {
   }
 
   document
-    .querySelectorAll("[data-go]")
+    .querySelectorAll(
+      "[data-go]"
+    )
     .forEach(
       (element) => {
         element.addEventListener(
@@ -1911,7 +2390,9 @@ function bindEvents() {
               element.dataset.go;
 
             if (target) {
-              showScreen(target);
+              showScreen(
+                target
+              );
             }
           }
         );
@@ -1919,7 +2400,9 @@ function bindEvents() {
     );
 
   document
-    .querySelectorAll("[data-back]")
+    .querySelectorAll(
+      "[data-back]"
+    )
     .forEach(
       (element) => {
         element.addEventListener(
@@ -1932,7 +2415,7 @@ function bindEvents() {
 
 
 // ======================================================
-// START
+// STARTUP
 // ======================================================
 
 function init() {
@@ -1942,7 +2425,10 @@ function init() {
 
   updateHistoryCounters();
 
-  showScreen("home");
+  showScreen(
+    "home"
+  );
 }
+
 
 init();
