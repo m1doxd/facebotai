@@ -1,23 +1,26 @@
 "use strict";
 
 /*
- * FaceBot — Telegram Mini App
- * Frontend for:
- *   POST https://facebot-gemini.snow4lyt.workers.dev/api/analyze
+ * ============================================================
+ * FaceMetric / FaceBot
+ * ============================================================
  *
- * Expected backend response:
- * {
- *   success: true,
- *   score: number|null,
- *   face_count: number,
- *   landmarks_count: number|null,
- *   detected_features: number,
- *   feature_count: number,
- *   model: string,
- *   metrics: object,
- *   production_features: object,
- *   generated_at: string
- * }
+ * Frontend for the current HTML structure.
+ *
+ * Website:
+ *   https://facebotpsl.snow4lyt.workers.dev/
+ *
+ * Gemini Worker:
+ *   https://facebot-gemini.snow4lyt.workers.dev/api/analyze
+ *
+ * IMPORTANT:
+ * - The website and Gemini Worker are separate services.
+ * - The browser sends multipart/form-data directly to the
+ *   Gemini Worker.
+ * - The file field name MUST be "file".
+ * - Content-Type is NOT set manually for FormData.
+ *   The browser creates the multipart boundary automatically.
+ * ============================================================
  */
 
 const MAX_FILE_SIZE = 15 * 1024 * 1024;
@@ -28,21 +31,13 @@ const ALLOWED_TYPES = new Set([
   "image/webp"
 ]);
 
-/*
- * IMPORTANT:
- * This is the Gemini Worker endpoint.
- *
- * Do NOT change this to:
- *   /analyze
- *   /api/analyze
- * on the static website domain.
- *
- * The website and Gemini Worker are separate services.
- */
 const API_ENDPOINT =
   "https://facebot-gemini.snow4lyt.workers.dev/api/analyze";
 
-const HISTORY_KEY = "facebot_history_v1";
+const HEALTH_ENDPOINT =
+  "https://facebot-gemini.snow4lyt.workers.dev/api/health";
+
+const HISTORY_KEY = "facemetric_history_v1";
 
 const tg =
   window.Telegram &&
@@ -51,101 +46,107 @@ const tg =
     : null;
 
 
-// ======================================================
-// DOM
-// ======================================================
+// ============================================================
+// DOM REFERENCES
+// ============================================================
 
-const screens =
-  document.querySelectorAll(".screen");
+const screens = document.querySelectorAll(".screen");
 
 const fileInput =
-  document.getElementById("fileInput");
+  document.getElementById("file-input");
 
-const choosePhotoBtn =
-  document.getElementById("choosePhotoBtn");
+const uploadButton =
+  document.getElementById("upload-btn");
 
-const chooseAnotherBtn =
-  document.getElementById("chooseAnotherBtn");
+const uploadName =
+  document.getElementById("upload-name");
 
-const analyzeBtn =
-  document.getElementById("analyzeBtn");
+const analysisImage =
+  document.getElementById("analysis-image");
 
-const previewImage =
-  document.getElementById("previewImage");
+const analysisFrame =
+  document.getElementById("analysis-frame");
 
-const fileFormat =
-  document.getElementById("fileFormat");
+const landmarkCanvas =
+  document.getElementById("landmark-canvas");
 
-const fileSize =
-  document.getElementById("fileSize");
+const analysisState =
+  document.getElementById("analysis-state");
+
+const analysisScore =
+  document.getElementById("analysis-score");
+
+const analysisScoreValue =
+  analysisScore
+    ? analysisScore.querySelector("strong")
+    : null;
+
+const loadingContent =
+  document.getElementById("loading-content");
 
 const loadingTitle =
-  document.getElementById("loadingTitle");
+  document.getElementById("loading-title");
 
-const loadingSubtitle =
-  document.getElementById("loadingSubtitle");
+const loadingText =
+  document.getElementById("loading-text");
+
+const loadingSteps =
+  document.querySelectorAll(
+    ".loading-step"
+  );
 
 const resultScore =
-  document.getElementById("resultScore");
+  document.getElementById("result-score");
 
-const resultProgress =
-  document.getElementById("resultProgress");
+const scoreProgress =
+  document.getElementById("score-progress");
 
-const resultCaption =
-  document.getElementById("resultCaption");
+const scoreStatus =
+  document.getElementById("score-status");
 
-const scoreRange =
-  document.getElementById("scoreRange");
-
-const statFaces =
-  document.getElementById("statFaces");
-
-const statLandmarks =
-  document.getElementById("statLandmarks");
-
-const statFeatures =
-  document.getElementById("statFeatures");
-
-const statModel =
-  document.getElementById("statModel");
-
-const metricCount =
-  document.getElementById("metricCount");
-
-const analyzerCount =
-  document.getElementById("analyzerCount");
-
-const featureCount =
-  document.getElementById("featureCount");
+const statsGrid =
+  document.getElementById("stats-grid");
 
 const overviewGrid =
-  document.getElementById("overviewGrid");
+  document.getElementById("overview-grid");
 
-const metricsContainer =
-  document.getElementById("metrics");
+const harmonyContent =
+  document.getElementById("harmony-content");
 
-const featureGroups =
-  document.getElementById("featureGroups");
+const metricsContent =
+  document.getElementById("metrics-content");
+
+const angularityContent =
+  document.getElementById("angularity-content");
+
+const symmetryContent =
+  document.getElementById("symmetry-content");
+
+const dimorphismContent =
+  document.getElementById("dimorphism-content");
+
+const healthContent =
+  document.getElementById("health-content");
+
+const reportTabs =
+  document.getElementById("report-tabs");
 
 const historyCount =
-  document.getElementById("historyCount");
-
-const historySummaryCount =
-  document.getElementById("historySummaryCount");
+  document.getElementById("history-count");
 
 const historyList =
-  document.getElementById("historyList");
+  document.getElementById("history-list");
 
-const newAnalysisBtn =
-  document.getElementById("newAnalysisBtn");
+const newAnalysisButton =
+  document.getElementById("new-analysis");
 
 const toast =
   document.getElementById("toast");
 
 
-// ======================================================
+// ============================================================
 // STATE
-// ======================================================
+// ============================================================
 
 let selectedFile = null;
 
@@ -159,10 +160,12 @@ let analysisInProgress = false;
 
 let toastTimer = null;
 
+let analysisRequestId = 0;
 
-// ======================================================
+
+// ============================================================
 // TELEGRAM MINI APP
-// ======================================================
+// ============================================================
 
 function initTelegram() {
   if (!tg) {
@@ -172,7 +175,11 @@ function initTelegram() {
   try {
     tg.ready();
 
-    tg.expand();
+    if (
+      typeof tg.expand === "function"
+    ) {
+      tg.expand();
+    }
 
     if (
       typeof tg.setHeaderColor ===
@@ -194,7 +201,6 @@ function initTelegram() {
     ) {
       tg.enableClosingConfirmation();
     }
-
   } catch (error) {
     console.warn(
       "Telegram WebApp initialization warning:",
@@ -204,26 +210,49 @@ function initTelegram() {
 }
 
 
-// ======================================================
+// ============================================================
 // NAVIGATION
-// ======================================================
+// ============================================================
 
 function showScreen(name) {
   const target =
-    document.querySelector(
-      `.screen[data-screen="${CSS.escape(name)}"]`
+    document.getElementById(
+      `screen-${name}`
     );
 
   if (!target) {
+    console.warn(
+      `Screen not found: screen-${name}`
+    );
+
     return;
   }
 
   screens.forEach(
     (screen) => {
+      const isTarget =
+        screen === target;
+
       screen.classList.toggle(
         "active",
-        screen === target
+        isTarget
       );
+
+      if (isTarget) {
+        /*
+         * Force the screen-enter animation
+         * every time we switch screens.
+         */
+        screen.classList.remove(
+          "screen-enter"
+        );
+
+        void screen.offsetWidth;
+
+        screen.classList.add(
+          "screen-enter"
+        );
+      }
     }
   );
 
@@ -239,8 +268,11 @@ function showScreen(name) {
   if (name === "history") {
     renderHistory();
   }
-}
 
+  if (name === "result") {
+    activateDefaultResultTab();
+  }
+}
 
 function updateNavigation(name) {
   const navItems =
@@ -251,12 +283,16 @@ function updateNavigation(name) {
   navItems.forEach(
     (item) => {
       const target =
-        item.dataset.go;
+        item.dataset.screen;
 
       const active =
         target === name ||
         (
           name === "result" &&
+          target === "home"
+        ) ||
+        (
+          name === "analysis" &&
           target === "home"
         );
 
@@ -268,31 +304,12 @@ function updateNavigation(name) {
   );
 }
 
-
 function goBack() {
   if (
-    currentScreen === "photo"
-  ) {
-    showScreen("home");
-    return;
-  }
-
-  if (
-    currentScreen === "history"
-  ) {
-    showScreen("home");
-    return;
-  }
-
-  if (
+    currentScreen === "analysis" ||
+    currentScreen === "result" ||
+    currentScreen === "history" ||
     currentScreen === "about"
-  ) {
-    showScreen("home");
-    return;
-  }
-
-  if (
-    currentScreen === "result"
   ) {
     showScreen("home");
     return;
@@ -302,20 +319,42 @@ function goBack() {
 }
 
 
-// ======================================================
+// ============================================================
 // FILE PICKER
-// ======================================================
+// ============================================================
 
 function openFilePicker() {
   if (!fileInput) {
+    console.error(
+      "FaceMetric: #file-input was not found."
+    );
+
+    showToast(
+      "Не найден загрузчик фотографии."
+    );
+
     return;
   }
 
+  /*
+   * Reset the value so selecting the same
+   * image twice still fires the change event.
+   */
   fileInput.value = "";
 
-  fileInput.click();
-}
+  try {
+    fileInput.click();
+  } catch (error) {
+    console.error(
+      "Could not open file picker:",
+      error
+    );
 
+    showToast(
+      "Не удалось открыть выбор фотографии."
+    );
+  }
+}
 
 function handleFileSelected(file) {
   if (!file) {
@@ -333,44 +372,89 @@ function handleFileSelected(file) {
     return;
   }
 
+  /*
+   * Invalidate any previous analysis request.
+   */
+  analysisRequestId++;
+
   selectedFile = file;
 
   if (selectedObjectUrl) {
     URL.revokeObjectURL(
       selectedObjectUrl
     );
+
+    selectedObjectUrl = null;
   }
 
   selectedObjectUrl =
-    URL.createObjectURL(
-      file
-    );
+    URL.createObjectURL(file);
 
-  if (previewImage) {
-    previewImage.src =
+  /*
+   * Update filename on home screen.
+   */
+  if (uploadName) {
+    uploadName.textContent =
+      `${file.name} · ${formatBytes(file.size)}`;
+  }
+
+  /*
+   * Put the image into the analysis preview.
+   */
+  if (analysisImage) {
+    analysisImage.src =
       selectedObjectUrl;
 
-    previewImage.alt =
-      "Selected photo preview";
+    analysisImage.alt =
+      "Фото для анализа";
+
+    /*
+     * Re-trigger image reveal animation.
+     */
+    analysisImage.style.animation = "none";
+
+    void analysisImage.offsetWidth;
+
+    analysisImage.style.animation = "";
   }
 
-  if (fileFormat) {
-    fileFormat.textContent =
-      getFileFormat(file);
+  /*
+   * Update state text.
+   */
+  if (analysisState) {
+    analysisState.textContent =
+      "READY";
   }
 
-  if (fileSize) {
-    fileSize.textContent =
-      formatBytes(
-        file.size
-      );
-  }
+  /*
+   * Reset the visible score.
+   */
+  resetAnalysisPreview();
 
-  showScreen("photo");
+  /*
+   * Go straight to the analysis screen.
+   *
+   * There is no separate "Analyze" button
+   * in the supplied HTML, so uploading the
+   * photo starts the analysis automatically.
+   */
+  showScreen("analysis");
+
+  /*
+   * Start the real analysis.
+   */
+  startAnalysis(file);
 }
 
-
 function validateFile(file) {
+  if (!file) {
+    return {
+      valid: false,
+      message:
+        "Фотография не выбрана."
+    };
+  }
+
   if (
     !ALLOWED_TYPES.has(
       file.type
@@ -379,7 +463,15 @@ function validateFile(file) {
     return {
       valid: false,
       message:
-        "Only JPG, PNG and WEBP images are supported."
+        "Поддерживаются только JPG, PNG и WEBP."
+    };
+  }
+
+  if (file.size <= 0) {
+    return {
+      valid: false,
+      message:
+        "Файл фотографии пустой."
     };
   }
 
@@ -390,17 +482,7 @@ function validateFile(file) {
     return {
       valid: false,
       message:
-        "Image is too large. Maximum size is 15 MB."
-    };
-  }
-
-  if (
-    file.size <= 0
-  ) {
-    return {
-      valid: false,
-      message:
-        "The selected image is empty."
+        "Фотография слишком большая. Максимум — 15 MB."
     };
   }
 
@@ -410,44 +492,121 @@ function validateFile(file) {
 }
 
 
-function getFileFormat(file) {
-  if (
-    file.type ===
-    "image/jpeg"
-  ) {
-    return "JPEG";
+// ============================================================
+// ANALYSIS PREVIEW
+// ============================================================
+
+function resetAnalysisPreview() {
+  if (analysisScore) {
+    analysisScore.classList.remove(
+      "show",
+      "float"
+    );
   }
 
-  if (
-    file.type ===
-    "image/png"
-  ) {
-    return "PNG";
+  if (analysisScoreValue) {
+    analysisScoreValue.textContent =
+      "—";
   }
 
-  if (
-    file.type ===
-    "image/webp"
-  ) {
-    return "WEBP";
+  if (analysisState) {
+    analysisState.textContent =
+      "ANALYZING";
   }
 
-  return "IMAGE";
+  clearLandmarks();
+}
+
+function setAnalysisState(text) {
+  if (!analysisState) {
+    return;
+  }
+
+  analysisState.textContent =
+    text;
+}
+
+function showAnalysisPreviewScore(score) {
+  if (
+    score === null ||
+    score === undefined ||
+    !Number.isFinite(
+      Number(score)
+    )
+  ) {
+    return;
+  }
+
+  const displayScore =
+    Math.round(
+      Number(score) * 10
+    );
+
+  if (analysisScoreValue) {
+    analysisScoreValue.textContent =
+      String(displayScore);
+  }
+
+  if (analysisScore) {
+    analysisScore.classList.add(
+      "show"
+    );
+
+    /*
+     * After the large central score
+     * appears, move it toward the
+     * bottom corner like a scan result.
+     */
+    setTimeout(
+      () => {
+        if (
+          currentScreen === "analysis"
+        ) {
+          analysisScore.classList.add(
+            "float"
+          );
+        }
+      },
+      900
+    );
+  }
+}
+
+function clearLandmarks() {
+  if (!landmarkCanvas) {
+    return;
+  }
+
+  const context =
+    landmarkCanvas.getContext(
+      "2d"
+    );
+
+  if (!context) {
+    return;
+  }
+
+  context.clearRect(
+    0,
+    0,
+    landmarkCanvas.width,
+    landmarkCanvas.height
+  );
 }
 
 
-// ======================================================
+// ============================================================
 // ANALYSIS
-// ======================================================
+// ============================================================
 
-async function startAnalysis() {
+async function startAnalysis(file) {
   if (analysisInProgress) {
     return;
   }
 
-  if (!selectedFile) {
+  if (!file) {
     showToast(
-      "Choose a photo first."
+      "Фотография не выбрана."
     );
 
     return;
@@ -455,31 +614,54 @@ async function startAnalysis() {
 
   analysisInProgress = true;
 
-  setAnalyzeButtonLoading(
-    true
-  );
-
-  showScreen(
-    "loading"
-  );
+  const requestId =
+    ++analysisRequestId;
 
   resetLoadingSteps();
 
+  setAnalysisState(
+    "ANALYZING"
+  );
+
   try {
-    await runLoadingSequence();
+    /*
+     * Start the API request immediately.
+     *
+     * This is important:
+     * the animation must NOT delay the
+     * actual Gemini request.
+     */
+    const analysisPromise =
+      analyzePhoto(file);
+
+    /*
+     * Animate the loading UI while
+     * Gemini is processing.
+     */
+    await runLoadingSequence(
+      analysisPromise
+    );
 
     const result =
-      await analyzePhoto(
-        selectedFile
-      );
+      await analysisPromise;
+
+    /*
+     * Ignore an obsolete request.
+     */
+    if (
+      requestId !==
+      analysisRequestId
+    ) {
+      return;
+    }
 
     if (
       !result ||
-      !result.success
+      result.success !== true
     ) {
       throw new Error(
         result?.detail ||
-        "Analysis failed."
+        "Анализ не выполнен."
       );
     }
 
@@ -488,9 +670,42 @@ async function startAnalysis() {
         result
       );
 
+    /*
+     * Finish loading UI.
+     */
+    completeLoadingSteps();
+
+    setAnalysisState(
+      "COMPLETE"
+    );
+
+    /*
+     * Show result score briefly
+     * on the analysis screen.
+     */
+    showAnalysisPreviewScore(
+      currentAnalysis.score
+    );
+
+    /*
+     * Save result locally.
+     */
     saveHistory(
       currentAnalysis
     );
+
+    /*
+     * Small pause so the completion
+     * animation can be seen.
+     */
+    await sleep(700);
+
+    if (
+      requestId !==
+      analysisRequestId
+    ) {
+      return;
+    }
 
     renderResult(
       currentAnalysis
@@ -501,59 +716,83 @@ async function startAnalysis() {
     );
 
   } catch (error) {
+    if (
+      requestId !==
+      analysisRequestId
+    ) {
+      return;
+    }
+
     console.error(
-      "FaceBot analysis error:",
+      "FaceMetric analysis error:",
       error
     );
 
     console.error(
-      "FaceBot analysis error stack:",
+      "FaceMetric analysis stack:",
       error?.stack
     );
 
-    showToast(
-      error?.message ||
-      "Analysis failed. Please try again."
+    setAnalysisState(
+      "ERROR"
     );
 
-    showScreen(
-      "photo"
+    showToast(
+      getFriendlyErrorMessage(
+        error
+      )
     );
+
+    /*
+     * Keep the selected photo.
+     * User can simply try the same
+     * photo again by clicking upload.
+     */
+    showScreen("home");
 
   } finally {
-    analysisInProgress =
-      false;
-
-    setAnalyzeButtonLoading(
-      false
-    );
+    if (
+      requestId ===
+      analysisRequestId
+    ) {
+      analysisInProgress = false;
+    }
   }
 }
 
 
-// ======================================================
+// ============================================================
 // API REQUEST
-// ======================================================
+// ============================================================
 
 async function analyzePhoto(file) {
   if (!file) {
     throw new Error(
-      "No image file selected."
+      "Фотография не выбрана."
     );
   }
 
   /*
-   * IMPORTANT:
+   * Validate again before sending.
+   */
+  const validation =
+    validateFile(file);
+
+  if (!validation.valid) {
+    throw new Error(
+      validation.message
+    );
+  }
+
+  /*
+   * FormData is REQUIRED.
    *
-   * We intentionally use FormData.
-   *
-   * DO NOT manually set:
-   *
+   * Do NOT manually set:
    * Content-Type: multipart/form-data
    *
-   * The browser must create the boundary automatically.
+   * The browser must generate:
+   * multipart/form-data; boundary=...
    */
-
   const formData =
     new FormData();
 
@@ -576,7 +815,7 @@ async function analyzePhoto(file) {
           body: formData,
 
           headers: {
-            "Accept":
+            Accept:
               "application/json"
           },
 
@@ -586,17 +825,30 @@ async function analyzePhoto(file) {
 
   } catch (error) {
     console.error(
-      "FaceBot network request error:",
+      "FaceMetric fetch error:",
       error
     );
 
     throw new Error(
-      "Could not connect to the analysis server."
+      "Не удалось подключиться к серверу анализа."
     );
   }
 
   const responseText =
     await response.text();
+
+  console.log(
+    "FaceMetric API status:",
+    response.status
+  );
+
+  console.log(
+    "FaceMetric API response:",
+    responseText.slice(
+      0,
+      2000
+    )
+  );
 
   let data = null;
 
@@ -609,20 +861,19 @@ async function analyzePhoto(file) {
         JSON.parse(
           responseText
         );
-
     } catch (error) {
       console.error(
-        "Invalid JSON from analysis server:",
+        "FaceMetric invalid JSON:",
         error
       );
 
       console.error(
-        "Raw server response:",
+        "Raw API response:",
         responseText
       );
 
       throw new Error(
-        `Server returned invalid JSON (${response.status}).`
+        `Сервер вернул некорректный ответ (${response.status}).`
       );
     }
   }
@@ -631,7 +882,9 @@ async function analyzePhoto(file) {
     const detail =
       data?.detail ||
       data?.error ||
-      `Analysis request failed (${response.status}).`;
+      getHttpErrorMessage(
+        response.status
+      );
 
     throw new Error(
       detail
@@ -640,7 +893,7 @@ async function analyzePhoto(file) {
 
   if (!data) {
     throw new Error(
-      "Server returned an empty response."
+      "Сервер вернул пустой ответ."
     );
   }
 
@@ -648,63 +901,124 @@ async function analyzePhoto(file) {
 }
 
 
-// ======================================================
-// LOADING ANIMATION
-// ======================================================
+// ============================================================
+// OPTIONAL WORKER HEALTH CHECK
+// ============================================================
 
-async function runLoadingSequence() {
+async function checkWorkerHealth() {
+  try {
+    const response =
+      await fetch(
+        HEALTH_ENDPOINT,
+        {
+          method: "GET",
+          cache: "no-store",
+          headers: {
+            Accept:
+              "application/json"
+          }
+        }
+      );
+
+    if (!response.ok) {
+      console.warn(
+        "Gemini Worker health check failed:",
+        response.status
+      );
+
+      return false;
+    }
+
+    const data =
+      await response.json();
+
+    console.log(
+      "Gemini Worker health:",
+      data
+    );
+
+    return (
+      data?.success === true
+    );
+
+  } catch (error) {
+    console.warn(
+      "Gemini Worker health check error:",
+      error
+    );
+
+    return false;
+  }
+}
+
+
+// ============================================================
+// LOADING ANIMATION
+// ============================================================
+
+async function runLoadingSequence(
+  analysisPromise
+) {
   const steps = [
     {
-      number: 1,
-
+      index: 0,
       title:
-        "Analyzing photo",
-
-      subtitle:
-        "Detecting the visible face…"
+        "Обрабатываем изображение",
+      text:
+        "Подготавливаем фотографию"
     },
 
     {
-      number: 2,
-
+      index: 1,
       title:
-        "Reading facial structure",
-
-      subtitle:
-        "Extracting visible geometry…"
+        "Ищем facial landmarks",
+      text:
+        "Анализируем видимую структуру лица"
     },
 
     {
-      number: 3,
-
+      index: 2,
       title:
-        "Preparing feature set",
-
-      subtitle:
-        "Organizing the analyzer response…"
+        "Измеряем пропорции",
+      text:
+        "Собираем измеряемые параметры"
     },
 
     {
-      number: 4,
-
+      index: 3,
       title:
-        "Running production analysis",
+        "Рассчитываем симметрию",
+      text:
+        "Сравниваем визуальные характеристики"
+    },
 
-      subtitle:
-        "Generating the final report…"
+    {
+      index: 4,
+      title:
+        "Формируем отчёт",
+      text:
+        "Получаем итоговый результат"
     }
   ];
 
+  /*
+   * We don't want the UI to hang forever
+   * if Gemini is slow.
+   *
+   * Each step gets a minimum amount of
+   * visual time, but the request itself
+   * runs in parallel.
+   */
   for (
-    let index = 0;
-    index < steps.length;
-    index++
+    let i = 0;
+    i < steps.length;
+    i++
   ) {
     const step =
-      steps[index];
+      steps[i];
 
     setLoadingStep(
-      step.number
+      step.index
     );
 
     if (loadingTitle) {
@@ -712,34 +1026,40 @@ async function runLoadingSequence() {
         step.title;
     }
 
-    if (loadingSubtitle) {
-      loadingSubtitle.textContent =
-        step.subtitle;
+    if (loadingText) {
+      loadingText.textContent =
+        step.text;
     }
 
     /*
-     * This animation is UI feedback.
-     *
-     * The actual API request starts
-     * after the sequence completes.
+     * First four stages are relatively
+     * short. The final stage waits for
+     * the actual API response.
      */
-    await sleep(
-      index ===
+    if (
+      i <
       steps.length - 1
-        ? 250
-        : 420
-    );
+    ) {
+      await sleep(500);
+    } else {
+      /*
+       * The request is already running.
+       * Keep the final stage visible until
+       * the API has finished, but don't block
+       * forever if something unexpected happens.
+       */
+      await Promise.race([
+        analysisPromise.catch(
+          () => null
+        ),
+        sleep(1500)
+      ]);
+    }
   }
 }
 
-
 function resetLoadingSteps() {
-  const steps =
-    document.querySelectorAll(
-      ".loading-step"
-    );
-
-  steps.forEach(
+  loadingSteps.forEach(
     (step) => {
       step.classList.remove(
         "active",
@@ -750,7 +1070,7 @@ function resetLoadingSteps() {
 
   const first =
     document.querySelector(
-      '.loading-step[data-step="1"]'
+      '.loading-step[data-step="0"]'
     );
 
   if (first) {
@@ -761,44 +1081,49 @@ function resetLoadingSteps() {
 
   if (loadingTitle) {
     loadingTitle.textContent =
-      "Analyzing photo";
+      "Обрабатываем изображение";
   }
 
-  if (loadingSubtitle) {
-    loadingSubtitle.textContent =
-      "Detecting the face…";
+  if (loadingText) {
+    loadingText.textContent =
+      "Подготавливаем фотографию";
   }
 }
 
-
-function setLoadingStep(number) {
-  const steps =
-    document.querySelectorAll(
-      ".loading-step"
-    );
-
-  steps.forEach(
+function setLoadingStep(index) {
+  loadingSteps.forEach(
     (step) => {
-      const stepNumber =
+      const stepIndex =
         Number(
           step.dataset.step
         );
 
       step.classList.toggle(
         "active",
-        stepNumber ===
-          number
+        stepIndex === index
       );
 
       step.classList.toggle(
         "done",
-        stepNumber <
-          number
+        stepIndex < index
       );
     }
   );
 }
 
+function completeLoadingSteps() {
+  loadingSteps.forEach(
+    (step) => {
+      step.classList.remove(
+        "active"
+      );
+
+      step.classList.add(
+        "done"
+      );
+    }
+  );
+}
 
 function sleep(ms) {
   return new Promise(
@@ -811,14 +1136,14 @@ function sleep(ms) {
 }
 
 
-// ======================================================
-// RESULT
-// ======================================================
+// ============================================================
+// RESULT NORMALIZATION
+// ============================================================
 
 function normalizeClientResult(
   data
 ) {
-  const result = {
+  return {
     success: true,
 
     score:
@@ -870,10 +1195,12 @@ function normalizeClientResult(
       data.generated_at ||
       new Date().toISOString()
   };
-
-  return result;
 }
 
+
+// ============================================================
+// RESULT RENDERING
+// ============================================================
 
 function renderResult(
   result
@@ -882,110 +1209,258 @@ function renderResult(
     result.score
   );
 
-  if (statFaces) {
-    statFaces.textContent =
-      String(
-        result.face_count
-      );
-  }
-
-  if (statLandmarks) {
-    statLandmarks.textContent =
-      result.landmarks_count ===
-      null
-        ? "—"
-        : formatValue(
-            result.landmarks_count
-          );
-  }
-
-  if (statFeatures) {
-    const total =
-      result.feature_count ||
-      result.detected_features ||
-      countLeaves(
-        result.production_features
-      );
-
-    statFeatures.textContent =
-      String(
-        total
-      );
-  }
-
-  if (statModel) {
-    statModel.textContent =
-      shortenModelName(
-        result.model
-      );
-  }
+  renderStats(
+    result
+  );
 
   renderOverview(
     result.metrics
+  );
+
+  renderHarmony(
+    result.metrics,
+    result.production_features
   );
 
   renderMetrics(
     result.metrics
   );
 
-  renderProductionFeatures(
+  renderAngularity(
+    result.metrics,
     result.production_features
+  );
+
+  renderSymmetry(
+    result.metrics,
+    result.production_features
+  );
+
+  renderDimorphism(
+    result.metrics,
+    result.production_features
+  );
+
+  renderHealth(
+    result
   );
 }
 
 
-function renderScore(score) {
-  if (score === null) {
+// ============================================================
+// SCORE
+// ============================================================
+
+function renderScore(
+  score
+) {
+  if (
+    score === null ||
+    score === undefined ||
+    !Number.isFinite(
+      Number(score)
+    )
+  ) {
     if (resultScore) {
       resultScore.textContent =
         "—";
     }
 
-    if (resultProgress) {
-      resultProgress.style.width =
+    if (scoreProgress) {
+      scoreProgress.style.width =
         "0%";
     }
 
-    if (resultCaption) {
-      resultCaption.textContent =
-        "No usable face detected";
-    }
-
-    if (scoreRange) {
-      scoreRange.textContent =
-        "NO SCORE";
+    if (scoreStatus) {
+      scoreStatus.textContent =
+        "Лицо не удалось надёжно определить";
     }
 
     return;
   }
 
+  const normalized =
+    clamp(
+      Number(score),
+      0,
+      10
+    );
+
+  /*
+   * Backend score is 0–10.
+   *
+   * UI displays 0–100.
+   */
+  const displayScore =
+    Math.round(
+      normalized * 10
+    );
+
   if (resultScore) {
     resultScore.textContent =
-      formatScore(
-        score
+      String(
+        displayScore
       );
   }
 
-  if (resultProgress) {
-    resultProgress.style.width =
+  if (scoreProgress) {
+    /*
+     * Because the backend score is already
+     * 0–10, multiplying by 10 gives the
+     * percentage.
+     */
+    scoreProgress.style.width =
       `${clamp(
-        score * 10,
+        normalized * 10,
         0,
         100
       )}%`;
   }
 
-  if (resultCaption) {
-    resultCaption.textContent =
-      "Production analysis result";
-  }
-
-  if (scoreRange) {
-    scoreRange.textContent =
-      "REAL RESULT";
+  if (scoreStatus) {
+    scoreStatus.textContent =
+      getScoreStatus(
+        normalized
+      );
   }
 }
 
+function getScoreStatus(
+  score
+) {
+  if (score < 3) {
+    return "Измерения получены";
+  }
+
+  if (score < 5) {
+    return "Измерения получены";
+  }
+
+  if (score < 7) {
+    return "Сбалансированный результат";
+  }
+
+  if (score < 8.5) {
+    return "Высокая согласованность измерений";
+  }
+
+  return "Очень высокая согласованность измерений";
+}
+
+
+// ============================================================
+// STATS
+// ============================================================
+
+function renderStats(
+  result
+) {
+  if (!statsGrid) {
+    return;
+  }
+
+  statsGrid.innerHTML =
+    "";
+
+  const stats = [
+    {
+      label: "FACE",
+      value:
+        String(
+          result.face_count
+        ),
+      detail:
+        "detected"
+    },
+
+    {
+      label: "LANDMARKS",
+      value:
+        result.landmarks_count === null
+          ? "—"
+          : formatValue(
+              result.landmarks_count
+            ),
+      detail:
+        "points"
+    },
+
+    {
+      label: "FEATURES",
+      value:
+        String(
+          result.feature_count ||
+          result.detected_features ||
+          countLeaves(
+            result.metrics
+          )
+        ),
+      detail:
+        "measured"
+    },
+
+    {
+      label: "MODEL",
+      value:
+        shortenModelName(
+          result.model
+        ),
+      detail:
+        "analyzer"
+    }
+  ];
+
+  stats.forEach(
+    (stat) => {
+      const card =
+        document.createElement(
+          "article"
+        );
+
+      card.className =
+        "stat";
+
+      const label =
+        document.createElement(
+          "span"
+        );
+
+      label.textContent =
+        stat.label;
+
+      const value =
+        document.createElement(
+          "strong"
+        );
+
+      value.textContent =
+        stat.value;
+
+      const detail =
+        document.createElement(
+          "small"
+        );
+
+      detail.textContent =
+        stat.detail;
+
+      card.append(
+        label,
+        value,
+        detail
+      );
+
+      statsGrid.appendChild(
+        card
+      );
+    }
+  );
+}
+
+
+// ============================================================
+// OVERVIEW
+// ============================================================
 
 function renderOverview(
   metrics
@@ -1008,27 +1483,10 @@ function renderOverview(
       8
     );
 
-  if (metricCount) {
-    metricCount.textContent =
-      String(
-        leaves.length
-      );
-  }
-
-  if (analyzerCount) {
-    analyzerCount.textContent =
-      String(
-        leaves.length
-      );
-  }
-
   if (!entries.length) {
-    overviewGrid.innerHTML =
-      "";
-
     overviewGrid.appendChild(
-      emptyBlock(
-        "No measured structure returned."
+      createEmptyBlock(
+        "Измерения не были возвращены."
       )
     );
 
@@ -1054,7 +1512,7 @@ function renderOverview(
         "overview-card__label";
 
       label.textContent =
-        prettifyKey(
+        prettifyPath(
           key
         );
 
@@ -1080,7 +1538,7 @@ function renderOverview(
         "overview-card__source";
 
       source.textContent =
-        "returned by analyzer";
+        "measurement data";
 
       card.append(
         label,
@@ -1096,14 +1554,93 @@ function renderOverview(
 }
 
 
-function renderMetrics(
-  metrics
+// ============================================================
+// HARMONY
+// ============================================================
+
+function renderHarmony(
+  metrics,
+  production
 ) {
-  if (!metricsContainer) {
+  if (!harmonyContent) {
     return;
   }
 
-  metricsContainer.innerHTML =
+  const groups = [];
+
+  const harmony =
+    getObjectGroup(
+      production,
+      [
+        "overall_harmony",
+        "frontal_harmony",
+        "proportions"
+      ]
+    );
+
+  if (harmony.length) {
+    groups.push({
+      title:
+        "Общая гармония",
+      values:
+        harmony
+    });
+  }
+
+  const geometry =
+    getGroup(
+      metrics,
+      [
+        "face_geometry"
+      ]
+    );
+
+  if (geometry.length) {
+    groups.push({
+      title:
+        "Геометрия лица",
+      values:
+        geometry
+    });
+  }
+
+  const midface =
+    getGroup(
+      metrics,
+      [
+        "midface"
+      ]
+    );
+
+  if (midface.length) {
+    groups.push({
+      title:
+        "Midface",
+      values:
+        midface
+    });
+  }
+
+  renderFeatureGroups(
+    harmonyContent,
+    groups,
+    "Гармония"
+  );
+}
+
+
+// ============================================================
+// METRICS / FEATURES
+// ============================================================
+
+function renderMetrics(
+  metrics
+) {
+  if (!metricsContent) {
+    return;
+  }
+
+  metricsContent.innerHTML =
     "";
 
   const groups =
@@ -1111,22 +1648,10 @@ function renderMetrics(
       metrics || {}
     );
 
-  const leaves =
-    flattenObject(
-      metrics
-    );
-
-  if (analyzerCount) {
-    analyzerCount.textContent =
-      String(
-        leaves.length
-      );
-  }
-
   if (!groups.length) {
-    metricsContainer.appendChild(
-      emptyBlock(
-        "No measurements returned."
+    metricsContent.appendChild(
+      createEmptyBlock(
+        "Измерения не были возвращены."
       )
     );
 
@@ -1134,12 +1659,7 @@ function renderMetrics(
   }
 
   groups.forEach(
-    (
-      [
-        groupName,
-        groupValue
-      ]
-    ) => {
+    ([groupName, groupValue]) => {
       if (
         isObject(
           groupValue
@@ -1148,13 +1668,8 @@ function renderMetrics(
         Object.entries(
           groupValue
         ).forEach(
-          (
-            [
-              key,
-              value
-            ]
-          ) => {
-            metricsContainer.appendChild(
+          ([key, value]) => {
+            metricsContent.appendChild(
               createMetricCard(
                 groupName,
                 key,
@@ -1165,7 +1680,7 @@ function renderMetrics(
         );
 
       } else {
-        metricsContainer.appendChild(
+        metricsContent.appendChild(
           createMetricCard(
             "",
             groupName,
@@ -1176,7 +1691,6 @@ function renderMetrics(
     }
   );
 }
-
 
 function createMetricCard(
   groupName,
@@ -1345,41 +1859,280 @@ function createMetricCard(
 }
 
 
-// ======================================================
-// PRODUCTION FEATURES
-// ======================================================
+// ============================================================
+// ANGULARITY
+// ============================================================
 
-function renderProductionFeatures(
+function renderAngularity(
+  metrics,
   production
 ) {
-  if (!featureGroups) {
+  if (!angularityContent) {
     return;
   }
 
-  featureGroups.innerHTML =
-    "";
+  const groups = [];
 
-  const groups =
-    Object.entries(
-      production || {}
+  const jaw =
+    getGroup(
+      metrics,
+      [
+        "jaw"
+      ]
     );
 
-  const total =
-    countLeaves(
-      production
-    );
-
-  if (featureCount) {
-    featureCount.textContent =
-      String(
-        total
-      );
+  if (jaw.length) {
+    groups.push({
+      title:
+        "Jaw",
+      values:
+        jaw
+    });
   }
 
+  const cheeks =
+    getGroup(
+      metrics,
+      [
+        "cheeks"
+      ]
+    );
+
+  if (cheeks.length) {
+    groups.push({
+      title:
+        "Cheeks",
+      values:
+        cheeks
+    });
+  }
+
+  const angularity =
+    getObjectGroup(
+      production,
+      [
+        "angularity",
+        "facial_definition"
+      ]
+    );
+
+  if (angularity.length) {
+    groups.push({
+      title:
+        "Угловатость",
+      values:
+        angularity
+    });
+  }
+
+  renderFeatureGroups(
+    angularityContent,
+    groups,
+    "Угловатость"
+  );
+}
+
+
+// ============================================================
+// SYMMETRY
+// ============================================================
+
+function renderSymmetry(
+  metrics,
+  production
+) {
+  if (!symmetryContent) {
+    return;
+  }
+
+  const groups = [];
+
+  const symmetry =
+    getGroup(
+      metrics,
+      [
+        "symmetry"
+      ]
+    );
+
+  if (symmetry.length) {
+    groups.push({
+      title:
+        "Симметрия",
+      values:
+        symmetry
+    });
+  }
+
+  const eyeAlignment =
+    getGroup(
+      metrics,
+      [
+        "eyes"
+      ]
+    ).filter(
+      ([key]) =>
+        key ===
+        "eye_alignment"
+    );
+
+  if (eyeAlignment.length) {
+    groups.push({
+      title:
+        "Выравнивание глаз",
+      values:
+        eyeAlignment
+    });
+  }
+
+  const productionSymmetry =
+    getObjectGroup(
+      production,
+      [
+        "symmetry"
+      ]
+    );
+
+  if (productionSymmetry.length) {
+    groups.push({
+      title:
+        "Итоговая симметрия",
+      values:
+        productionSymmetry
+    });
+  }
+
+  renderFeatureGroups(
+    symmetryContent,
+    groups,
+    "Симметрия"
+  );
+}
+
+
+// ============================================================
+// DIMORPHISM
+// ============================================================
+
+function renderDimorphism(
+  metrics,
+  production
+) {
+  if (!dimorphismContent) {
+    return;
+  }
+
+  const groups = [];
+
+  /*
+   * We intentionally do not invent
+   * biological sex/gender information.
+   *
+   * If the backend provides a visual
+   * "dimorphism" metric, we display
+   * only the returned measurement.
+   */
+  const productionDimorphism =
+    getObjectGroup(
+      production,
+      [
+        "dimorphism"
+      ]
+    );
+
+  if (
+    productionDimorphism.length
+  ) {
+    groups.push({
+      title:
+        "Визуальный показатель",
+      values:
+        productionDimorphism
+    });
+  }
+
+  renderFeatureGroups(
+    dimorphismContent,
+    groups,
+    "Диморфизм"
+  );
+
+  if (
+    !groups.length
+  ) {
+    dimorphismContent.innerHTML =
+      "";
+
+    dimorphismContent.appendChild(
+      createEmptyBlock(
+        "В текущем результате отдельный показатель не возвращён."
+      )
+    );
+  }
+}
+
+
+// ============================================================
+// HEALTH
+// ============================================================
+
+function renderHealth(
+  result
+) {
+  if (!healthContent) {
+    return;
+  }
+
+  /*
+   * Keep this section strictly non-medical.
+   * The Worker prompt explicitly prohibits
+   * inferring health conditions.
+   */
+  healthContent.innerHTML =
+    "";
+
+  const icon =
+    document.createElement(
+      "div"
+    );
+
+  icon.className =
+    "note-icon";
+
+  icon.textContent =
+    "i";
+
+  const text =
+    document.createElement(
+      "p"
+    );
+
+  text.textContent =
+    "Этот раздел не является медицинской диагностикой. Система не определяет заболевания или состояние здоровья. Здесь отображаются только визуальные параметры, которые реально удалось получить из изображения.";
+
+  healthContent.append(
+    icon,
+    text
+  );
+}
+
+
+// ============================================================
+// FEATURE GROUP RENDERER
+// ============================================================
+
+function renderFeatureGroups(
+  container,
+  groups,
+  emptyLabel
+) {
+  container.innerHTML =
+    "";
+
   if (!groups.length) {
-    featureGroups.appendChild(
-      emptyBlock(
-        "No production features returned."
+    container.appendChild(
+      createEmptyBlock(
+        `Для раздела «${emptyLabel}» нет отдельных измерений.`
       )
     );
 
@@ -1387,12 +2140,7 @@ function renderProductionFeatures(
   }
 
   groups.forEach(
-    (
-      [
-        groupName,
-        groupValue
-      ]
-    ) => {
+    (groupData) => {
       const group =
         document.createElement(
           "article"
@@ -1421,9 +2169,7 @@ function renderProductionFeatures(
         "feature-group__title";
 
       title.textContent =
-        prettifyKey(
-          groupName
-        );
+        groupData.title;
 
       const count =
         document.createElement(
@@ -1434,9 +2180,7 @@ function renderProductionFeatures(
         "feature-group__count";
 
       count.textContent =
-        `${countLeaves(
-          groupValue
-        )} VALUES`;
+        `${groupData.values.length} VALUES`;
 
       const arrow =
         document.createElement(
@@ -1463,7 +2207,7 @@ function renderProductionFeatures(
       list.className =
         "feature-list";
 
-      const listWrapper =
+      const wrapper =
         document.createElement(
           "div"
         );
@@ -1476,119 +2220,59 @@ function renderProductionFeatures(
       inner.className =
         "feature-list-inner";
 
-      const leaves =
-        flattenObject(
-          groupValue
-        );
+      groupData.values.forEach(
+        ([key, value]) => {
+          const row =
+            document.createElement(
+              "div"
+            );
 
-      if (
-        isObject(
-          groupValue
-        )
-      ) {
-        leaves.forEach(
-          (
-            [
-              key,
+          row.className =
+            "feature-row";
+
+          const name =
+            document.createElement(
+              "span"
+            );
+
+          name.className =
+            "feature-row__name";
+
+          name.textContent =
+            prettifyPath(
+              key
+            );
+
+          const valueElement =
+            document.createElement(
+              "span"
+            );
+
+          valueElement.className =
+            "feature-row__value";
+
+          valueElement.textContent =
+            formatValue(
               value
-            ]
-          ) => {
-            const row =
-              document.createElement(
-                "div"
-              );
-
-            row.className =
-              "feature-row";
-
-            const name =
-              document.createElement(
-                "span"
-              );
-
-            name.className =
-              "feature-row__name";
-
-            name.textContent =
-              prettifyKey(
-                key
-              );
-
-            const valueElement =
-              document.createElement(
-                "span"
-              );
-
-            valueElement.className =
-              "feature-row__value";
-
-            valueElement.textContent =
-              formatValue(
-                value
-              );
-
-            row.append(
-              name,
-              valueElement
             );
 
-            inner.appendChild(
-              row
-            );
-          }
-        );
-
-      } else {
-        const row =
-          document.createElement(
-            "div"
+          row.append(
+            name,
+            valueElement
           );
 
-        row.className =
-          "feature-row";
-
-        const name =
-          document.createElement(
-            "span"
+          inner.appendChild(
+            row
           );
+        }
+      );
 
-        name.className =
-          "feature-row__name";
-
-        name.textContent =
-          prettifyKey(
-            groupName
-          );
-
-        const value =
-          document.createElement(
-            "span"
-          );
-
-        value.className =
-          "feature-row__value";
-
-        value.textContent =
-          formatValue(
-            groupValue
-          );
-
-        row.append(
-          name,
-          value
-        );
-
-        inner.appendChild(
-          row
-        );
-      }
-
-      listWrapper.append(
+      wrapper.append(
         inner
       );
 
       list.append(
-        listWrapper
+        wrapper
       );
 
       group.append(
@@ -1605,7 +2289,7 @@ function renderProductionFeatures(
         }
       );
 
-      featureGroups.appendChild(
+      container.appendChild(
         group
       );
     }
@@ -1613,9 +2297,9 @@ function renderProductionFeatures(
 }
 
 
-// ======================================================
+// ============================================================
 // HISTORY
-// ======================================================
+// ============================================================
 
 function getHistory() {
   try {
@@ -1648,7 +2332,6 @@ function getHistory() {
     return [];
   }
 }
-
 
 function saveHistory(
   result
@@ -1700,7 +2383,7 @@ function saveHistory(
       )
     );
 
-    updateHistoryCounters();
+    updateHistoryCount();
 
   } catch (error) {
     console.warn(
@@ -1710,7 +2393,6 @@ function saveHistory(
   }
 }
 
-
 function renderHistory() {
   if (!historyList) {
     return;
@@ -1719,7 +2401,7 @@ function renderHistory() {
   const history =
     getHistory();
 
-  updateHistoryCounters(
+  updateHistoryCount(
     history.length
   );
 
@@ -1727,11 +2409,20 @@ function renderHistory() {
     "";
 
   if (!history.length) {
-    historyList.innerHTML = `
-      <div class="history-empty">
-        No analyses saved yet.
-      </div>
-    `;
+    const empty =
+      document.createElement(
+        "div"
+      );
+
+    empty.className =
+      "history-empty";
+
+    empty.textContent =
+      "Пока нет сохранённых анализов.";
+
+    historyList.appendChild(
+      empty
+    );
 
     return;
   }
@@ -1793,8 +2484,12 @@ function renderHistory() {
         entry.score === null ||
         entry.score === undefined
           ? "—"
-          : formatScore(
-              entry.score
+          : String(
+              Math.round(
+                Number(
+                  entry.score
+                ) * 10
+              )
             );
 
       item.append(
@@ -1809,8 +2504,7 @@ function renderHistory() {
   );
 }
 
-
-function updateHistoryCounters(
+function updateHistoryCount(
   explicitCount = null
 ) {
   const count =
@@ -1820,15 +2514,6 @@ function updateHistoryCounters(
 
   if (historyCount) {
     historyCount.textContent =
-      `${count} ${
-        count === 1
-          ? "analysis"
-          : "analyses"
-      }`;
-  }
-
-  if (historySummaryCount) {
-    historySummaryCount.textContent =
       String(
         count
       );
@@ -1836,11 +2521,115 @@ function updateHistoryCounters(
 }
 
 
-// ======================================================
-// NEW ANALYSIS / RESET
-// ======================================================
+// ============================================================
+// RESULT TABS
+// ============================================================
+
+function bindResultTabs() {
+  if (!reportTabs) {
+    return;
+  }
+
+  const tabs =
+    reportTabs.querySelectorAll(
+      ".tab"
+    );
+
+  const panels =
+    document.querySelectorAll(
+      ".tab-panel"
+    );
+
+  tabs.forEach(
+    (tab) => {
+      tab.addEventListener(
+        "click",
+        () => {
+          const target =
+            tab.dataset.tab;
+
+          if (!target) {
+            return;
+          }
+
+          tabs.forEach(
+            (item) => {
+              item.classList.toggle(
+                "active",
+                item === tab
+              );
+            }
+          );
+
+          panels.forEach(
+            (panel) => {
+              panel.classList.toggle(
+                "active",
+                panel.dataset.panel ===
+                  target
+              );
+            }
+          );
+        }
+      );
+    }
+  );
+}
+
+function activateDefaultResultTab() {
+  if (!reportTabs) {
+    return;
+  }
+
+  const firstTab =
+    reportTabs.querySelector(
+      '.tab[data-tab="overview"]'
+    );
+
+  if (!firstTab) {
+    return;
+  }
+
+  const tabs =
+    reportTabs.querySelectorAll(
+      ".tab"
+    );
+
+  const panels =
+    document.querySelectorAll(
+      ".tab-panel"
+    );
+
+  tabs.forEach(
+    (tab) => {
+      tab.classList.toggle(
+        "active",
+        tab === firstTab
+      );
+    }
+  );
+
+  panels.forEach(
+    (panel) => {
+      panel.classList.toggle(
+        "active",
+        panel.dataset.panel ===
+          "overview"
+      );
+    }
+  );
+}
+
+
+// ============================================================
+// NEW ANALYSIS
+// ============================================================
 
 function startNewAnalysis() {
+  analysisRequestId++;
+
+  analysisInProgress = false;
+
   selectedFile = null;
 
   currentAnalysis = null;
@@ -1850,8 +2639,7 @@ function startNewAnalysis() {
       selectedObjectUrl
     );
 
-    selectedObjectUrl =
-      null;
+    selectedObjectUrl = null;
   }
 
   if (fileInput) {
@@ -1859,21 +2647,20 @@ function startNewAnalysis() {
       "";
   }
 
-  if (previewImage) {
-    previewImage.removeAttribute(
+  if (uploadName) {
+    uploadName.textContent =
+      "JPG, PNG или WEBP · до 15 MB";
+  }
+
+  if (analysisImage) {
+    analysisImage.removeAttribute(
       "src"
     );
   }
 
-  if (fileFormat) {
-    fileFormat.textContent =
-      "—";
-  }
+  resetAnalysisPreview();
 
-  if (fileSize) {
-    fileSize.textContent =
-      "—";
-  }
+  resetLoadingSteps();
 
   showScreen(
     "home"
@@ -1881,54 +2668,9 @@ function startNewAnalysis() {
 }
 
 
-// ======================================================
-// UI HELPERS
-// ======================================================
-
-function setAnalyzeButtonLoading(
-  loading
-) {
-  if (!analyzeBtn) {
-    return;
-  }
-
-  analyzeBtn.disabled =
-    loading;
-
-  analyzeBtn.style.opacity =
-    loading
-      ? "0.6"
-      : "";
-
-  const spans =
-    analyzeBtn.querySelectorAll(
-      "span"
-    );
-
-  if (!spans.length) {
-    return;
-  }
-
-  if (loading) {
-    spans[0].textContent =
-      "Analyzing…";
-
-    if (spans[1]) {
-      spans[1].textContent =
-        "…";
-    }
-
-  } else {
-    spans[0].textContent =
-      "Analyze photo";
-
-    if (spans[1]) {
-      spans[1].textContent =
-        "→";
-    }
-  }
-}
-
+// ============================================================
+// TOAST
+// ============================================================
 
 function showToast(
   message
@@ -1939,7 +2681,8 @@ function showToast(
 
   toast.textContent =
     String(
-      message
+      message ||
+      "Произошла ошибка."
     );
 
   toast.classList.add(
@@ -1957,32 +2700,118 @@ function showToast(
           "show"
         );
       },
-      3000
+      4000
     );
 }
 
 
-function emptyBlock(
-  message
+// ============================================================
+// ERROR MESSAGES
+// ============================================================
+
+function getFriendlyErrorMessage(
+  error
 ) {
-  const div =
-    document.createElement(
-      "div"
+  const message =
+    String(
+      error?.message ||
+      ""
     );
 
-  div.className =
-    "history-empty";
+  if (
+    message.includes(
+      "Failed to fetch"
+    )
+  ) {
+    return (
+      "Не удалось подключиться к Gemini Worker. " +
+      "Проверь Worker и CORS."
+    );
+  }
 
-  div.textContent =
-    message;
+  if (
+    message.includes(
+      "NetworkError"
+    )
+  ) {
+    return (
+      "Сетевая ошибка при подключении к серверу анализа."
+    );
+  }
 
-  return div;
+  if (
+    message.includes(
+      "413"
+    )
+  ) {
+    return (
+      "Фотография слишком большая."
+    );
+  }
+
+  if (
+    message.includes(
+      "429"
+    )
+  ) {
+    return (
+      "Gemini временно ограничил количество запросов. Попробуй немного позже."
+    );
+  }
+
+  if (
+    message.includes(
+      "401"
+    ) ||
+    message.includes(
+      "403"
+    )
+  ) {
+    return (
+      "Worker не смог авторизоваться в Gemini API. Проверь GEMINI_API_KEY."
+    );
+  }
+
+  return (
+    message ||
+    "Анализ не выполнен. Попробуй ещё раз."
+  );
+}
+
+function getHttpErrorMessage(
+  status
+) {
+  if (status === 400) {
+    return "Некорректный запрос к серверу анализа.";
+  }
+
+  if (status === 401) {
+    return "Ошибка авторизации Gemini API.";
+  }
+
+  if (status === 403) {
+    return "Доступ к Gemini API запрещён.";
+  }
+
+  if (status === 413) {
+    return "Файл слишком большой.";
+  }
+
+  if (status === 429) {
+    return "Слишком много запросов. Попробуй позже.";
+  }
+
+  if (status >= 500) {
+    return "Ошибка Gemini Worker.";
+  }
+
+  return `Ошибка сервера (${status}).`;
 }
 
 
-// ======================================================
+// ============================================================
 // FORMATTING
-// ======================================================
+// ============================================================
 
 function formatBytes(
   bytes
@@ -2016,7 +2845,6 @@ function formatBytes(
   ).toFixed(2)} MB`;
 }
 
-
 function formatScore(
   score
 ) {
@@ -2033,14 +2861,16 @@ function formatScore(
     return "—";
   }
 
-  return number
-    .toFixed(2)
-    .replace(
-      /\.00$/,
-      ""
-    );
+  return String(
+    Math.round(
+      clamp(
+        number,
+        0,
+        10
+      ) * 10
+    )
+  );
 }
-
 
 function formatValue(
   value
@@ -2109,7 +2939,6 @@ function formatValue(
   );
 }
 
-
 function formatDate(
   value
 ) {
@@ -2138,7 +2967,6 @@ function formatDate(
   );
 }
 
-
 function prettifyKey(
   key
 ) {
@@ -2146,7 +2974,7 @@ function prettifyKey(
     key || ""
   )
     .replace(
-      /[_-]+/g,
+      /[\_-]+/g,
       " "
     )
     .replace(
@@ -2165,6 +2993,27 @@ function prettifyKey(
     );
 }
 
+function prettifyPath(
+  path
+) {
+  const parts =
+    String(
+      path || ""
+    ).split(
+      "."
+    );
+
+  return parts
+    .map(
+      (part) =>
+        prettifyKey(
+          part
+        )
+    )
+    .join(
+      " · "
+    );
+}
 
 function shortenModelName(
   model
@@ -2187,9 +3036,9 @@ function shortenModelName(
 }
 
 
-// ======================================================
+// ============================================================
 // OBJECT HELPERS
-// ======================================================
+// ============================================================
 
 function isObject(
   value
@@ -2203,7 +3052,6 @@ function isObject(
     )
   );
 }
-
 
 function flattenObject(
   object,
@@ -2222,12 +3070,7 @@ function flattenObject(
   Object.entries(
     object
   ).forEach(
-    (
-      [
-        key,
-        value
-      ]
-    ) => {
+    ([key, value]) => {
       const path =
         prefix
           ? `${prefix}.${key}`
@@ -2244,7 +3087,6 @@ function flattenObject(
             path
           )
         );
-
       } else {
         result.push([
           path,
@@ -2257,7 +3099,6 @@ function flattenObject(
   return result;
 }
 
-
 function countLeaves(
   object
 ) {
@@ -2265,7 +3106,6 @@ function countLeaves(
     object
   ).length;
 }
-
 
 function toNumberOrZero(
   value
@@ -2281,7 +3121,6 @@ function toNumberOrZero(
     ? number
     : 0;
 }
-
 
 function nullableNumber(
   value
@@ -2305,7 +3144,6 @@ function nullableNumber(
     ? number
     : null;
 }
-
 
 function normalizeScore(
   value
@@ -2331,15 +3169,16 @@ function normalizeScore(
     return null;
   }
 
-  return Math.round(
-    clamp(
-      number,
-      0,
-      10
-    ) * 100
-  ) / 100;
+  return (
+    Math.round(
+      clamp(
+        number,
+        0,
+        10
+      ) * 100
+    ) / 100
+  );
 }
-
 
 function cleanText(
   value
@@ -2356,7 +3195,6 @@ function cleanText(
   ).trim();
 }
 
-
 function clamp(
   value,
   min,
@@ -2371,65 +3209,186 @@ function clamp(
   );
 }
 
+function createEmptyBlock(
+  message
+) {
+  const div =
+    document.createElement(
+      "div"
+    );
 
-// ======================================================
+  div.className =
+    "history-empty";
+
+  div.textContent =
+    message;
+
+  return div;
+}
+
+
+// ============================================================
+// METRIC GROUP HELPERS
+// ============================================================
+
+function getGroup(
+  object,
+  names
+) {
+  if (
+    !isObject(
+      object
+    )
+  ) {
+    return [];
+  }
+
+  const result = [];
+
+  names.forEach(
+    (name) => {
+      const group =
+        object[name];
+
+      if (
+        isObject(
+          group
+        )
+      ) {
+        result.push(
+          ...flattenObject(
+            group
+          ).map(
+            ([key, value]) => [
+              key,
+              value
+            ]
+          )
+        );
+      }
+    }
+  );
+
+  return result;
+}
+
+function getObjectGroup(
+  object,
+  names
+) {
+  if (
+    !isObject(
+      object
+    )
+  ) {
+    return [];
+  }
+
+  const result = [];
+
+  names.forEach(
+    (name) => {
+      const value =
+        object[name];
+
+      if (
+        value !==
+        undefined
+      ) {
+        result.push([
+          name,
+          value
+        ]);
+      }
+    }
+  );
+
+  return result;
+}
+
+
+// ============================================================
 // EVENTS
-// ======================================================
+// ============================================================
 
 function bindEvents() {
-  if (choosePhotoBtn) {
-    choosePhotoBtn.addEventListener(
+  /*
+   * MAIN UPLOAD BUTTON
+   *
+   * This is the critical fix.
+   *
+   * Current HTML:
+   *   <button id="upload-btn">
+   *
+   * Current input:
+   *   <input id="file-input" ...>
+   */
+  if (uploadButton) {
+    uploadButton.addEventListener(
       "click",
-      openFilePicker
+      (event) => {
+        event.preventDefault();
+
+        openFilePicker();
+      }
+    );
+  } else {
+    console.error(
+      "FaceMetric: #upload-btn was not found."
     );
   }
 
-  if (chooseAnotherBtn) {
-    chooseAnotherBtn.addEventListener(
-      "click",
-      openFilePicker
-    );
-  }
-
+  /*
+   * FILE INPUT
+   */
   if (fileInput) {
     fileInput.addEventListener(
       "change",
-      () => {
+      (event) => {
         const file =
-          fileInput.files?.[0];
+          event.target.files?.[0];
 
         handleFileSelected(
           file
         );
       }
     );
-  }
-
-  if (analyzeBtn) {
-    analyzeBtn.addEventListener(
-      "click",
-      startAnalysis
+  } else {
+    console.error(
+      "FaceMetric: #file-input was not found."
     );
   }
 
-  if (newAnalysisBtn) {
-    newAnalysisBtn.addEventListener(
-      "click",
-      startNewAnalysis
-    );
-  }
-
+  /*
+   * NAVIGATION
+   *
+   * Current HTML uses:
+   *   data-screen="history"
+   *
+   * not data-go.
+   */
   document
     .querySelectorAll(
-      "[data-go]"
+      "[data-screen]"
     )
     .forEach(
       (element) => {
         element.addEventListener(
           "click",
-          () => {
+          (event) => {
+            /*
+             * Don't interfere with the
+             * actual upload button.
+             */
+            if (
+              element ===
+              uploadButton
+            ) {
+              return;
+            }
+
             const target =
-              element.dataset.go;
+              element.dataset.screen;
 
             if (
               target
@@ -2443,36 +3402,102 @@ function bindEvents() {
       }
     );
 
+  /*
+   * BACK BUTTONS
+   */
   document
     .querySelectorAll(
-      "[data-back]"
+      ".back-btn"
     )
     .forEach(
-      (element) => {
-        element.addEventListener(
+      (button) => {
+        button.addEventListener(
           "click",
-          goBack
+          () => {
+            const target =
+              button.dataset.screen;
+
+            if (
+              target
+            ) {
+              showScreen(
+                target
+              );
+            } else {
+              goBack();
+            }
+          }
+        );
+      }
+    );
+
+  /*
+   * NEW ANALYSIS
+   */
+  if (newAnalysisButton) {
+    newAnalysisButton.addEventListener(
+      "click",
+      () => {
+        startNewAnalysis();
+      }
+    );
+  }
+
+  /*
+   * REPORT TABS
+   */
+  bindResultTabs();
+}
+
+
+// ============================================================
+// STARTUP
+// ============================================================
+
+function init() {
+  /*
+   * The script is normally loaded at
+   * the bottom of <body>, so DOM elements
+   * should already exist.
+   */
+  initTelegram();
+
+  bindEvents();
+
+  updateHistoryCount();
+
+  activateDefaultResultTab();
+
+  showScreen(
+    "home"
+  );
+
+  /*
+   * Don't block startup with health check.
+   * It is only diagnostic.
+   */
+  checkWorkerHealth()
+    .then(
+      (healthy) => {
+        if (!healthy) {
+          console.warn(
+            "FaceMetric: Gemini Worker health check did not pass."
+          );
+        }
+      }
+    )
+    .catch(
+      (error) => {
+        console.warn(
+          "FaceMetric: background health check failed:",
+          error
         );
       }
     );
 }
 
 
-// ======================================================
-// STARTUP
-// ======================================================
-
-function init() {
-  initTelegram();
-
-  bindEvents();
-
-  updateHistoryCounters();
-
-  showScreen(
-    "home"
-  );
-}
-
-
+/*
+ * Start the application.
+ */
 init();
