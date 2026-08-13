@@ -1,4214 +1,2478 @@
-(() => {
-  "use strict";
+"use strict";
+
+/*
+ * FaceBot — Telegram Mini App
+ * Frontend for:
+ *   POST https://facebot-gemini.snow4lyt.workers.dev/api/analyze
+ *
+ * Expected backend response:
+ * {
+ *   success: true,
+ *   score: number|null,
+ *   face_count: number,
+ *   landmarks_count: number|null,
+ *   detected_features: number,
+ *   feature_count: number,
+ *   model: string,
+ *   metrics: object,
+ *   production_features: object,
+ *   generated_at: string
+ * }
+ */
+
+const MAX_FILE_SIZE = 15 * 1024 * 1024;
 
+const ALLOWED_TYPES = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/webp"
+]);
 
-  /* =========================================================
-     DOM HELPERS
-  ========================================================== */
+/*
+ * IMPORTANT:
+ * This is the Gemini Worker endpoint.
+ *
+ * Do NOT change this to:
+ *   /analyze
+ *   /api/analyze
+ * on the static website domain.
+ *
+ * The website and Gemini Worker are separate services.
+ */
+const API_ENDPOINT =
+  "https://facebot-gemini.snow4lyt.workers.dev/api/analyze";
 
-  const $ = (selector, root = document) =>
-    root.querySelector(selector);
+const HISTORY_KEY = "facebot_history_v1";
 
+const tg =
+  window.Telegram &&
+  window.Telegram.WebApp
+    ? window.Telegram.WebApp
+    : null;
 
-  const $$ = (selector, root = document) =>
-    [...root.querySelectorAll(selector)];
 
+// ======================================================
+// DOM
+// ======================================================
 
-  /* =========================================================
-     APPLICATION STATE
-  ========================================================== */
+const screens =
+  document.querySelectorAll(".screen");
 
-  const state = {
-    file: null,
+const fileInput =
+  document.getElementById("fileInput");
 
-    objectUrl: null,
+const choosePhotoBtn =
+  document.getElementById("choosePhotoBtn");
 
-    result: null,
+const chooseAnotherBtn =
+  document.getElementById("chooseAnotherBtn");
 
-    analysisRunning: false,
+const analyzeBtn =
+  document.getElementById("analyzeBtn");
 
-    analysisTimer: null,
+const previewImage =
+  document.getElementById("previewImage");
 
-    animationTimers: [],
+const fileFormat =
+  document.getElementById("fileFormat");
 
-    imageNaturalWidth: 0,
+const fileSize =
+  document.getElementById("fileSize");
 
-    imageNaturalHeight: 0,
+const loadingTitle =
+  document.getElementById("loadingTitle");
 
-    canvasScale: 1,
+const loadingSubtitle =
+  document.getElementById("loadingSubtitle");
 
-    lastLandmarks: [],
+const resultScore =
+  document.getElementById("resultScore");
 
-    historyKey: "facemetric-history"
-  };
+const resultProgress =
+  document.getElementById("resultProgress");
 
+const resultCaption =
+  document.getElementById("resultCaption");
 
-  /* =========================================================
-     SCREENS
-  ========================================================== */
+const scoreRange =
+  document.getElementById("scoreRange");
 
-  const screens = {
-    home: $("#screen-home"),
-    analysis: $("#screen-analysis"),
-    result: $("#screen-result"),
-    history: $("#screen-history"),
-    about: $("#screen-about")
-  };
+const statFaces =
+  document.getElementById("statFaces");
 
+const statLandmarks =
+  document.getElementById("statLandmarks");
 
-  /* =========================================================
-     UPLOAD DOM
-  ========================================================== */
+const statFeatures =
+  document.getElementById("statFeatures");
 
-  const fileInput =
-    $("#file-input");
+const statModel =
+  document.getElementById("statModel");
 
-  const uploadBtn =
-    $("#upload-btn");
+const metricCount =
+  document.getElementById("metricCount");
 
-  const uploadZone =
-    $("#upload-zone");
+const analyzerCount =
+  document.getElementById("analyzerCount");
 
-  const uploadName =
-    $("#upload-name");
+const featureCount =
+  document.getElementById("featureCount");
 
+const overviewGrid =
+  document.getElementById("overviewGrid");
 
-  /* =========================================================
-     ANALYSIS DOM
-  ========================================================== */
+const metricsContainer =
+  document.getElementById("metrics");
 
-  const analysisImage =
-    $("#analysis-image");
+const featureGroups =
+  document.getElementById("featureGroups");
 
-  const canvas =
-    $("#landmark-canvas");
+const historyCount =
+  document.getElementById("historyCount");
 
-  const ctx =
-    canvas?.getContext("2d");
+const historySummaryCount =
+  document.getElementById("historySummaryCount");
 
-  const analysisFrame =
-    $("#analysis-frame");
+const historyList =
+  document.getElementById("historyList");
 
-  const loadingTitle =
-    $("#loading-title");
+const newAnalysisBtn =
+  document.getElementById("newAnalysisBtn");
 
-  const loadingText =
-    $("#loading-text");
+const toast =
+  document.getElementById("toast");
 
-  const analysisState =
-    $("#analysis-state");
 
-  const analysisScore =
-    $("#analysis-score");
+// ======================================================
+// STATE
+// ======================================================
 
-  const analysisScoreValue =
-    $("#analysis-score strong");
+let selectedFile = null;
 
-  const analysisScoreUnit =
-    $("#analysis-score small");
+let selectedObjectUrl = null;
 
-  const loadingProgressBar =
-    $("#loading-progress-bar");
+let currentAnalysis = null;
 
-  const scanLine =
-    $("#scan-line");
+let currentScreen = "home";
 
-  const faceGuide =
-    $("#face-guide");
+let analysisInProgress = false;
 
-  const landmarkCount =
-    $("#landmark-count");
+let toastTimer = null;
 
-  const axisStatus =
-    $("#axis-status");
 
-  const previewProcessing =
-    $("#preview-processing");
+// ======================================================
+// TELEGRAM MINI APP
+// ======================================================
 
+function initTelegram() {
+  if (!tg) {
+    return;
+  }
 
-  /* =========================================================
-     RESULT DOM
-  ========================================================== */
+  try {
+    tg.ready();
 
-  const resultScore =
-    $("#result-score");
+    tg.expand();
 
-  const scoreProgress =
-    $("#score-progress");
-
-  const scoreStatus =
-    $("#score-status");
-
-  const resultLandmarkCount =
-    $("#result-landmark-count");
-
-  const scoreDataStatus =
-    $("#score-data-status");
-
-
-  /* =========================================================
-     TOAST
-  ========================================================== */
-
-  const toast =
-    $("#toast");
-
-
-  /* =========================================================
-     CONSTANTS
-  ========================================================== */
-
-  const MAX_FILE_SIZE =
-    15 * 1024 * 1024;
-
-
-  const ACCEPTED_TYPES =
-    new Set([
-      "image/jpeg",
-      "image/png",
-      "image/webp"
-    ]);
-
-
-  const LOADING_STEPS = [
-    {
-      title: "Анализируем",
-      text: "Подготавливаем изображение"
-    },
-
-    {
-      title: "Ищем landmarks",
-      text: "Определяем опорные точки лица"
-    },
-
-    {
-      title: "Измеряем",
-      text: "Рассчитываем пропорции и отношения"
-    },
-
-    {
-      title: "Сравниваем",
-      text: "Анализируем симметрию и геометрию"
-    },
-
-    {
-      title: "Формируем отчёт",
-      text: "Собираем измеренные результаты"
+    if (
+      typeof tg.setHeaderColor ===
+      "function"
+    ) {
+      tg.setHeaderColor("#08090b");
     }
-  ];
+
+    if (
+      typeof tg.setBackgroundColor ===
+      "function"
+    ) {
+      tg.setBackgroundColor("#08090b");
+    }
+
+    if (
+      typeof tg.enableClosingConfirmation ===
+      "function"
+    ) {
+      tg.enableClosingConfirmation();
+    }
+
+  } catch (error) {
+    console.warn(
+      "Telegram WebApp initialization warning:",
+      error
+    );
+  }
+}
 
 
-  /* =========================================================
-     INITIALIZATION
-  ========================================================== */
+// ======================================================
+// NAVIGATION
+// ======================================================
 
-  init();
+function showScreen(name) {
+  const target =
+    document.querySelector(
+      `.screen[data-screen="${CSS.escape(name)}"]`
+    );
 
+  if (!target) {
+    return;
+  }
 
-  function init() {
-    bindNavigation();
+  screens.forEach(
+    (screen) => {
+      screen.classList.toggle(
+        "active",
+        screen === target
+      );
+    }
+  );
 
-    bindUpload();
+  currentScreen = name;
 
-    bindDragAndDrop();
+  updateNavigation(name);
 
-    bindTabs();
+  window.scrollTo({
+    top: 0,
+    behavior: "smooth"
+  });
 
-    bindExpandableDelegation();
-
-    bindNewAnalysis();
-
-    bindKeyboardShortcuts();
-
+  if (name === "history") {
     renderHistory();
-
-    setupImageEvents();
-
-    updateRevealDelays();
-
-    window.addEventListener(
-      "resize",
-      handleResize
-    );
-
-    window.addEventListener(
-      "beforeunload",
-      cleanupObjectUrl
-    );
   }
+}
 
 
-  /* =========================================================
-     NAVIGATION
-  ========================================================== */
-
-  function bindNavigation() {
-    $$("[data-screen]").forEach(button => {
-      button.addEventListener(
-        "click",
-        () => {
-          const screen =
-            button.dataset.screen;
-
-          if (
-            screen === "analysis" &&
-            !state.analysisRunning
-          ) {
-            return;
-          }
-
-          showScreen(screen);
-        }
-      );
-    });
-  }
-
-
-  function showScreen(name) {
-    const target =
-      screens[name];
-
-    if (!target) {
-      return;
-    }
-
-
-    Object.values(screens).forEach(screen => {
-      if (!screen) {
-        return;
-      }
-
-      screen.classList.remove(
-        "active",
-        "screen-enter"
-      );
-    });
-
-
-    target.classList.add("active");
-
-
-    requestAnimationFrame(() => {
-      target.classList.add(
-        "screen-enter"
-      );
-    });
-
-
-    $$(".nav-item").forEach(button => {
-      button.classList.toggle(
-        "active",
-        button.dataset.screen === name
-      );
-    });
-
-
-    window.scrollTo({
-      top: 0,
-      behavior: "smooth"
-    });
-  }
-
-
-  /* =========================================================
-     UPLOAD
-  ========================================================== */
-
-  function bindUpload() {
-    if (!uploadBtn || !fileInput) {
-      return;
-    }
-
-
-    uploadBtn.addEventListener(
-      "click",
-      () => {
-        if (state.analysisRunning) {
-          return;
-        }
-
-        fileInput.click();
-      }
+function updateNavigation(name) {
+  const navItems =
+    document.querySelectorAll(
+      ".nav-item"
     );
 
+  navItems.forEach(
+    (item) => {
+      const target =
+        item.dataset.go;
 
-    fileInput.addEventListener(
-      "change",
-      event => {
-        const file =
-          event.target.files?.[0];
-
-        if (!file) {
-          return;
-        }
-
-        handleSelectedFile(file);
-      }
-    );
-  }
-
-
-  function handleSelectedFile(file) {
-    const validation =
-      validateFile(file);
-
-    if (!validation.valid) {
-      notify(validation.message);
-
-      fileInput.value = "";
-
-      return;
-    }
-
-
-    startAnalysis(file);
-  }
-
-
-  function validateFile(file) {
-    if (!file) {
-      return {
-        valid: false,
-        message: "Файл не выбран."
-      };
-    }
-
-
-    if (
-      !ACCEPTED_TYPES.has(file.type)
-    ) {
-      return {
-        valid: false,
-        message:
-          "Поддерживаются только JPG, PNG и WEBP."
-      };
-    }
-
-
-    if (
-      file.size > MAX_FILE_SIZE
-    ) {
-      return {
-        valid: false,
-        message:
-          "Файл слишком большой. Максимум 15 MB."
-      };
-    }
-
-
-    return {
-      valid: true
-    };
-  }
-
-
-  /* =========================================================
-     DRAG & DROP
-  ========================================================== */
-
-  function bindDragAndDrop() {
-    if (!uploadZone) {
-      return;
-    }
-
-
-    [
-      "dragenter",
-      "dragover"
-    ].forEach(eventName => {
-      uploadZone.addEventListener(
-        eventName,
-        event => {
-          event.preventDefault();
-
-          if (state.analysisRunning) {
-            return;
-          }
-
-          uploadZone.classList.add(
-            "dragging"
-          );
-        }
-      );
-    });
-
-
-    [
-      "dragleave",
-      "drop"
-    ].forEach(eventName => {
-      uploadZone.addEventListener(
-        eventName,
-        event => {
-          event.preventDefault();
-
-          uploadZone.classList.remove(
-            "dragging"
-          );
-        }
-      );
-    });
-
-
-    uploadZone.addEventListener(
-      "drop",
-      event => {
-        if (state.analysisRunning) {
-          return;
-        }
-
-        const file =
-          event.dataTransfer?.files?.[0];
-
-        if (!file) {
-          return;
-        }
-
-        handleSelectedFile(file);
-      }
-    );
-  }
-
-
-  /* =========================================================
-     IMAGE SETUP
-  ========================================================== */
-
-  function setupImageEvents() {
-    if (!analysisImage) {
-      return;
-    }
-
-
-    analysisImage.addEventListener(
-      "load",
-      () => {
-        state.imageNaturalWidth =
-          analysisImage.naturalWidth;
-
-        state.imageNaturalHeight =
-          analysisImage.naturalHeight;
-
-        resizeCanvas();
-
-        drawScanningLandmarks();
-      }
-    );
-  }
-
-
-  function setPreview(file) {
-    if (!analysisImage) {
-      return;
-    }
-
-
-    revokeObjectUrl();
-
-
-    state.objectUrl =
-      URL.createObjectURL(file);
-
-
-    analysisImage.src =
-      state.objectUrl;
-
-
-    uploadName.textContent =
-      file.name;
-
-
-    analysisImage.onload = () => {
-      state.imageNaturalWidth =
-        analysisImage.naturalWidth;
-
-      state.imageNaturalHeight =
-        analysisImage.naturalHeight;
-
-      resizeCanvas();
-
-      drawScanningLandmarks();
-    };
-  }
-
-
-  /* =========================================================
-     START ANALYSIS
-  ========================================================== */
-
-  async function startAnalysis(file) {
-    if (state.analysisRunning) {
-      return;
-    }
-
-
-    state.analysisRunning = true;
-
-    state.file = file;
-
-    state.result = null;
-
-    state.lastLandmarks = [];
-
-
-    uploadName.textContent =
-      file.name;
-
-
-    setPreview(file);
-
-    resetAnalysisUI();
-
-    showScreen("analysis");
-
-
-    try {
-      await waitForImageReady();
-
-      const loadingAnimation =
-        runLoadingAnimation();
-
-
-      const result =
-        await analyzeImage(file);
-
-
-      await loadingAnimation;
-
-
-      validateResult(result);
-
-
-      state.result = result;
-
-
-      await finishAnalysis(result);
-
-    } catch (error) {
-      console.error(
-        "FaceMetric analysis error:",
-        error
-      );
-
-
-      clearAnalysisAnimation();
-
-
-      const message =
-        error?.message ||
-        "Не удалось выполнить анализ.";
-
-
-      notify(message);
-
-
-      analysisState.textContent =
-        "ERROR";
-
-
-      analysisState.classList.remove(
-        "complete"
-      );
-
-
-      previewProcessing.style.display =
-        "none";
-
-
-      state.analysisRunning = false;
-
-
-      showScreen("home");
-    }
-  }
-
-
-  /* =========================================================
-     RESET ANALYSIS UI
-  ========================================================== */
-
-  function resetAnalysisUI() {
-    clearAnalysisAnimation();
-
-
-    analysisState.textContent =
-      "ANALYZING";
-
-
-    analysisState.classList.remove(
-      "complete"
-    );
-
-
-    analysisScore.classList.remove(
-      "show",
-      "float"
-    );
-
-
-    analysisScoreValue.textContent =
-      "—";
-
-
-    if (analysisScoreUnit) {
-      analysisScoreUnit.textContent =
-        "/ 100";
-    }
-
-
-    loadingTitle.textContent =
-      LOADING_STEPS[0].title;
-
-
-    loadingText.textContent =
-      LOADING_STEPS[0].text;
-
-
-    loadingProgressBar.style.width =
-      "0%";
-
-
-    landmarkCount.textContent =
-      "0";
-
-
-    axisStatus.textContent =
-      "—";
-
-
-    faceGuide.classList.remove(
-      "visible"
-    );
-
-
-    previewProcessing.style.display =
-      "flex";
-
-
-    $$(".loading-step").forEach(
-      (step, index) => {
-        step.classList.toggle(
-          "active",
-          index === 0
-        );
-
-        step.classList.remove(
-          "done"
-        );
-      }
-    );
-
-
-    clearCanvas();
-  }
-
-
-  /* =========================================================
-     LOADING ANIMATION
-  ========================================================== */
-
-  async function runLoadingAnimation() {
-    const steps =
-      $$(".loading-step");
-
-
-    if (!steps.length) {
-      return;
-    }
-
-
-    for (
-      let index = 0;
-      index < steps.length;
-      index++
-    ) {
-      if (!state.analysisRunning) {
-        return;
-      }
-
-
-      const step =
-        steps[index];
-
-
-      const info =
-        LOADING_STEPS[index];
-
-
-      loadingTitle.textContent =
-        info.title;
-
-
-      loadingText.textContent =
-        info.text;
-
-
-      loadingProgressBar.style.width =
-        `${((index + 1) / steps.length) * 100}%`;
-
-
-      steps.forEach(
-        (currentStep, currentIndex) => {
-          currentStep.classList.toggle(
-            "active",
-            currentIndex === index
-          );
-
-
-          if (
-            currentIndex < index
-          ) {
-            currentStep.classList.add(
-              "done"
-            );
-          }
-        }
-      );
-
-
-      const duration =
-        index === 0
-          ? 420
-          : index === steps.length - 1
-            ? 520
-            : 460;
-
-
-      await delay(duration);
-    }
-
-
-    steps.forEach(step => {
-      step.classList.remove(
-        "active"
-      );
-
-      step.classList.add(
-        "done"
-      );
-    });
-
-
-    loadingProgressBar.style.width =
-      "100%";
-  }
-
-
-  /* =========================================================
-     BACKEND ANALYSIS
-  ========================================================== */
-
-  async function analyzeImage(file) {
-    /*
-     * ВАЖНО:
-     *
-     * Этот frontend НЕ создаёт score.
-     *
-     * Backend /api/analyze должен вернуть реальные
-     * измерения из measurement pipeline.
-     *
-     * Минимальный обязательный ответ:
-     *
-     * {
-     *   "score": 78.4
-     * }
-     *
-     * Желательно:
-     *
-     * {
-     *   "score": 78.4,
-     *   "landmarks": [...],
-     *   "stats": [...],
-     *   "overview": [...],
-     *   "metrics": [...],
-     *   "harmony": {...},
-     *   "angularity": {...},
-     *   "symmetry": {...},
-     *   "dimorphism": {...},
-     *   "health": {...}
-     * }
-     *
-     * Gemini может использоваться backend'ом
-     * для qualitative notes.
-     *
-     * Gemini НЕ должен создавать или менять score.
-     */
-
-
-    const form =
-      new FormData();
-
-
-    form.append(
-      "image",
-      file,
-      file.name
-    );
-
-
-    const response =
-      await fetch(
-        "/api/analyze",
-        {
-          method: "POST",
-          body: form
-        }
-      );
-
-
-    if (!response.ok) {
-      let message =
-        "Ошибка анализа.";
-
-
-      try {
-        const data =
-          await response.json();
-
-        if (data?.error) {
-          message =
-            String(data.error);
-        }
-      } catch {
-        /*
-         * Ответ не JSON.
-         */
-      }
-
-
-      throw new Error(message);
-    }
-
-
-    let data;
-
-
-    try {
-      data =
-        await response.json();
-    } catch {
-      throw new Error(
-        "Сервер вернул невалидный JSON."
-      );
-    }
-
-
-    return data;
-  }
-
-
-  /* =========================================================
-     VALIDATE RESULT
-  ========================================================== */
-
-  function validateResult(data) {
-    if (
-      !data ||
-      typeof data !== "object"
-    ) {
-      throw new Error(
-        "Сервер вернул некорректный результат."
-      );
-    }
-
-
-    if (
-      typeof data.score !== "number" ||
-      !Number.isFinite(data.score)
-    ) {
-      throw new Error(
-        "Числовой score не получен из измерений."
-      );
-    }
-
-
-    if (
-      data.score < 0 ||
-      data.score > 100
-    ) {
-      throw new Error(
-        "Score должен находиться в диапазоне 0–100."
-      );
-    }
-  }
-
-
-  /* =========================================================
-     FINISH ANALYSIS
-  ========================================================== */
-
-  async function finishAnalysis(result) {
-    analysisState.textContent =
-      "COMPLETE";
-
-
-    analysisState.classList.add(
-      "complete"
-    );
-
-
-    previewProcessing.style.display =
-      "none";
-
-
-    const landmarks =
-      normalizeLandmarks(
-        result.landmarks
-      );
-
-
-    state.lastLandmarks =
-      landmarks;
-
-
-    landmarkCount.textContent =
-      String(landmarks.length);
-
-
-    axisStatus.textContent =
-      landmarks.length
-        ? "READY"
-        : "—";
-
-
-    drawLandmarks(
-      landmarks
-    );
-
-
-    if (landmarks.length) {
-      faceGuide.classList.add(
-        "visible"
-      );
-    }
-
-
-    /*
-     * Score сначала появляется
-     * прямо поверх изображения.
-     */
-
-    await delay(300);
-
-
-    await animateScoreOnImage(
-      result.score
-    );
-
-
-    /*
-     * Затем score перемещается
-     * в нижний левый угол.
-     */
-
-    await delay(650);
-
-
-    analysisScore.classList.add(
-      "float"
-    );
-
-
-    await delay(950);
-
-
-    renderResult(result);
-
-
-    showScreen("result");
-
-
-    state.analysisRunning =
-      false;
-  }
-
-
-  /* =========================================================
-     SCORE ANIMATION
-  ========================================================== */
-
-  async function animateScoreOnImage(
-    targetScore
-  ) {
-    analysisScore.classList.add(
-      "show"
-    );
-
-
-    await animateNumber(
-      analysisScoreValue,
-      0,
-      targetScore,
-      850
-    );
-  }
-
-
-  async function animateNumber(
-    element,
-    from,
-    to,
-    duration
-  ) {
-    if (!element) {
-      return;
-    }
-
-
-    const start =
-      performance.now();
-
-
-    return new Promise(resolve => {
-      function frame(now) {
-        const elapsed =
-          now - start;
-
-
-        const progress =
-          clamp(
-            elapsed / duration,
-            0,
-            1
-          );
-
-
-        const eased =
-          1 -
-          Math.pow(
-            1 - progress,
-            3
-          );
-
-
-        const value =
-          from +
-          (to - from) * eased;
-
-
-        element.textContent =
-          formatNumber(value);
-
-
-        if (progress < 1) {
-          requestAnimationFrame(
-            frame
-          );
-        } else {
-          element.textContent =
-            formatNumber(to);
-
-          resolve();
-        }
-      }
-
-
-      requestAnimationFrame(
-        frame
-      );
-    });
-  }
-
-
-  /* =========================================================
-     RESULT RENDER
-  ========================================================== */
-
-  function renderResult(result) {
-    const score =
-      clamp(
-        result.score,
-        0,
-        100
-      );
-
-
-    resultScore.textContent =
-      "0";
-
-
-    scoreProgress.style.width =
-      "0%";
-
-
-    scoreStatus.textContent =
-      getScoreStatus(score);
-
-
-    scoreDataStatus.textContent =
-      "VERIFIED";
-
-
-    const landmarks =
-      normalizeLandmarks(
-        result.landmarks
-      );
-
-
-    resultLandmarkCount.textContent =
-      landmarks.length
-        ? String(landmarks.length)
-        : "—";
-
-
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-
-        animateNumber(
-          resultScore,
-          0,
-          score,
-          1000
-        );
-
-
-        scoreProgress.style.width =
-          `${score}%`;
-      });
-    });
-
-
-    renderStats(
-      result.stats || []
-    );
-
-
-    renderOverview(
-      result.overview || []
-    );
-
-
-    renderGroup(
-      $("#harmony-content"),
-      result.harmony
-    );
-
-
-    renderMetrics(
-      result.metrics || []
-    );
-
-
-    renderGroup(
-      $("#angularity-content"),
-      result.angularity
-    );
-
-
-    renderGroup(
-      $("#symmetry-content"),
-      result.symmetry
-    );
-
-
-    renderGroup(
-      $("#dimorphism-content"),
-      result.dimorphism
-    );
-
-
-    renderHealth(
-      result.health
-    );
-
-
-    bindExpandableCards();
-
-
-    updateRevealDelays();
-  }
-
-
-  function getScoreStatus(score) {
-    if (score >= 80) {
-      return "Высокий измеренный результат";
-    }
-
-
-    if (score >= 60) {
-      return "Средний измеренный результат";
-    }
-
-
-    if (score >= 40) {
-      return "Ниже среднего по выбранной шкале";
-    }
-
-
-    return "Низкий измеренный результат";
-  }
-
-
-  /* =========================================================
-     STATS
-  ========================================================== */
-
-  function renderStats(stats) {
-    const container =
-      $("#stats-grid");
-
-
-    if (!container) {
-      return;
-    }
-
-
-    container.innerHTML =
-      "";
-
-
-    const normalized =
-      Array.isArray(stats)
-        ? stats.slice(0, 4)
-        : [];
-
-
-    if (!normalized.length) {
-      container.innerHTML =
-        createEmptyCard(
-          "Нет быстрых показателей."
-        );
-
-      return;
-    }
-
-
-    normalized.forEach(
-      (stat, index) => {
-        const element =
-          document.createElement("div");
-
-
-        element.className =
-          "stat";
-
-
-        element.style.setProperty(
-          "--reveal-delay",
-          `${index * 50}ms`
-        );
-
-
-        element.classList.add(
-          "reveal"
-        );
-
-
-        element.innerHTML = `
-          <span>
-            ${escapeHtml(
-              stat.label || ""
-            )}
-          </span>
-
-          <strong>
-            ${escapeHtml(
-              formatValue(
-                stat.value
-              )
-            )}
-          </strong>
-
-          <small>
-            ${escapeHtml(
-              stat.unit || ""
-            )}
-          </small>
-        `;
-
-
-        container.appendChild(
-          element
-        );
-      }
-    );
-  }
-
-
-  /* =========================================================
-     OVERVIEW
-  ========================================================== */
-
-  function renderOverview(items) {
-    const container =
-      $("#overview-grid");
-
-
-    if (!container) {
-      return;
-    }
-
-
-    container.innerHTML =
-      "";
-
-
-    const normalized =
-      Array.isArray(items)
-        ? items
-        : [];
-
-
-    if (!normalized.length) {
-      container.innerHTML =
-        createEmptyCard(
-          "Обзор пока не содержит измерений."
-        );
-
-      return;
-    }
-
-
-    normalized.forEach(
-      (item, index) => {
-        const element =
-          document.createElement("div");
-
-
-        element.className =
-          "overview-card";
-
-
-        element.style.setProperty(
-          "--reveal-delay",
-          `${index * 45}ms`
-        );
-
-
-        element.classList.add(
-          "reveal"
-        );
-
-
-        element.innerHTML = `
-          <div class="overview-card__label">
-            ${escapeHtml(
-              item.label || ""
-            )}
-          </div>
-
-          <div class="overview-card__value">
-            ${escapeHtml(
-              formatValue(
-                item.value
-              )
-            )}
-          </div>
-
-          <div class="overview-card__source">
-            ${escapeHtml(
-              item.source ||
-              "measured"
-            )}
-          </div>
-        `;
-
-
-        container.appendChild(
-          element
-        );
-      }
-    );
-  }
-
-
-  /* =========================================================
-     METRICS
-  ========================================================== */
-
-  function renderMetrics(metrics) {
-    const container =
-      $("#metrics-content");
-
-
-    if (!container) {
-      return;
-    }
-
-
-    container.innerHTML =
-      "";
-
-
-    const normalized =
-      Array.isArray(metrics)
-        ? metrics
-        : [];
-
-
-    if (!normalized.length) {
-      container.innerHTML =
-        createEmptyCard(
-          "Измеренные черты пока не переданы."
-        );
-
-      return;
-    }
-
-
-    normalized.forEach(
-      (metric, index) => {
-        const card =
-          document.createElement("article");
-
-
-        card.className =
-          "metric-card";
-
-
-        card.innerHTML = `
-          <button
-            class="metric-header"
-            type="button"
-            aria-expanded="false"
-          >
-
-            <div class="metric-main">
-
-              <div class="metric-name">
-                ${escapeHtml(
-                  metric.name || ""
-                )}
-              </div>
-
-              <div class="metric-key">
-                ${escapeHtml(
-                  metric.key || ""
-                )}
-              </div>
-
-            </div>
-
-
-            <div class="metric-value">
-              ${escapeHtml(
-                formatValue(
-                  metric.value
-                )
-              )}
-            </div>
-
-
-            <div class="metric-arrow">
-              +
-            </div>
-
-          </button>
-
-
-          <div class="metric-content">
-
-            <div>
-
-              <div class="metric-detail">
-
-                <span>
-                  Источник
-                </span>
-
-                <strong>
-                  ${escapeHtml(
-                    metric.source ||
-                    "measured"
-                  )}
-                </strong>
-
-              </div>
-
-
-              ${
-                metric.description
-                  ? `
-                    <div class="metric-detail">
-
-                      <span>
-                        Описание
-                      </span>
-
-                      <strong>
-                        ${escapeHtml(
-                          metric.description
-                        )}
-                      </strong>
-
-                    </div>
-                  `
-                  : ""
-              }
-
-
-              ${renderMetricIndicator(
-                metric
-              )}
-
-            </div>
-
-          </div>
-        `;
-
-
-        card.style.setProperty(
-          "--reveal-delay",
-          `${index * 35}ms`
-        );
-
-
-        card.classList.add(
-          "reveal"
-        );
-
-
-        container.appendChild(
-          card
-        );
-      }
-    );
-  }
-
-
-  function renderMetricIndicator(metric) {
-    const raw =
-      metric.normalized ??
-      metric.score ??
-      metric.percent;
-
-
-    if (
-      typeof raw !== "number" ||
-      !Number.isFinite(raw)
-    ) {
-      return "";
-    }
-
-
-    const value =
-      clamp(
-        raw,
-        0,
-        100
-      );
-
-
-    const tone =
-      metric.tone ||
-      getToneFromValue(value);
-
-
-    return `
-      <div class="metric-indicator">
-
-        <div class="metric-indicator__track">
-
-          <div
-            class="metric-indicator__bar ${escapeHtml(
-              tone
-            )}"
-            style="width:${value}%"
-          ></div>
-
-        </div>
-
-        <span class="metric-indicator__value">
-          ${formatNumber(value)}
-        </span>
-
-      </div>
-    `;
-  }
-
-
-  function getToneFromValue(value) {
-    if (value >= 70) {
-      return "positive";
-    }
-
-
-    if (value < 40) {
-      return "negative";
-    }
-
-
-    return "neutral";
-  }
-
-
-  /* =========================================================
-     GROUP RENDERER
-  ========================================================== */
-
-  function renderGroup(
-    container,
-    data
-  ) {
-    if (!container) {
-      return;
-    }
-
-
-    container.innerHTML =
-      "";
-
-
-    if (!data) {
-      container.innerHTML =
-        createEmptyCard(
-          "Нет данных."
-        );
-
-      return;
-    }
-
-
-    const groups =
-      normalizeGroups(data);
-
-
-    if (!groups.length) {
-      container.innerHTML =
-        createEmptyCard(
-          "Нет измерений в этом разделе."
-        );
-
-      return;
-    }
-
-
-    groups.forEach(
-      (group, groupIndex) => {
-        const values =
-          normalizeGroupValues(
-            group.values
-          );
-
-
-        const element =
-          document.createElement("article");
-
-
-        element.className =
-          "feature-group";
-
-
-        element.innerHTML = `
-          <button
-            class="feature-group__header"
-            type="button"
-            aria-expanded="false"
-          >
-
-            <span class="feature-group__title">
-              ${escapeHtml(
-                group.title || ""
-              )}
-            </span>
-
-            <span class="feature-group__count">
-              ${values.length}
-            </span>
-
-            <span class="feature-group__arrow">
-              +
-            </span>
-
-          </button>
-
-
-          <div class="feature-list">
-
-            <div>
-
-              <div class="feature-list-inner">
-
-                ${
-                  values.length
-                    ? values
-                        .map(
-                          (
-                            item,
-                            itemIndex
-                          ) => `
-                            <div
-                              class="feature-row"
-                              style="--reveal-delay:${
-                                itemIndex * 25
-                              }ms"
-                            >
-
-                              <span
-                                class="feature-row__name"
-                              >
-                                ${escapeHtml(
-                                  item.name ||
-                                  item.label ||
-                                  ""
-                                )}
-                              </span>
-
-                              <span
-                                class="feature-row__value"
-                              >
-                                ${escapeHtml(
-                                  formatValue(
-                                    item.value
-                                  )
-                                )}
-                              </span>
-
-                            </div>
-                          `
-                        )
-                        .join("")
-                    : `
-                      <div class="feature-row">
-                        <span class="feature-row__name">
-                          Нет данных
-                        </span>
-
-                        <span class="feature-row__value">
-                          —
-                        </span>
-                      </div>
-                    `
-                }
-
-              </div>
-
-            </div>
-
-          </div>
-        `;
-
-
-        element.style.setProperty(
-          "--reveal-delay",
-          `${groupIndex * 40}ms`
-        );
-
-
-        element.classList.add(
-          "reveal"
-        );
-
-
-        container.appendChild(
-          element
-        );
-      }
-    );
-  }
-
-
-  function normalizeGroups(data) {
-    if (Array.isArray(data)) {
-      return data.map(
-        group => ({
-          title:
-            group.title ||
-            group.name ||
-            group.label ||
-            "Раздел",
-
-          values:
-            group.values ??
-            group.items ??
-            []
-        })
-      );
-    }
-
-
-    if (
-      typeof data === "object" &&
-      data !== null
-    ) {
-      return Object.entries(
-        data
-      ).map(
-        ([title, values]) => ({
-          title,
-          values
-        })
-      );
-    }
-
-
-    return [];
-  }
-
-
-  function normalizeGroupValues(
-    values
-  ) {
-    if (Array.isArray(values)) {
-      return values;
-    }
-
-
-    if (
-      typeof values === "object" &&
-      values !== null
-    ) {
-      return Object.entries(
-        values
-      ).map(
-        ([name, value]) => ({
-          name,
-          value
-        })
-      );
-    }
-
-
-    return [];
-  }
-
-
-  /* =========================================================
-     HEALTH
-  ========================================================== */
-
-  function renderHealth(data) {
-    const container =
-      $("#health-content");
-
-
-    if (!container) {
-      return;
-    }
-
-
-    if (!data) {
-      container.innerHTML = `
-        <div class="note-icon">
-          i
-        </div>
-
-        <p>
-          Нет дополнительных визуальных наблюдений.
-        </p>
-      `;
-
-      return;
-    }
-
-
-    const text =
-      typeof data === "string"
-        ? data
-        : data.note ||
-          data.description ||
-          data.text;
-
-
-    if (!text) {
-      container.innerHTML = `
-        <div class="note-icon">
-          i
-        </div>
-
-        <p>
-          Нет дополнительных визуальных наблюдений.
-        </p>
-      `;
-
-      return;
-    }
-
-
-    container.innerHTML = `
-      <div class="note-icon">
-        i
-      </div>
-
-      <p>
-        ${escapeHtml(text)}
-      </p>
-    `;
-  }
-
-
-  /* =========================================================
-     TABS
-  ========================================================== */
-
-  function bindTabs() {
-    $$(".tab").forEach(
-      tab => {
-        tab.addEventListener(
-          "click",
-          () => {
-            activateTab(
-              tab.dataset.tab
-            );
-          }
-        );
-      }
-    );
-  }
-
-
-  function activateTab(target) {
-    if (!target) {
-      return;
-    }
-
-
-    $$(".tab").forEach(tab => {
       const active =
-        tab.dataset.tab === target;
+        target === name ||
+        (
+          name === "result" &&
+          target === "home"
+        );
 
-
-      tab.classList.toggle(
+      item.classList.toggle(
         "active",
         active
       );
+    }
+  );
+}
 
 
-      tab.setAttribute(
-        "aria-selected",
-        String(active)
-      );
-    });
-
-
-    $$(".tab-panel").forEach(
-      panel => {
-        panel.classList.toggle(
-          "active",
-          panel.dataset.panel === target
-        );
-      }
-    );
-  }
-
-
-  /* =========================================================
-     EXPANDABLE CARDS
-  ========================================================== */
-
-  function bindExpandableDelegation() {
-    document.addEventListener(
-      "click",
-      event => {
-        const metricButton =
-          event.target.closest(
-            ".metric-header"
-          );
-
-
-        if (metricButton) {
-          toggleExpandable(
-            metricButton,
-            ".metric-card"
-          );
-
-          return;
-        }
-
-
-        const featureButton =
-          event.target.closest(
-            ".feature-group__header"
-          );
-
-
-        if (featureButton) {
-          toggleExpandable(
-            featureButton,
-            ".feature-group"
-          );
-        }
-      }
-    );
-  }
-
-
-  function bindExpandableCards() {
-    /*
-     * Делегирование кликов уже установлено.
-     *
-     * Здесь intentionally ничего не добавляется повторно,
-     * чтобы после каждого нового render не возникали
-     * duplicate event listeners.
-     */
-  }
-
-
-  function toggleExpandable(
-    button,
-    cardSelector
+function goBack() {
+  if (
+    currentScreen === "photo"
   ) {
-    const card =
-      button.closest(
-        cardSelector
-      );
-
-
-    if (!card) {
-      return;
-    }
-
-
-    const open =
-      card.classList.toggle(
-        "open"
-      );
-
-
-    button.setAttribute(
-      "aria-expanded",
-      String(open)
-    );
+    showScreen("home");
+    return;
   }
 
-
-  /* =========================================================
-     LANDMARK NORMALIZATION
-  ========================================================== */
-
-  function normalizeLandmarks(
-    landmarks
+  if (
+    currentScreen === "history"
   ) {
-    if (!Array.isArray(landmarks)) {
-      return [];
-    }
-
-
-    return landmarks
-      .map(point => {
-        if (
-          Array.isArray(point) &&
-          point.length >= 2
-        ) {
-          return {
-            x: Number(point[0]),
-            y: Number(point[1]),
-            name:
-              point[2] ||
-              ""
-          };
-        }
-
-
-        if (
-          point &&
-          typeof point === "object"
-        ) {
-          return {
-            x: Number(point.x),
-            y: Number(point.y),
-            name:
-              point.name ||
-              point.label ||
-              ""
-          };
-        }
-
-
-        return null;
-      })
-      .filter(
-        point =>
-          point &&
-          Number.isFinite(point.x) &&
-          Number.isFinite(point.y)
-      )
-      .map(point => ({
-        ...point,
-
-        x: clamp(
-          point.x,
-          0,
-          1
-        ),
-
-        y: clamp(
-          point.y,
-          0,
-          1
-        )
-      }));
+    showScreen("home");
+    return;
   }
 
+  if (
+    currentScreen === "about"
+  ) {
+    showScreen("home");
+    return;
+  }
 
-  /* =========================================================
-     LANDMARK DRAWING
-  ========================================================== */
+  if (
+    currentScreen === "result"
+  ) {
+    showScreen("home");
+    return;
+  }
 
-  function resizeCanvas() {
-    if (
-      !analysisImage ||
-      !canvas ||
-      !ctx
-    ) {
-      return;
-    }
-
-
-    const rect =
-      analysisImage.getBoundingClientRect();
-
-
-    if (
-      !rect.width ||
-      !rect.height
-    ) {
-      return;
-    }
+  showScreen("home");
+}
 
 
-    const ratio =
-      window.devicePixelRatio ||
-      1;
+// ======================================================
+// FILE PICKER
+// ======================================================
+
+function openFilePicker() {
+  if (!fileInput) {
+    return;
+  }
+
+  fileInput.value = "";
+
+  fileInput.click();
+}
 
 
-    canvas.width =
-      Math.round(
-        rect.width * ratio
-      );
+function handleFileSelected(file) {
+  if (!file) {
+    return;
+  }
 
+  const validation =
+    validateFile(file);
 
-    canvas.height =
-      Math.round(
-        rect.height * ratio
-      );
-
-
-    canvas.style.width =
-      `${rect.width}px`;
-
-
-    canvas.style.height =
-      `${rect.height}px`;
-
-
-    ctx.setTransform(
-      ratio,
-      0,
-      0,
-      ratio,
-      0,
-      0
+  if (!validation.valid) {
+    showToast(
+      validation.message
     );
 
-
-    state.canvasScale =
-      ratio;
-
-
-    if (
-      state.analysisRunning &&
-      !state.lastLandmarks.length
-    ) {
-      drawScanningLandmarks();
-
-      return;
-    }
-
-
-    if (
-      state.lastLandmarks.length
-    ) {
-      drawLandmarks(
-        state.lastLandmarks
-      );
-    }
+    return;
   }
 
+  selectedFile = file;
 
-  function clearCanvas() {
-    if (
-      !ctx ||
-      !canvas
-    ) {
-      return;
-    }
-
-
-    ctx.clearRect(
-      0,
-      0,
-      canvas.clientWidth,
-      canvas.clientHeight
+  if (selectedObjectUrl) {
+    URL.revokeObjectURL(
+      selectedObjectUrl
     );
   }
 
-
-  function drawScanningLandmarks() {
-    if (
-      !ctx ||
-      !canvas
-    ) {
-      return;
-    }
-
-
-    clearCanvas();
-
-
-    const width =
-      canvas.clientWidth;
-
-    const height =
-      canvas.clientHeight;
-
-
-    if (
-      !width ||
-      !height
-    ) {
-      return;
-    }
-
-
-    /*
-     * Это НЕ выдаётся за реальные landmarks.
-     *
-     * Во время ожидания backend здесь показывается
-     * только визуальная scanning animation.
-     *
-     * Реальные landmarks рисуются после ответа сервера.
-     */
-
-
-    const points = [
-      [.50, .18],
-      [.42, .27],
-      [.58, .27],
-      [.38, .37],
-      [.62, .37],
-      [.50, .42],
-      [.44, .52],
-      [.56, .52],
-      [.39, .62],
-      [.61, .62],
-      [.50, .70]
-    ];
-
-
-    ctx.save();
-
-
-    ctx.strokeStyle =
-      "rgba(255,255,255,.18)";
-
-    ctx.lineWidth =
-      1;
-
-
-    ctx.setLineDash([
-      3,
-      6
-    ]);
-
-
-    ctx.beginPath();
-
-
-    points.forEach(
-      ([x, y], index) => {
-        const px =
-          x * width;
-
-        const py =
-          y * height;
-
-
-        if (index === 0) {
-          ctx.moveTo(
-            px,
-            py
-          );
-        } else {
-          ctx.lineTo(
-            px,
-            py
-          );
-        }
-      }
+  selectedObjectUrl =
+    URL.createObjectURL(
+      file
     );
 
+  if (previewImage) {
+    previewImage.src =
+      selectedObjectUrl;
 
-    ctx.stroke();
-
-
-    ctx.setLineDash([]);
-
-
-    points.forEach(
-      ([x, y]) => {
-        ctx.beginPath();
-
-
-        ctx.arc(
-          x * width,
-          y * height,
-          2,
-          0,
-          Math.PI * 2
-        );
-
-
-        ctx.fillStyle =
-          "rgba(255,255,255,.6)";
-
-
-        ctx.fill();
-      }
-    );
-
-
-    ctx.restore();
+    previewImage.alt =
+      "Selected photo preview";
   }
 
-
-  function drawLandmarks(points) {
-    if (
-      !ctx ||
-      !canvas
-    ) {
-      return;
-    }
-
-
-    clearCanvas();
-
-
-    if (!points?.length) {
-      return;
-    }
-
-
-    const width =
-      canvas.clientWidth;
-
-    const height =
-      canvas.clientHeight;
-
-
-    if (
-      !width ||
-      !height
-    ) {
-      return;
-    }
-
-
-    ctx.save();
-
-
-    /*
-     * Face mesh:
-     *
-     * Соединяем landmarks в разумную
-     * визуальную сеть, но не предполагаем
-     * конкретную topology модели.
-     */
-
-
-    const meshLines =
-      buildMeshLines(points);
-
-
-    ctx.lineWidth =
-      .65;
-
-    ctx.strokeStyle =
-      "rgba(255,255,255,.18)";
-
-
-    meshLines.forEach(
-      ([a, b]) => {
-        const p1 =
-          points[a];
-
-        const p2 =
-          points[b];
-
-
-        if (!p1 || !p2) {
-          return;
-        }
-
-
-        ctx.beginPath();
-
-
-        ctx.moveTo(
-          p1.x * width,
-          p1.y * height
-        );
-
-
-        ctx.lineTo(
-          p2.x * width,
-          p2.y * height
-        );
-
-
-        ctx.stroke();
-      }
-    );
-
-
-    /*
-     * Central axis.
-     */
-
-    const centerX =
-      calculateCenterAxis(points);
-
-
-    if (
-      Number.isFinite(centerX)
-    ) {
-      ctx.save();
-
-
-      ctx.strokeStyle =
-        "rgba(255,255,255,.32)";
-
-
-      ctx.lineWidth =
-        .75;
-
-
-      ctx.setLineDash([
-        4,
-        7
-      ]);
-
-
-      ctx.beginPath();
-
-
-      ctx.moveTo(
-        centerX * width,
-        height * .06
-      );
-
-
-      ctx.lineTo(
-        centerX * width,
-        height * .94
-      );
-
-
-      ctx.stroke();
-
-
-      ctx.restore();
-    }
-
-
-    /*
-     * Landmark points.
-     */
-
-    points.forEach(
-      point => {
-        const px =
-          point.x * width;
-
-        const py =
-          point.y * height;
-
-
-        ctx.beginPath();
-
-
-        ctx.arc(
-          px,
-          py,
-          2,
-          0,
-          Math.PI * 2
-        );
-
-
-        ctx.fillStyle =
-          "rgba(255,255,255,.92)";
-
-
-        ctx.shadowColor =
-          "rgba(255,255,255,.45)";
-
-
-        ctx.shadowBlur =
-          6;
-
-
-        ctx.fill();
-
-
-        ctx.shadowBlur =
-          0;
-      }
-    );
-
-
-    ctx.restore();
+  if (fileFormat) {
+    fileFormat.textContent =
+      getFileFormat(file);
   }
 
-
-  function buildMeshLines(points) {
-    const lines = [];
-
-
-    /*
-     * Nearest-neighbour connections.
-     *
-     * Это даёт mesh-визуализацию для любого
-     * нормализованного массива landmarks,
-     * не требуя от frontend знания конкретной
-     * модели backend.
-     */
-
-
-    const maxDistance =
-      .14;
-
-
-    for (
-      let i = 0;
-      i < points.length;
-      i++
-    ) {
-      const current =
-        points[i];
-
-
-      const neighbours =
-        [];
-
-
-      for (
-        let j = 0;
-        j < points.length;
-        j++
-      ) {
-        if (i === j) {
-          continue;
-        }
-
-
-        const candidate =
-          points[j];
-
-
-        const dx =
-          candidate.x -
-          current.x;
-
-
-        const dy =
-          candidate.y -
-          current.y;
-
-
-        const distance =
-          Math.sqrt(
-            dx * dx +
-            dy * dy
-          );
-
-
-        if (
-          distance <= maxDistance
-        ) {
-          neighbours.push({
-            index: j,
-            distance
-          });
-        }
-      }
-
-
-      neighbours
-        .sort(
-          (a, b) =>
-            a.distance -
-            b.distance
-        )
-        .slice(0, 3)
-        .forEach(
-          neighbour => {
-            const a =
-              Math.min(
-                i,
-                neighbour.index
-              );
-
-            const b =
-              Math.max(
-                i,
-                neighbour.index
-              );
-
-
-            const exists =
-              lines.some(
-                ([x, y]) =>
-                  x === a &&
-                  y === b
-              );
-
-
-            if (!exists) {
-              lines.push([
-                a,
-                b
-              ]);
-            }
-          }
-        );
-    }
-
-
-    return lines;
+  if (fileSize) {
+    fileSize.textContent =
+      formatBytes(
+        file.size
+      );
   }
 
-
-  function calculateCenterAxis(points) {
-    if (!points.length) {
-      return NaN;
-    }
+  showScreen("photo");
+}
 
 
-    const values =
-      points.map(
-        point => point.x
-      );
-
-
-    values.sort(
-      (a, b) => a - b
-    );
-
-
-    const middle =
-      Math.floor(
-        values.length / 2
-      );
-
-
-    if (
-      values.length % 2 === 0
-    ) {
-      return (
-        values[middle - 1] +
-        values[middle]
-      ) / 2;
-    }
-
-
-    return values[middle];
-  }
-
-
-  /* =========================================================
-     HISTORY
-  ========================================================== */
-
-  function saveHistory(result) {
-    if (!state.file) {
-      return;
-    }
-
-
-    const history =
-      getHistory();
-
-
-    const entry = {
-      id:
-        `${Date.now()}-${Math.random()
-          .toString(36)
-          .slice(2, 8)}`,
-
-      date:
-        new Date().toISOString(),
-
-      score:
-        result.score,
-
-      fileName:
-        state.file.name ||
-        "photo",
-
-      landmarkCount:
-        normalizeLandmarks(
-          result.landmarks
-        ).length
+function validateFile(file) {
+  if (
+    !ALLOWED_TYPES.has(
+      file.type
+    )
+  ) {
+    return {
+      valid: false,
+      message:
+        "Only JPG, PNG and WEBP images are supported."
     };
+  }
+
+  if (
+    file.size >
+    MAX_FILE_SIZE
+  ) {
+    return {
+      valid: false,
+      message:
+        "Image is too large. Maximum size is 15 MB."
+    };
+  }
+
+  if (
+    file.size <= 0
+  ) {
+    return {
+      valid: false,
+      message:
+        "The selected image is empty."
+    };
+  }
+
+  return {
+    valid: true
+  };
+}
 
 
-    history.unshift(
-      entry
+function getFileFormat(file) {
+  if (
+    file.type ===
+    "image/jpeg"
+  ) {
+    return "JPEG";
+  }
+
+  if (
+    file.type ===
+    "image/png"
+  ) {
+    return "PNG";
+  }
+
+  if (
+    file.type ===
+    "image/webp"
+  ) {
+    return "WEBP";
+  }
+
+  return "IMAGE";
+}
+
+
+// ======================================================
+// ANALYSIS
+// ======================================================
+
+async function startAnalysis() {
+  if (analysisInProgress) {
+    return;
+  }
+
+  if (!selectedFile) {
+    showToast(
+      "Choose a photo first."
     );
 
+    return;
+  }
 
-    try {
-      localStorage.setItem(
-        state.historyKey,
-        JSON.stringify(
-          history.slice(0, 30)
-        )
+  analysisInProgress = true;
+
+  setAnalyzeButtonLoading(
+    true
+  );
+
+  showScreen(
+    "loading"
+  );
+
+  resetLoadingSteps();
+
+  try {
+    await runLoadingSequence();
+
+    const result =
+      await analyzePhoto(
+        selectedFile
       );
+
+    if (
+      !result ||
+      !result.success
+    ) {
+      throw new Error(
+        result?.detail ||
+        "Analysis failed."
+      );
+    }
+
+    currentAnalysis =
+      normalizeClientResult(
+        result
+      );
+
+    saveHistory(
+      currentAnalysis
+    );
+
+    renderResult(
+      currentAnalysis
+    );
+
+    showScreen(
+      "result"
+    );
+
+  } catch (error) {
+    console.error(
+      "FaceBot analysis error:",
+      error
+    );
+
+    console.error(
+      "FaceBot analysis error stack:",
+      error?.stack
+    );
+
+    showToast(
+      error?.message ||
+      "Analysis failed. Please try again."
+    );
+
+    showScreen(
+      "photo"
+    );
+
+  } finally {
+    analysisInProgress =
+      false;
+
+    setAnalyzeButtonLoading(
+      false
+    );
+  }
+}
+
+
+// ======================================================
+// API REQUEST
+// ======================================================
+
+async function analyzePhoto(file) {
+  if (!file) {
+    throw new Error(
+      "No image file selected."
+    );
+  }
+
+  /*
+   * IMPORTANT:
+   *
+   * We intentionally use FormData.
+   *
+   * DO NOT manually set:
+   *
+   * Content-Type: multipart/form-data
+   *
+   * The browser must create the boundary automatically.
+   */
+
+  const formData =
+    new FormData();
+
+  formData.append(
+    "file",
+    file,
+    file.name ||
+      "photo.jpg"
+  );
+
+  let response;
+
+  try {
+    response =
+      await fetch(
+        API_ENDPOINT,
+        {
+          method: "POST",
+
+          body: formData,
+
+          headers: {
+            "Accept":
+              "application/json"
+          },
+
+          cache: "no-store"
+        }
+      );
+
+  } catch (error) {
+    console.error(
+      "FaceBot network request error:",
+      error
+    );
+
+    throw new Error(
+      "Could not connect to the analysis server."
+    );
+  }
+
+  const responseText =
+    await response.text();
+
+  let data = null;
+
+  if (
+    responseText &&
+    responseText.trim()
+  ) {
+    try {
+      data =
+        JSON.parse(
+          responseText
+        );
+
     } catch (error) {
-      console.warn(
-        "Could not save history:",
+      console.error(
+        "Invalid JSON from analysis server:",
         error
       );
-    }
 
+      console.error(
+        "Raw server response:",
+        responseText
+      );
 
-    renderHistory();
-  }
-
-
-  function getHistory() {
-    try {
-      const raw =
-        localStorage.getItem(
-          state.historyKey
-        );
-
-
-      if (!raw) {
-        return [];
-      }
-
-
-      const parsed =
-        JSON.parse(raw);
-
-
-      return Array.isArray(parsed)
-        ? parsed
-        : [];
-    } catch {
-      return [];
+      throw new Error(
+        `Server returned invalid JSON (${response.status}).`
+      );
     }
   }
 
+  if (!response.ok) {
+    const detail =
+      data?.detail ||
+      data?.error ||
+      `Analysis request failed (${response.status}).`;
 
-  function renderHistory() {
-    const history =
-      getHistory();
-
-
-    const count =
-      $("#history-count");
-
-
-    const container =
-      $("#history-list");
-
-
-    if (!count || !container) {
-      return;
-    }
-
-
-    count.textContent =
-      history.length;
-
-
-    if (!history.length) {
-      container.innerHTML = `
-        <div class="history-empty">
-          Анализов пока нет.
-        </div>
-      `;
-
-      return;
-    }
-
-
-    container.innerHTML =
-      history
-        .map(
-          (item, index) => `
-            <div
-              class="history-item reveal"
-              style="--reveal-delay:${
-                index * 35
-              }ms"
-            >
-
-              <div>
-
-                <div class="date">
-                  ${formatDate(
-                    item.date
-                  )}
-                </div>
-
-                <div class="meta">
-                  ${escapeHtml(
-                    item.fileName
-                  )}
-                  ${
-                    Number.isFinite(
-                      item.landmarkCount
-                    )
-                      ? `
-                        · ${item.landmarkCount}
-                        landmarks
-                      `
-                      : ""
-                  }
-                </div>
-
-              </div>
-
-              <div class="score">
-                ${formatNumber(
-                  item.score
-                )}
-              </div>
-
-            </div>
-          `
-        )
-        .join("");
-  }
-
-
-  /* =========================================================
-     NEW ANALYSIS
-  ========================================================== */
-
-  function bindNewAnalysis() {
-    const button =
-      $("#new-analysis");
-
-
-    if (!button) {
-      return;
-    }
-
-
-    button.addEventListener(
-      "click",
-      () => {
-        if (state.analysisRunning) {
-          return;
-        }
-
-
-        if (fileInput) {
-          fileInput.value =
-            "";
-        }
-
-
-        state.result =
-          null;
-
-        state.lastLandmarks =
-          [];
-
-
-        resetResultUI();
-
-        showScreen("home");
-      }
+    throw new Error(
+      detail
     );
   }
 
+  if (!data) {
+    throw new Error(
+      "Server returned an empty response."
+    );
+  }
 
-  function resetResultUI() {
+  return data;
+}
+
+
+// ======================================================
+// LOADING ANIMATION
+// ======================================================
+
+async function runLoadingSequence() {
+  const steps = [
+    {
+      number: 1,
+
+      title:
+        "Analyzing photo",
+
+      subtitle:
+        "Detecting the visible face…"
+    },
+
+    {
+      number: 2,
+
+      title:
+        "Reading facial structure",
+
+      subtitle:
+        "Extracting visible geometry…"
+    },
+
+    {
+      number: 3,
+
+      title:
+        "Preparing feature set",
+
+      subtitle:
+        "Organizing the analyzer response…"
+    },
+
+    {
+      number: 4,
+
+      title:
+        "Running production analysis",
+
+      subtitle:
+        "Generating the final report…"
+    }
+  ];
+
+  for (
+    let index = 0;
+    index < steps.length;
+    index++
+  ) {
+    const step =
+      steps[index];
+
+    setLoadingStep(
+      step.number
+    );
+
+    if (loadingTitle) {
+      loadingTitle.textContent =
+        step.title;
+    }
+
+    if (loadingSubtitle) {
+      loadingSubtitle.textContent =
+        step.subtitle;
+    }
+
+    /*
+     * This animation is UI feedback.
+     *
+     * The actual API request starts
+     * after the sequence completes.
+     */
+    await sleep(
+      index ===
+      steps.length - 1
+        ? 250
+        : 420
+    );
+  }
+}
+
+
+function resetLoadingSteps() {
+  const steps =
+    document.querySelectorAll(
+      ".loading-step"
+    );
+
+  steps.forEach(
+    (step) => {
+      step.classList.remove(
+        "active",
+        "done"
+      );
+    }
+  );
+
+  const first =
+    document.querySelector(
+      '.loading-step[data-step="1"]'
+    );
+
+  if (first) {
+    first.classList.add(
+      "active"
+    );
+  }
+
+  if (loadingTitle) {
+    loadingTitle.textContent =
+      "Analyzing photo";
+  }
+
+  if (loadingSubtitle) {
+    loadingSubtitle.textContent =
+      "Detecting the face…";
+  }
+}
+
+
+function setLoadingStep(number) {
+  const steps =
+    document.querySelectorAll(
+      ".loading-step"
+    );
+
+  steps.forEach(
+    (step) => {
+      const stepNumber =
+        Number(
+          step.dataset.step
+        );
+
+      step.classList.toggle(
+        "active",
+        stepNumber ===
+          number
+      );
+
+      step.classList.toggle(
+        "done",
+        stepNumber <
+          number
+      );
+    }
+  );
+}
+
+
+function sleep(ms) {
+  return new Promise(
+    (resolve) =>
+      setTimeout(
+        resolve,
+        ms
+      )
+  );
+}
+
+
+// ======================================================
+// RESULT
+// ======================================================
+
+function normalizeClientResult(
+  data
+) {
+  const result = {
+    success: true,
+
+    score:
+      normalizeScore(
+        data.score
+      ),
+
+    face_count:
+      toNumberOrZero(
+        data.face_count
+      ),
+
+    landmarks_count:
+      nullableNumber(
+        data.landmarks_count
+      ),
+
+    detected_features:
+      toNumberOrZero(
+        data.detected_features
+      ),
+
+    feature_count:
+      toNumberOrZero(
+        data.feature_count
+      ),
+
+    model:
+      cleanText(
+        data.model
+      ) ||
+      "Gemini",
+
+    metrics:
+      isObject(
+        data.metrics
+      )
+        ? data.metrics
+        : {},
+
+    production_features:
+      isObject(
+        data.production_features
+      )
+        ? data.production_features
+        : {},
+
+    generated_at:
+      data.generated_at ||
+      new Date().toISOString()
+  };
+
+  return result;
+}
+
+
+function renderResult(
+  result
+) {
+  renderScore(
+    result.score
+  );
+
+  if (statFaces) {
+    statFaces.textContent =
+      String(
+        result.face_count
+      );
+  }
+
+  if (statLandmarks) {
+    statLandmarks.textContent =
+      result.landmarks_count ===
+      null
+        ? "—"
+        : formatValue(
+            result.landmarks_count
+          );
+  }
+
+  if (statFeatures) {
+    const total =
+      result.feature_count ||
+      result.detected_features ||
+      countLeaves(
+        result.production_features
+      );
+
+    statFeatures.textContent =
+      String(
+        total
+      );
+  }
+
+  if (statModel) {
+    statModel.textContent =
+      shortenModelName(
+        result.model
+      );
+  }
+
+  renderOverview(
+    result.metrics
+  );
+
+  renderMetrics(
+    result.metrics
+  );
+
+  renderProductionFeatures(
+    result.production_features
+  );
+}
+
+
+function renderScore(score) {
+  if (score === null) {
     if (resultScore) {
       resultScore.textContent =
         "—";
     }
 
-
-    if (scoreProgress) {
-      scoreProgress.style.width =
+    if (resultProgress) {
+      resultProgress.style.width =
         "0%";
     }
 
-
-    if (resultLandmarkCount) {
-      resultLandmarkCount.textContent =
-        "—";
+    if (resultCaption) {
+      resultCaption.textContent =
+        "No usable face detected";
     }
 
-
-    if (scoreStatus) {
-      scoreStatus.textContent =
-        "Измерения получены";
+    if (scoreRange) {
+      scoreRange.textContent =
+        "NO SCORE";
     }
+
+    return;
   }
 
+  if (resultScore) {
+    resultScore.textContent =
+      formatScore(
+        score
+      );
+  }
 
-  /* =========================================================
-     KEYBOARD
-  ========================================================== */
+  if (resultProgress) {
+    resultProgress.style.width =
+      `${clamp(
+        score * 10,
+        0,
+        100
+      )}%`;
+  }
 
-  function bindKeyboardShortcuts() {
-    document.addEventListener(
-      "keydown",
-      event => {
-        if (
-          event.key === "Escape" &&
-          state.analysisRunning
-        ) {
-          /*
-           * Не отменяем backend fetch.
-           * Escape здесь только не должен
-           * ломать текущий процесс.
-           */
-          return;
-        }
-      }
+  if (resultCaption) {
+    resultCaption.textContent =
+      "Production analysis result";
+  }
+
+  if (scoreRange) {
+    scoreRange.textContent =
+      "REAL RESULT";
+  }
+}
+
+
+function renderOverview(
+  metrics
+) {
+  if (!overviewGrid) {
+    return;
+  }
+
+  overviewGrid.innerHTML =
+    "";
+
+  const leaves =
+    flattenObject(
+      metrics
     );
+
+  const entries =
+    leaves.slice(
+      0,
+      8
+    );
+
+  if (metricCount) {
+    metricCount.textContent =
+      String(
+        leaves.length
+      );
   }
 
-
-  /* =========================================================
-     RESIZE
-  ========================================================== */
-
-  function handleResize() {
-    resizeCanvas();
+  if (analyzerCount) {
+    analyzerCount.textContent =
+      String(
+        leaves.length
+      );
   }
 
+  if (!entries.length) {
+    overviewGrid.innerHTML =
+      "";
 
-  /* =========================================================
-     IMAGE WAIT
-  ========================================================== */
+    overviewGrid.appendChild(
+      emptyBlock(
+        "No measured structure returned."
+      )
+    );
 
-  async function waitForImageReady() {
-    if (
-      analysisImage.complete &&
-      analysisImage.naturalWidth
-    ) {
-      resizeCanvas();
+    return;
+  }
 
-      return;
-    }
-
-
-    await new Promise(
-      (resolve, reject) => {
-        const timeout =
-          setTimeout(
-            () => {
-              reject(
-                new Error(
-                  "Изображение не удалось подготовить."
-                )
-              );
-            },
-            10000
-          );
-
-
-        analysisImage.addEventListener(
-          "load",
-          () => {
-            clearTimeout(
-              timeout
-            );
-
-            resolve();
-          },
-          {
-            once: true
-          }
+  entries.forEach(
+    ([key, value]) => {
+      const card =
+        document.createElement(
+          "article"
         );
 
+      card.className =
+        "overview-card";
 
-        analysisImage.addEventListener(
-          "error",
-          () => {
-            clearTimeout(
-              timeout
-            );
+      const label =
+        document.createElement(
+          "div"
+        );
 
-            reject(
-              new Error(
-                "Не удалось загрузить изображение."
+      label.className =
+        "overview-card__label";
+
+      label.textContent =
+        prettifyKey(
+          key
+        );
+
+      const valueElement =
+        document.createElement(
+          "div"
+        );
+
+      valueElement.className =
+        "overview-card__value";
+
+      valueElement.textContent =
+        formatValue(
+          value
+        );
+
+      const source =
+        document.createElement(
+          "div"
+        );
+
+      source.className =
+        "overview-card__source";
+
+      source.textContent =
+        "returned by analyzer";
+
+      card.append(
+        label,
+        valueElement,
+        source
+      );
+
+      overviewGrid.appendChild(
+        card
+      );
+    }
+  );
+}
+
+
+function renderMetrics(
+  metrics
+) {
+  if (!metricsContainer) {
+    return;
+  }
+
+  metricsContainer.innerHTML =
+    "";
+
+  const groups =
+    Object.entries(
+      metrics || {}
+    );
+
+  const leaves =
+    flattenObject(
+      metrics
+    );
+
+  if (analyzerCount) {
+    analyzerCount.textContent =
+      String(
+        leaves.length
+      );
+  }
+
+  if (!groups.length) {
+    metricsContainer.appendChild(
+      emptyBlock(
+        "No measurements returned."
+      )
+    );
+
+    return;
+  }
+
+  groups.forEach(
+    (
+      [
+        groupName,
+        groupValue
+      ]
+    ) => {
+      if (
+        isObject(
+          groupValue
+        )
+      ) {
+        Object.entries(
+          groupValue
+        ).forEach(
+          (
+            [
+              key,
+              value
+            ]
+          ) => {
+            metricsContainer.appendChild(
+              createMetricCard(
+                groupName,
+                key,
+                value
               )
             );
-          },
-          {
-            once: true
           }
         );
-      }
-    );
-  }
 
-
-  /* =========================================================
-     HELPERS
-  ========================================================== */
-
-  function formatNumber(value) {
-    if (
-      typeof value !== "number" ||
-      !Number.isFinite(value)
-    ) {
-      return "—";
-    }
-
-
-    return Number.isInteger(value)
-      ? String(value)
-      : value.toFixed(1);
-  }
-
-
-  function formatValue(value) {
-    if (
-      value === null ||
-      value === undefined
-    ) {
-      return "—";
-    }
-
-
-    if (
-      typeof value === "number"
-    ) {
-      return formatNumber(value);
-    }
-
-
-    if (
-      typeof value === "boolean"
-    ) {
-      return value
-        ? "Да"
-        : "Нет";
-    }
-
-
-    return String(value);
-  }
-
-
-  function formatDate(date) {
-    const parsed =
-      new Date(date);
-
-
-    if (
-      Number.isNaN(
-        parsed.getTime()
-      )
-    ) {
-      return "—";
-    }
-
-
-    return new Intl.DateTimeFormat(
-      "ru-RU",
-      {
-        day: "2-digit",
-        month: "2-digit",
-        year: "numeric",
-        hour: "2-digit",
-        minute: "2-digit"
-      }
-    ).format(parsed);
-  }
-
-
-  function clamp(
-    value,
-    min,
-    max
-  ) {
-    return Math.min(
-      max,
-      Math.max(
-        min,
-        value
-      )
-    );
-  }
-
-
-  function delay(ms) {
-    return new Promise(
-      resolve =>
-        setTimeout(
-          resolve,
-          ms
-        )
-    );
-  }
-
-
-  function notify(message) {
-    if (!toast) {
-      return;
-    }
-
-
-    toast.textContent =
-      String(message);
-
-
-    toast.classList.add(
-      "show"
-    );
-
-
-    clearTimeout(
-      notify.timer
-    );
-
-
-    notify.timer =
-      setTimeout(
-        () => {
-          toast.classList.remove(
-            "show"
-          );
-        },
-        3000
-      );
-  }
-
-
-  function emptyMessage(text) {
-    return `
-      <div class="history-empty">
-        ${escapeHtml(text)}
-      </div>
-    `;
-  }
-
-
-  function createEmptyCard(text) {
-    return `
-      <div class="history-empty">
-        ${escapeHtml(text)}
-      </div>
-    `;
-  }
-
-
-  function escapeHtml(value) {
-    return String(
-      value ?? ""
-    )
-      .replaceAll(
-        "&",
-        "&amp;"
-      )
-      .replaceAll(
-        "<",
-        "&lt;"
-      )
-      .replaceAll(
-        ">",
-        "&gt;"
-      )
-      .replaceAll(
-        '"',
-        "&quot;"
-      )
-      .replaceAll(
-        "'",
-        "&#039;"
-      );
-  }
-
-
-  function updateRevealDelays() {
-    $$(".reveal").forEach(
-      (element, index) => {
-        if (
-          !element.style.getPropertyValue(
-            "--reveal-delay"
+      } else {
+        metricsContainer.appendChild(
+          createMetricCard(
+            "",
+            groupName,
+            groupValue
           )
-        ) {
-          element.style.setProperty(
-            "--reveal-delay",
-            `${Math.min(index * 45, 450)}ms`
-          );
-        }
+        );
       }
-    );
-  }
-
-
-  /* =========================================================
-     CLEANUP
-  ========================================================== */
-
-  function clearAnalysisAnimation() {
-    state.animationTimers.forEach(
-      timer => {
-        clearTimeout(timer);
-      }
-    );
-
-
-    state.animationTimers =
-      [];
-
-
-    if (state.analysisTimer) {
-      clearTimeout(
-        state.analysisTimer
-      );
-
-      state.analysisTimer =
-        null;
     }
-  }
+  );
+}
 
 
-  function revokeObjectUrl() {
-    if (!state.objectUrl) {
-      return;
-    }
-
-
-    URL.revokeObjectURL(
-      state.objectUrl
+function createMetricCard(
+  groupName,
+  key,
+  value
+) {
+  const card =
+    document.createElement(
+      "article"
     );
 
+  card.className =
+    "metric-card";
 
-    state.objectUrl =
-      null;
-  }
-
-
-  function cleanupObjectUrl() {
-    revokeObjectUrl();
-  }
-
-})();(() => {
-  "use strict";
-
-  const $ = (selector, root = document) =>
-    root.querySelector(selector);
-
-  const $$ = (selector, root = document) =>
-    [...root.querySelectorAll(selector)];
-
-  const state = {
-    file: null,
-    objectUrl: null,
-    result: null,
-    analysisTimer: null
-  };
-
-  const screens = {
-    home: $("#screen-home"),
-    analysis: $("#screen-analysis"),
-    result: $("#screen-result"),
-    history: $("#screen-history"),
-    about: $("#screen-about")
-  };
-
-  const fileInput = $("#file-input");
-  const uploadBtn = $("#upload-btn");
-  const uploadName = $("#upload-name");
-
-  const analysisImage = $("#analysis-image");
-  const canvas = $("#landmark-canvas");
-  const ctx = canvas.getContext("2d");
-
-  const loadingTitle = $("#loading-title");
-  const loadingText = $("#loading-text");
-  const analysisState = $("#analysis-state");
-
-  const analysisScore = $("#analysis-score");
-  const analysisScoreValue =
-    $("#analysis-score strong");
-
-  const resultScore = $("#result-score");
-  const scoreProgress = $("#score-progress");
-
-  const toast = $("#toast");
-
-  /* ---------------- NAVIGATION ---------------- */
-
-  function showScreen(name) {
-    const target = screens[name];
-
-    if (!target) return;
-
-    Object.values(screens).forEach(screen => {
-      screen.classList.remove("active", "screen-enter");
-    });
-
-    target.classList.add("active");
-
-    requestAnimationFrame(() => {
-      target.classList.add("screen-enter");
-    });
-
-    $$(".nav-item").forEach(button => {
-      button.classList.toggle(
-        "active",
-        button.dataset.screen === name
-      );
-    });
-
-    window.scrollTo({
-      top: 0,
-      behavior: "smooth"
-    });
-  }
-
-  $$("[data-screen]").forEach(button => {
-    button.addEventListener("click", () => {
-      showScreen(button.dataset.screen);
-    });
-  });
-
-  /* ---------------- UPLOAD ---------------- */
-
-  uploadBtn.addEventListener("click", () => {
-    fileInput.click();
-  });
-
-  fileInput.addEventListener("change", () => {
-    const file = fileInput.files?.[0];
-
-    if (!file) return;
-
-    if (!file.type.startsWith("image/")) {
-      notify("Выбери изображение.");
-      return;
-    }
-
-    if (file.size > 15 * 1024 * 1024) {
-      notify("Файл слишком большой. Максимум 15 MB.");
-      return;
-    }
-
-    startAnalysis(file);
-  });
-
-  function setPreview(file) {
-    if (state.objectUrl) {
-      URL.revokeObjectURL(state.objectUrl);
-    }
-
-    state.objectUrl = URL.createObjectURL(file);
-
-    analysisImage.src = state.objectUrl;
-
-    analysisImage.onload = () => {
-      resizeCanvas();
-      drawScanningLandmarks();
-    };
-  }
-
-  /* ---------------- ANALYSIS ---------------- */
-
-  async function startAnalysis(file) {
-    state.file = file;
-    state.result = null;
-
-    uploadName.textContent = file.name;
-
-    setPreview(file);
-
-    resetAnalysisUI();
-
-    showScreen("analysis");
-
-    await runLoadingAnimation();
-
-    try {
-      const result = await analyzeImage(file);
-
-      state.result = result;
-
-      finishAnalysis(result);
-    } catch (error) {
-      console.error(error);
-
-      notify(
-        error?.message ||
-        "Не удалось выполнить анализ."
-      );
-
-      showScreen("home");
-    }
-  }
-
-  function resetAnalysisUI() {
-    analysisScore.classList.remove(
-      "show",
-      "float"
+  const header =
+    document.createElement(
+      "button"
     );
 
-    analysisScoreValue.textContent = "—";
+  header.type =
+    "button";
 
-    analysisState.textContent = "ANALYZING";
+  header.className =
+    "metric-header";
 
-    loadingTitle.textContent = "Анализируем";
-    loadingText.textContent =
-      "Подготавливаем изображение";
-
-    $$(".loading-step").forEach((step, index) => {
-      step.classList.toggle("active", index === 0);
-      step.classList.remove("done");
-    });
-
-    clearCanvas();
-  }
-
-  async function runLoadingAnimation() {
-    const steps = $$(".loading-step");
-
-    const messages = [
-      "Подготавливаем изображение",
-      "Определяем landmarks",
-      "Измеряем пропорции",
-      "Сравниваем стороны лица",
-      "Собираем результат"
-    ];
-
-    for (let i = 0; i < steps.length; i++) {
-      loadingText.textContent = messages[i];
-
-      steps.forEach((step, index) => {
-        step.classList.toggle(
-          "active",
-          index === i
-        );
-
-        if (index < i) {
-          step.classList.add("done");
-        }
-      });
-
-      await delay(420);
-    }
-
-    steps.forEach(step => {
-      step.classList.remove("active");
-      step.classList.add("done");
-    });
-  }
-
-  async function analyzeImage(file) {
-    /*
-     * app.js не придумывает score.
-     *
-     * Backend должен вернуть реальные измерения.
-     * Например:
-     *
-     * {
-     *   score: 78.4,
-     *   stats: [...],
-     *   overview: [...],
-     *   metrics: [...],
-     *   harmony: {...},
-     *   angularity: {...},
-     *   symmetry: {...},
-     *   dimorphism: {...},
-     *   health: {...},
-     *   landmarks: [...]
-     * }
-     *
-     * Gemini может использоваться backend'ом
-     * для qualitative notes, но score сюда должен
-     * приходить из measurement pipeline.
-     */
-
-    const form = new FormData();
-
-    form.append("image", file);
-
-    const response = await fetch(
-      "/api/analyze",
-      {
-        method: "POST",
-        body: form
-      }
+  const main =
+    document.createElement(
+      "div"
     );
 
-    if (!response.ok) {
-      let message = "Ошибка анализа.";
+  main.className =
+    "metric-main";
 
-      try {
-        const data = await response.json();
-
-        if (data?.error) {
-          message = data.error;
-        }
-      } catch {}
-
-      throw new Error(message);
-    }
-
-    const data = await response.json();
-
-    validateResult(data);
-
-    return data;
-  }
-
-  function validateResult(data) {
-    if (!data || typeof data !== "object") {
-      throw new Error(
-        "Сервер вернул некорректный результат."
-      );
-    }
-
-    if (
-      typeof data.score !== "number" ||
-      !Number.isFinite(data.score)
-    ) {
-      throw new Error(
-        "Числовой score не получен из измерений."
-      );
-    }
-  }
-
-  /* ---------------- RESULT ---------------- */
-
-  function finishAnalysis(result) {
-    analysisState.textContent = "COMPLETE";
-
-    analysisScoreValue.textContent =
-      formatNumber(result.score);
-
-    analysisScore.classList.add("show");
-
-    drawLandmarks(result.landmarks || []);
-
-    setTimeout(() => {
-      analysisScore.classList.add("float");
-    }, 950);
-
-    setTimeout(() => {
-      renderResult(result);
-      showScreen("result");
-    }, 1650);
-  }
-
-  function renderResult(result) {
-    resultScore.textContent =
-      formatNumber(result.score);
-
-    requestAnimationFrame(() => {
-      scoreProgress.style.width =
-        `${clamp(result.score, 0, 100)}%`;
-    });
-
-    renderStats(result.stats || []);
-    renderOverview(result.overview || []);
-
-    renderGroup(
-      $("#harmony-content"),
-      result.harmony
+  const name =
+    document.createElement(
+      "div"
     );
 
-    renderMetrics(
-      result.metrics || []
+  name.className =
+    "metric-name";
+
+  name.textContent =
+    prettifyKey(
+      key
     );
 
-    renderGroup(
-      $("#angularity-content"),
-      result.angularity
+  const metricKey =
+    document.createElement(
+      "div"
     );
 
-    renderGroup(
-      $("#symmetry-content"),
-      result.symmetry
-    );
+  metricKey.className =
+    "metric-key";
 
-    renderGroup(
-      $("#dimorphism-content"),
-      result.dimorphism
-    );
+  metricKey.textContent =
+    groupName
+      ? `${groupName}.${key}`
+      : key;
 
-    renderHealth(result.health);
-
-    saveHistory(result);
-
-    bindExpandableCards();
-  }
-
-  function renderStats(stats) {
-    const container = $("#stats-grid");
-
-    container.innerHTML = "";
-
-    stats.slice(0, 4).forEach(stat => {
-      const element = document.createElement("div");
-
-      element.className = "stat";
-
-      element.innerHTML = `
-        <span>${escapeHtml(stat.label || "")}</span>
-        <strong>${escapeHtml(formatValue(stat.value))}</strong>
-        <small>${escapeHtml(stat.unit || "")}</small>
-      `;
-
-      container.appendChild(element);
-    });
-  }
-
-  function renderOverview(items) {
-    const container = $("#overview-grid");
-
-    container.innerHTML = "";
-
-    items.forEach(item => {
-      const element =
-        document.createElement("div");
-
-      element.className = "overview-card";
-
-      element.innerHTML = `
-        <div class="overview-card__label">
-          ${escapeHtml(item.label || "")}
-        </div>
-
-        <div class="overview-card__value">
-          ${escapeHtml(formatValue(item.value))}
-        </div>
-
-        <div class="overview-card__source">
-          ${escapeHtml(item.source || "measured")}
-        </div>
-      `;
-
-      container.appendChild(element);
-    });
-  }
-
-  function renderMetrics(metrics) {
-    const container = $("#metrics-content");
-
-    container.innerHTML = "";
-
-    metrics.forEach(metric => {
-      const card =
-        document.createElement("article");
-
-      card.className = "metric-card";
-
-      card.innerHTML = `
-        <button class="metric-header">
-          <div class="metric-main">
-            <div class="metric-name">
-              ${escapeHtml(metric.name || "")}
-            </div>
-
-            <div class="metric-key">
-              ${escapeHtml(metric.key || "")}
-            </div>
-          </div>
-
-          <div class="metric-value">
-            ${escapeHtml(formatValue(metric.value))}
-          </div>
-
-          <div class="metric-arrow">+</div>
-        </button>
-
-        <div class="metric-content">
-          <div>
-            <div class="metric-detail">
-              <span>Источник</span>
-              <strong>
-                ${escapeHtml(
-                  metric.source || "measured"
-                )}
-              </strong>
-            </div>
-
-            ${
-              metric.description
-                ? `
-                  <div class="metric-detail">
-                    <span>Описание</span>
-                    <strong>
-                      ${escapeHtml(metric.description)}
-                    </strong>
-                  </div>
-                `
-                : ""
-            }
-          </div>
-        </div>
-      `;
-
-      container.appendChild(card);
-    });
-  }
-
-  function renderGroup(container, data) {
-    if (!container) return;
-
-    container.innerHTML = "";
-
-    if (!data) {
-      container.innerHTML =
-        emptyMessage("Нет данных.");
-      return;
-    }
-
-    const groups = Array.isArray(data)
-      ? data
-      : Object.entries(data).map(
-          ([title, values]) => ({
-            title,
-            values
-          })
-        );
-
-    groups.forEach(group => {
-      const values = Array.isArray(group.values)
-        ? group.values
-        : Object.entries(group.values || {})
-            .map(([name, value]) => ({
-              name,
-              value
-            }));
-
-      const element =
-        document.createElement("article");
-
-      element.className = "feature-group";
-
-      element.innerHTML = `
-        <button class="feature-group__header">
-          <span class="feature-group__title">
-            ${escapeHtml(group.title || "")}
-          </span>
-
-          <span class="feature-group__count">
-            ${values.length}
-          </span>
-
-          <span class="feature-group__arrow">
-            +
-          </span>
-        </button>
-
-        <div class="feature-list">
-          <div>
-            <div class="feature-list-inner">
-              ${values.map(item => `
-                <div class="feature-row">
-                  <span class="feature-row__name">
-                    ${escapeHtml(item.name || item.label || "")}
-                  </span>
-
-                  <span class="feature-row__value">
-                    ${escapeHtml(formatValue(item.value))}
-                  </span>
-                </div>
-              `).join("")}
-            </div>
-          </div>
-        </div>
-      `;
-
-      container.appendChild(element);
-    });
-  }
-
-  function renderHealth(data) {
-    const container = $("#health-content");
-
-    if (!data) {
-      return;
-    }
-
-    const text =
-      typeof data === "string"
-        ? data
-        : data.note || data.description;
-
-    if (!text) return;
-
-    container.innerHTML = `
-      <div class="note-icon">i</div>
-      <p>${escapeHtml(text)}</p>
-    `;
-  }
-
-  /* ---------------- TABS ---------------- */
-
-  $$(".tab").forEach(tab => {
-    tab.addEventListener("click", () => {
-      const target = tab.dataset.tab;
-
-      $$(".tab").forEach(item => {
-        item.classList.toggle(
-          "active",
-          item === tab
-        );
-      });
-
-      $$(".tab-panel").forEach(panel => {
-        panel.classList.toggle(
-          "active",
-          panel.dataset.panel === target
-        );
-      });
-    });
-  });
-
-  /* ---------------- EXPANDABLE ---------------- */
-
-  function bindExpandableCards() {
-    $$(".metric-header").forEach(button => {
-      button.onclick = () => {
-        button
-          .closest(".metric-card")
-          .classList.toggle("open");
-      };
-    });
-
-    $$(".feature-group__header").forEach(button => {
-      button.onclick = () => {
-        button
-          .closest(".feature-group")
-          .classList.toggle("open");
-      };
-    });
-  }
-
-  /* ---------------- LANDMARKS ---------------- */
-
-  function resizeCanvas() {
-    if (!analysisImage.naturalWidth) return;
-
-    const rect =
-      analysisImage.getBoundingClientRect();
-
-    const ratio = window.devicePixelRatio || 1;
-
-    canvas.width = rect.width * ratio;
-    canvas.height = rect.height * ratio;
-
-    canvas.style.width = `${rect.width}px`;
-    canvas.style.height = `${rect.height}px`;
-
-    ctx.setTransform(
-      ratio,
-      0,
-      0,
-      ratio,
-      0,
-      0
-    );
-  }
-
-  window.addEventListener(
-    "resize",
-    resizeCanvas
+  main.append(
+    name,
+    metricKey
   );
 
-  function clearCanvas() {
-    ctx.clearRect(
-      0,
-      0,
-      canvas.clientWidth,
-      canvas.clientHeight
+  const metricValue =
+    document.createElement(
+      "div"
     );
+
+  metricValue.className =
+    "metric-value";
+
+  metricValue.textContent =
+    formatValue(
+      value
+    );
+
+  const arrow =
+    document.createElement(
+      "span"
+    );
+
+  arrow.className =
+    "metric-arrow";
+
+  arrow.textContent =
+    "+";
+
+  header.append(
+    main,
+    metricValue,
+    arrow
+  );
+
+  const content =
+    document.createElement(
+      "div"
+    );
+
+  content.className =
+    "metric-content";
+
+  const contentInner =
+    document.createElement(
+      "div"
+    );
+
+  const detail =
+    document.createElement(
+      "div"
+    );
+
+  detail.className =
+    "metric-detail";
+
+  const detailLabel =
+    document.createElement(
+      "span"
+    );
+
+  detailLabel.textContent =
+    groupName
+      ? prettifyKey(
+          groupName
+        )
+      : "VALUE";
+
+  const detailValue =
+    document.createElement(
+      "strong"
+    );
+
+  detailValue.textContent =
+    formatValue(
+      value
+    );
+
+  detail.append(
+    detailLabel,
+    detailValue
+  );
+
+  contentInner.append(
+    detail
+  );
+
+  content.append(
+    contentInner
+  );
+
+  card.append(
+    header,
+    content
+  );
+
+  header.addEventListener(
+    "click",
+    () => {
+      card.classList.toggle(
+        "open"
+      );
+    }
+  );
+
+  return card;
+}
+
+
+// ======================================================
+// PRODUCTION FEATURES
+// ======================================================
+
+function renderProductionFeatures(
+  production
+) {
+  if (!featureGroups) {
+    return;
   }
 
-  function drawScanningLandmarks() {
-    clearCanvas();
+  featureGroups.innerHTML =
+    "";
 
-    const width = canvas.clientWidth;
-    const height = canvas.clientHeight;
+  const groups =
+    Object.entries(
+      production || {}
+    );
 
-    if (!width || !height) return;
+  const total =
+    countLeaves(
+      production
+    );
 
-    const points = [
-      [.50,.18],
-      [.42,.27],
-      [.58,.27],
-      [.38,.37],
-      [.62,.37],
-      [.50,.42],
-      [.44,.52],
-      [.56,.52],
-      [.39,.62],
-      [.61,.62],
-      [.50,.70]
-    ];
+  if (featureCount) {
+    featureCount.textContent =
+      String(
+        total
+      );
+  }
 
-    ctx.save();
+  if (!groups.length) {
+    featureGroups.appendChild(
+      emptyBlock(
+        "No production features returned."
+      )
+    );
 
-    ctx.strokeStyle =
-      "rgba(255,255,255,.22)";
+    return;
+  }
 
-    ctx.lineWidth = 1;
+  groups.forEach(
+    (
+      [
+        groupName,
+        groupValue
+      ]
+    ) => {
+      const group =
+        document.createElement(
+          "article"
+        );
 
-    ctx.beginPath();
+      group.className =
+        "feature-group";
 
-    points.forEach(([x,y], index) => {
-      const px = x * width;
-      const py = y * height;
+      const header =
+        document.createElement(
+          "button"
+        );
 
-      if (index === 0) {
-        ctx.moveTo(px, py);
+      header.type =
+        "button";
+
+      header.className =
+        "feature-group__header";
+
+      const title =
+        document.createElement(
+          "span"
+        );
+
+      title.className =
+        "feature-group__title";
+
+      title.textContent =
+        prettifyKey(
+          groupName
+        );
+
+      const count =
+        document.createElement(
+          "span"
+        );
+
+      count.className =
+        "feature-group__count";
+
+      count.textContent =
+        `${countLeaves(
+          groupValue
+        )} VALUES`;
+
+      const arrow =
+        document.createElement(
+          "span"
+        );
+
+      arrow.className =
+        "feature-group__arrow";
+
+      arrow.textContent =
+        "+";
+
+      header.append(
+        title,
+        count,
+        arrow
+      );
+
+      const list =
+        document.createElement(
+          "div"
+        );
+
+      list.className =
+        "feature-list";
+
+      const listWrapper =
+        document.createElement(
+          "div"
+        );
+
+      const inner =
+        document.createElement(
+          "div"
+        );
+
+      inner.className =
+        "feature-list-inner";
+
+      const leaves =
+        flattenObject(
+          groupValue
+        );
+
+      if (
+        isObject(
+          groupValue
+        )
+      ) {
+        leaves.forEach(
+          (
+            [
+              key,
+              value
+            ]
+          ) => {
+            const row =
+              document.createElement(
+                "div"
+              );
+
+            row.className =
+              "feature-row";
+
+            const name =
+              document.createElement(
+                "span"
+              );
+
+            name.className =
+              "feature-row__name";
+
+            name.textContent =
+              prettifyKey(
+                key
+              );
+
+            const valueElement =
+              document.createElement(
+                "span"
+              );
+
+            valueElement.className =
+              "feature-row__value";
+
+            valueElement.textContent =
+              formatValue(
+                value
+              );
+
+            row.append(
+              name,
+              valueElement
+            );
+
+            inner.appendChild(
+              row
+            );
+          }
+        );
+
       } else {
-        ctx.lineTo(px, py);
+        const row =
+          document.createElement(
+            "div"
+          );
+
+        row.className =
+          "feature-row";
+
+        const name =
+          document.createElement(
+            "span"
+          );
+
+        name.className =
+          "feature-row__name";
+
+        name.textContent =
+          prettifyKey(
+            groupName
+          );
+
+        const value =
+          document.createElement(
+            "span"
+          );
+
+        value.className =
+          "feature-row__value";
+
+        value.textContent =
+          formatValue(
+            groupValue
+          );
+
+        row.append(
+          name,
+          value
+        );
+
+        inner.appendChild(
+          row
+        );
       }
-    });
 
-    ctx.stroke();
-
-    points.forEach(([x,y]) => {
-      ctx.beginPath();
-
-      ctx.arc(
-        x * width,
-        y * height,
-        2,
-        0,
-        Math.PI * 2
+      listWrapper.append(
+        inner
       );
 
-      ctx.fillStyle =
-        "rgba(255,255,255,.75)";
-
-      ctx.fill();
-    });
-
-    ctx.restore();
-  }
-
-  function drawLandmarks(points) {
-    clearCanvas();
-
-    if (!points?.length) return;
-
-    const width = canvas.clientWidth;
-    const height = canvas.clientHeight;
-
-    ctx.save();
-
-    ctx.fillStyle =
-      "rgba(255,255,255,.85)";
-
-    ctx.strokeStyle =
-      "rgba(255,255,255,.32)";
-
-    ctx.lineWidth = 1;
-
-    points.forEach(point => {
-      const x =
-        typeof point.x === "number"
-          ? point.x * width
-          : point[0] * width;
-
-      const y =
-        typeof point.y === "number"
-          ? point.y * height
-          : point[1] * height;
-
-      ctx.beginPath();
-
-      ctx.arc(
-        x,
-        y,
-        2,
-        0,
-        Math.PI * 2
+      list.append(
+        listWrapper
       );
 
-      ctx.fill();
-    });
+      group.append(
+        header,
+        list
+      );
 
-    ctx.restore();
+      header.addEventListener(
+        "click",
+        () => {
+          group.classList.toggle(
+            "open"
+          );
+        }
+      );
+
+      featureGroups.appendChild(
+        group
+      );
+    }
+  );
+}
+
+
+// ======================================================
+// HISTORY
+// ======================================================
+
+function getHistory() {
+  try {
+    const raw =
+      localStorage.getItem(
+        HISTORY_KEY
+      );
+
+    if (!raw) {
+      return [];
+    }
+
+    const parsed =
+      JSON.parse(
+        raw
+      );
+
+    return Array.isArray(
+      parsed
+    )
+      ? parsed
+      : [];
+
+  } catch (error) {
+    console.warn(
+      "History read error:",
+      error
+    );
+
+    return [];
   }
+}
 
-  /* ---------------- HISTORY ---------------- */
 
-  function saveHistory(result) {
+function saveHistory(
+  result
+) {
+  try {
     const history =
       getHistory();
 
-    history.unshift({
-      date: new Date().toISOString(),
-      score: result.score,
-      fileName:
-        state.file?.name || "photo"
-    });
+    const entry = {
+      id:
+        `${Date.now()}_${Math.random()
+          .toString(36)
+          .slice(2, 9)}`,
+
+      created_at:
+        result.generated_at ||
+        new Date().toISOString(),
+
+      score:
+        result.score,
+
+      face_count:
+        result.face_count,
+
+      feature_count:
+        result.feature_count,
+
+      detected_features:
+        result.detected_features,
+
+      model:
+        result.model
+    };
+
+    history.unshift(
+      entry
+    );
+
+    const limited =
+      history.slice(
+        0,
+        50
+      );
 
     localStorage.setItem(
-      "facemetric-history",
-      JSON.stringify(history.slice(0, 30))
+      HISTORY_KEY,
+      JSON.stringify(
+        limited
+      )
+    );
+
+    updateHistoryCounters();
+
+  } catch (error) {
+    console.warn(
+      "History save error:",
+      error
     );
   }
+}
 
-  function getHistory() {
-    try {
-      return JSON.parse(
-        localStorage.getItem(
-          "facemetric-history"
-        )
-      ) || [];
-    } catch {
-      return [];
-    }
+
+function renderHistory() {
+  if (!historyList) {
+    return;
   }
 
-  function renderHistory() {
-    const history = getHistory();
+  const history =
+    getHistory();
 
-    $("#history-count").textContent =
-      history.length;
-
-    const container = $("#history-list");
-
-    if (!history.length) {
-      container.innerHTML = `
-        <div class="history-empty">
-          Анализов пока нет.
-        </div>
-      `;
-
-      return;
-    }
-
-    container.innerHTML =
-      history.map(item => `
-        <div class="history-item">
-          <div>
-            <div class="date">
-              ${formatDate(item.date)}
-            </div>
-
-            <div class="meta">
-              ${escapeHtml(item.fileName)}
-            </div>
-          </div>
-
-          <div class="score">
-            ${formatNumber(item.score)}
-          </div>
-        </div>
-      `).join("");
-  }
-
-  /* ---------------- NEW ANALYSIS ---------------- */
-
-  $("#new-analysis").addEventListener(
-    "click",
-    () => {
-      fileInput.value = "";
-      state.result = null;
-
-      showScreen("home");
-    }
+  updateHistoryCounters(
+    history.length
   );
 
-  /* ---------------- HELPERS ---------------- */
+  historyList.innerHTML =
+    "";
 
-  function formatNumber(value) {
-    if (
-      typeof value !== "number" ||
-      !Number.isFinite(value)
-    ) {
-      return "—";
-    }
-
-    return Number.isInteger(value)
-      ? String(value)
-      : value.toFixed(1);
-  }
-
-  function formatValue(value) {
-    if (
-      value === null ||
-      value === undefined
-    ) {
-      return "—";
-    }
-
-    if (typeof value === "number") {
-      return formatNumber(value);
-    }
-
-    return String(value);
-  }
-
-  function formatDate(date) {
-    return new Intl.DateTimeFormat(
-      "ru-RU",
-      {
-        day: "2-digit",
-        month: "2-digit",
-        year: "numeric"
-      }
-    ).format(new Date(date));
-  }
-
-  function clamp(value, min, max) {
-    return Math.min(
-      max,
-      Math.max(min, value)
-    );
-  }
-
-  function delay(ms) {
-    return new Promise(resolve =>
-      setTimeout(resolve, ms)
-    );
-  }
-
-  function notify(message) {
-    toast.textContent = message;
-
-    toast.classList.add("show");
-
-    clearTimeout(
-      notify.timer
-    );
-
-    notify.timer = setTimeout(() => {
-      toast.classList.remove("show");
-    }, 2600);
-  }
-
-  function emptyMessage(text) {
-    return `
+  if (!history.length) {
+    historyList.innerHTML = `
       <div class="history-empty">
-        ${escapeHtml(text)}
+        No analyses saved yet.
       </div>
     `;
+
+    return;
   }
 
-  function escapeHtml(value) {
-    return String(value ?? "")
-      .replaceAll("&", "&amp;")
-      .replaceAll("<", "&lt;")
-      .replaceAll(">", "&gt;")
-      .replaceAll('"', "&quot;")
-      .replaceAll("'", "&#039;");
-  }
-
-  /* ---------------- INIT ---------------- */
-
-  renderHistory();
-
-  window.addEventListener(
-    "beforeunload",
-    () => {
-      if (state.objectUrl) {
-        URL.revokeObjectURL(
-          state.objectUrl
+  history.forEach(
+    (entry) => {
+      const item =
+        document.createElement(
+          "article"
         );
+
+      item.className =
+        "history-item";
+
+      const left =
+        document.createElement(
+          "div"
+        );
+
+      const date =
+        document.createElement(
+          "div"
+        );
+
+      date.className =
+        "date";
+
+      date.textContent =
+        formatDate(
+          entry.created_at
+        );
+
+      const meta =
+        document.createElement(
+          "div"
+        );
+
+      meta.className =
+        "meta";
+
+      meta.textContent =
+        `${entry.face_count || 0} face · ` +
+        `${entry.feature_count || entry.detected_features || 0} features`;
+
+      left.append(
+        date,
+        meta
+      );
+
+      const score =
+        document.createElement(
+          "div"
+        );
+
+      score.className =
+        "score";
+
+      score.textContent =
+        entry.score === null ||
+        entry.score === undefined
+          ? "—"
+          : formatScore(
+              entry.score
+            );
+
+      item.append(
+        left,
+        score
+      );
+
+      historyList.appendChild(
+        item
+      );
+    }
+  );
+}
+
+
+function updateHistoryCounters(
+  explicitCount = null
+) {
+  const count =
+    explicitCount === null
+      ? getHistory().length
+      : explicitCount;
+
+  if (historyCount) {
+    historyCount.textContent =
+      `${count} ${
+        count === 1
+          ? "analysis"
+          : "analyses"
+      }`;
+  }
+
+  if (historySummaryCount) {
+    historySummaryCount.textContent =
+      String(
+        count
+      );
+  }
+}
+
+
+// ======================================================
+// NEW ANALYSIS / RESET
+// ======================================================
+
+function startNewAnalysis() {
+  selectedFile = null;
+
+  currentAnalysis = null;
+
+  if (selectedObjectUrl) {
+    URL.revokeObjectURL(
+      selectedObjectUrl
+    );
+
+    selectedObjectUrl =
+      null;
+  }
+
+  if (fileInput) {
+    fileInput.value =
+      "";
+  }
+
+  if (previewImage) {
+    previewImage.removeAttribute(
+      "src"
+    );
+  }
+
+  if (fileFormat) {
+    fileFormat.textContent =
+      "—";
+  }
+
+  if (fileSize) {
+    fileSize.textContent =
+      "—";
+  }
+
+  showScreen(
+    "home"
+  );
+}
+
+
+// ======================================================
+// UI HELPERS
+// ======================================================
+
+function setAnalyzeButtonLoading(
+  loading
+) {
+  if (!analyzeBtn) {
+    return;
+  }
+
+  analyzeBtn.disabled =
+    loading;
+
+  analyzeBtn.style.opacity =
+    loading
+      ? "0.6"
+      : "";
+
+  const spans =
+    analyzeBtn.querySelectorAll(
+      "span"
+    );
+
+  if (!spans.length) {
+    return;
+  }
+
+  if (loading) {
+    spans[0].textContent =
+      "Analyzing…";
+
+    if (spans[1]) {
+      spans[1].textContent =
+        "…";
+    }
+
+  } else {
+    spans[0].textContent =
+      "Analyze photo";
+
+    if (spans[1]) {
+      spans[1].textContent =
+        "→";
+    }
+  }
+}
+
+
+function showToast(
+  message
+) {
+  if (!toast) {
+    return;
+  }
+
+  toast.textContent =
+    String(
+      message
+    );
+
+  toast.classList.add(
+    "show"
+  );
+
+  clearTimeout(
+    toastTimer
+  );
+
+  toastTimer =
+    setTimeout(
+      () => {
+        toast.classList.remove(
+          "show"
+        );
+      },
+      3000
+    );
+}
+
+
+function emptyBlock(
+  message
+) {
+  const div =
+    document.createElement(
+      "div"
+    );
+
+  div.className =
+    "history-empty";
+
+  div.textContent =
+    message;
+
+  return div;
+}
+
+
+// ======================================================
+// FORMATTING
+// ======================================================
+
+function formatBytes(
+  bytes
+) {
+  if (
+    !Number.isFinite(
+      bytes
+    )
+  ) {
+    return "—";
+  }
+
+  if (
+    bytes < 1024
+  ) {
+    return `${bytes} B`;
+  }
+
+  if (
+    bytes <
+    1024 * 1024
+  ) {
+    return `${(
+      bytes / 1024
+    ).toFixed(1)} KB`;
+  }
+
+  return `${(
+    bytes /
+    (1024 * 1024)
+  ).toFixed(2)} MB`;
+}
+
+
+function formatScore(
+  score
+) {
+  const number =
+    Number(
+      score
+    );
+
+  if (
+    !Number.isFinite(
+      number
+    )
+  ) {
+    return "—";
+  }
+
+  return number
+    .toFixed(2)
+    .replace(
+      /\.00$/,
+      ""
+    );
+}
+
+
+function formatValue(
+  value
+) {
+  if (
+    value === null ||
+    value === undefined ||
+    value === ""
+  ) {
+    return "—";
+  }
+
+  if (
+    typeof value ===
+    "number"
+  ) {
+    if (
+      !Number.isFinite(
+        value
+      )
+    ) {
+      return "—";
+    }
+
+    if (
+      Number.isInteger(
+        value
+      )
+    ) {
+      return String(
+        value
+      );
+    }
+
+    return String(
+      Math.round(
+        value * 100
+      ) / 100
+    );
+  }
+
+  if (
+    typeof value ===
+    "boolean"
+  ) {
+    return value
+      ? "Yes"
+      : "No";
+  }
+
+  if (
+    typeof value ===
+    "object"
+  ) {
+    try {
+      return JSON.stringify(
+        value
+      );
+    } catch (error) {
+      return "—";
+    }
+  }
+
+  return String(
+    value
+  );
+}
+
+
+function formatDate(
+  value
+) {
+  const date =
+    new Date(
+      value
+    );
+
+  if (
+    Number.isNaN(
+      date.getTime()
+    )
+  ) {
+    return "Unknown date";
+  }
+
+  return date.toLocaleString(
+    undefined,
+    {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit"
+    }
+  );
+}
+
+
+function prettifyKey(
+  key
+) {
+  return String(
+    key || ""
+  )
+    .replace(
+      /[_-]+/g,
+      " "
+    )
+    .replace(
+      /([a-z])([A-Z])/g,
+      "$1 $2"
+    )
+    .replace(
+      /\s+/g,
+      " "
+    )
+    .trim()
+    .replace(
+      /^./,
+      (char) =>
+        char.toUpperCase()
+    );
+}
+
+
+function shortenModelName(
+  model
+) {
+  const value =
+    String(
+      model || ""
+    );
+
+  if (
+    value.length <= 18
+  ) {
+    return value;
+  }
+
+  return `${value.slice(
+    0,
+    16
+  )}…`;
+}
+
+
+// ======================================================
+// OBJECT HELPERS
+// ======================================================
+
+function isObject(
+  value
+) {
+  return (
+    value !== null &&
+    typeof value ===
+      "object" &&
+    !Array.isArray(
+      value
+    )
+  );
+}
+
+
+function flattenObject(
+  object,
+  prefix = ""
+) {
+  const result = [];
+
+  if (
+    !isObject(
+      object
+    )
+  ) {
+    return result;
+  }
+
+  Object.entries(
+    object
+  ).forEach(
+    (
+      [
+        key,
+        value
+      ]
+    ) => {
+      const path =
+        prefix
+          ? `${prefix}.${key}`
+          : key;
+
+      if (
+        isObject(
+          value
+        )
+      ) {
+        result.push(
+          ...flattenObject(
+            value,
+            path
+          )
+        );
+
+      } else {
+        result.push([
+          path,
+          value
+        ]);
       }
     }
   );
-})();
+
+  return result;
+}
+
+
+function countLeaves(
+  object
+) {
+  return flattenObject(
+    object
+  ).length;
+}
+
+
+function toNumberOrZero(
+  value
+) {
+  const number =
+    Number(
+      value
+    );
+
+  return Number.isFinite(
+    number
+  )
+    ? number
+    : 0;
+}
+
+
+function nullableNumber(
+  value
+) {
+  if (
+    value === null ||
+    value === undefined ||
+    value === ""
+  ) {
+    return null;
+  }
+
+  const number =
+    Number(
+      value
+    );
+
+  return Number.isFinite(
+    number
+  )
+    ? number
+    : null;
+}
+
+
+function normalizeScore(
+  value
+) {
+  if (
+    value === null ||
+    value === undefined ||
+    value === ""
+  ) {
+    return null;
+  }
+
+  const number =
+    Number(
+      value
+    );
+
+  if (
+    !Number.isFinite(
+      number
+    )
+  ) {
+    return null;
+  }
+
+  return Math.round(
+    clamp(
+      number,
+      0,
+      10
+    ) * 100
+  ) / 100;
+}
+
+
+function cleanText(
+  value
+) {
+  if (
+    value === null ||
+    value === undefined
+  ) {
+    return "";
+  }
+
+  return String(
+    value
+  ).trim();
+}
+
+
+function clamp(
+  value,
+  min,
+  max
+) {
+  return Math.min(
+    max,
+    Math.max(
+      min,
+      value
+    )
+  );
+}
+
+
+// ======================================================
+// EVENTS
+// ======================================================
+
+function bindEvents() {
+  if (choosePhotoBtn) {
+    choosePhotoBtn.addEventListener(
+      "click",
+      openFilePicker
+    );
+  }
+
+  if (chooseAnotherBtn) {
+    chooseAnotherBtn.addEventListener(
+      "click",
+      openFilePicker
+    );
+  }
+
+  if (fileInput) {
+    fileInput.addEventListener(
+      "change",
+      () => {
+        const file =
+          fileInput.files?.[0];
+
+        handleFileSelected(
+          file
+        );
+      }
+    );
+  }
+
+  if (analyzeBtn) {
+    analyzeBtn.addEventListener(
+      "click",
+      startAnalysis
+    );
+  }
+
+  if (newAnalysisBtn) {
+    newAnalysisBtn.addEventListener(
+      "click",
+      startNewAnalysis
+    );
+  }
+
+  document
+    .querySelectorAll(
+      "[data-go]"
+    )
+    .forEach(
+      (element) => {
+        element.addEventListener(
+          "click",
+          () => {
+            const target =
+              element.dataset.go;
+
+            if (
+              target
+            ) {
+              showScreen(
+                target
+              );
+            }
+          }
+        );
+      }
+    );
+
+  document
+    .querySelectorAll(
+      "[data-back]"
+    )
+    .forEach(
+      (element) => {
+        element.addEventListener(
+          "click",
+          goBack
+        );
+      }
+    );
+}
+
+
+// ======================================================
+// STARTUP
+// ======================================================
+
+function init() {
+  initTelegram();
+
+  bindEvents();
+
+  updateHistoryCounters();
+
+  showScreen(
+    "home"
+  );
+}
+
+
+init();
