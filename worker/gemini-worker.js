@@ -95,7 +95,7 @@ export default {
 // ============================================================
 
 async function analyze(request, env) {
-  const apiKey = env.GEMINI_API_KEY;
+  const apiKey = request.headers.get("X-Gemini-Key") || env.GEMINI_API_KEY;
 
   if (!apiKey) {
     return json(
