@@ -1,3 +1,16 @@
+
+// Gemini BYOK
+function getGeminiApiKey(){ return localStorage.getItem("facemetric_gemini_key") || ""; }
+function setGeminiApiKey(k){ localStorage.setItem("facemetric_gemini_key", k.trim()); }
+function initGeminiKeyModal(){
+  const m=document.getElementById("apiKeyModal");
+  const i=document.getElementById("geminiApiKeyInput");
+  const b=document.getElementById("saveGeminiKeyBtn");
+  if(!m||!i||!b)return;
+  if(!getGeminiApiKey()) m.style.display="flex";
+  b.onclick=()=>{ if(i.value.trim()){setGeminiApiKey(i.value); m.style.display="none";} };
+}
+
 // web/app.js
 "use strict";
 
@@ -728,6 +741,8 @@ async function analyzePhoto(file, signal) {
     file.name || "photo.jpg"
   );
 
+  const userGeminiKey = getGeminiApiKey();
+
   let response;
 
   try {
@@ -740,7 +755,8 @@ async function analyzePhoto(file, signal) {
 
           headers: {
             Accept:
-              "application/json"
+              "application/json",
+            ...(userGeminiKey ? {"X-Gemini-Key": userGeminiKey} : {})
           },
 
           cache: "no-store",
@@ -5265,3 +5281,5 @@ function init() {
 
 
 init();
+
+window.addEventListener("DOMContentLoaded", initGeminiKeyModal);
