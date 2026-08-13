@@ -1,239 +1,44 @@
-"use strict";
+const $ = (s, root = document) => root.querySelector(s);
+const $$ = (s, root = document) => [...root.querySelectorAll(s)];
 
-/*
- * FaceBot — Telegram Mini App
- * Frontend for FaceBot Gemini Worker
- *
- * IMPORTANT:
- * - Uses the real Gemini Worker response.
- * - Does not create fake scores.
- * - Supports both:
- *
- *   {
- *     success: true,
- *     score: 8.8,
- *     metrics: {...}
- *   }
- *
- *   and:
- *
- *   {
- *     success: true,
- *     analysis: {
- *       score: 8.8,
- *       metrics: {...}
- *     }
- *   }
- */
+const state = {
+  image: null,
+  file: null,
+  result: null
+};
 
-const MAX_FILE_SIZE = 15 * 1024 * 1024;
-
-const ALLOWED_TYPES = new Set([
-  "image/jpeg",
-  "image/png",
-  "image/webp"
-]);
-
-const API_ENDPOINT =
-  "https://facebot-gemini.snow4lyt.workers.dev/api/analyze";
-
-const HISTORY_KEY =
-  "facebot_history_v1";
-
-const tg =
-  window.Telegram &&
-  window.Telegram.WebApp
-    ? window.Telegram.WebApp
-    : null;
+const historyKey = "sub5-history-v1";
 
 
-// ======================================================
-// DOM
-// ======================================================
+/* =========================
+   NAVIGATION
+========================= */
 
-const screens =
-  document.querySelectorAll(".screen");
+function go(screen) {
 
-const fileInput =
-  document.getElementById("fileInput");
+  $$(".screen").forEach(el => {
 
-const choosePhotoBtn =
-  document.getElementById("choosePhotoBtn");
+    const active = el.id === screen;
 
-const chooseAnotherBtn =
-  document.getElementById("chooseAnotherBtn");
+    el.classList.toggle("active", active);
 
-const analyzeBtn =
-  document.getElementById("analyzeBtn");
+    if (active) {
 
-const previewImage =
-  document.getElementById("previewImage");
+      el.classList.remove("screen-enter");
 
-const fileFormat =
-  document.getElementById("fileFormat");
+      requestAnimationFrame(() => {
+        el.classList.add("screen-enter");
+      });
 
-const fileSize =
-  document.getElementById("fileSize");
-
-const loadingTitle =
-  document.getElementById("loadingTitle");
-
-const loadingSubtitle =
-  document.getElementById("loadingSubtitle");
-
-const resultScore =
-  document.getElementById("resultScore");
-
-const resultProgress =
-  document.getElementById("resultProgress");
-
-const resultCaption =
-  document.getElementById("resultCaption");
-
-const scoreRange =
-  document.getElementById("scoreRange");
-
-const statFaces =
-  document.getElementById("statFaces");
-
-const statLandmarks =
-  document.getElementById("statLandmarks");
-
-const statFeatures =
-  document.getElementById("statFeatures");
-
-const statModel =
-  document.getElementById("statModel");
-
-const metricCount =
-  document.getElementById("metricCount");
-
-const analyzerCount =
-  document.getElementById("analyzerCount");
-
-const featureCount =
-  document.getElementById("featureCount");
-
-const overviewGrid =
-  document.getElementById("overviewGrid");
-
-const metricsContainer =
-  document.getElementById("metrics");
-
-const featureGroups =
-  document.getElementById("featureGroups");
-
-const historyCount =
-  document.getElementById("historyCount");
-
-const historySummaryCount =
-  document.getElementById("historySummaryCount");
-
-const historyList =
-  document.getElementById("historyList");
-
-const newAnalysisBtn =
-  document.getElementById("newAnalysisBtn");
-
-const toast =
-  document.getElementById("toast");
-
-
-// ======================================================
-// STATE
-// ======================================================
-
-let selectedFile = null;
-let selectedObjectUrl = null;
-let currentAnalysis = null;
-let currentScreen = "home";
-let analysisInProgress = false;
-let toastTimer = null;
-
-
-// ======================================================
-// TELEGRAM
-// ======================================================
-
-function initTelegram() {
-  if (!tg) {
-    return;
-  }
-
-  try {
-    tg.ready();
-    tg.expand();
-
-    if (
-      typeof tg.setHeaderColor ===
-      "function"
-    ) {
-      tg.setHeaderColor("#08090b");
     }
 
-    if (
-      typeof tg.setBackgroundColor ===
-      "function"
-    ) {
-      tg.setBackgroundColor("#08090b");
-    }
+  });
 
-    if (
-      typeof tg.enableClosingConfirmation ===
-      "function"
-    ) {
-      tg.enableClosingConfirmation();
-    }
-
-  } catch (error) {
-    console.warn(
-      "Telegram initialization warning:",
-      error
+  $$(".nav-item").forEach(btn => {
+    btn.classList.toggle(
+      "active",
+      btn.dataset.screen === screen
     );
-  }
-}
-
-
-// ======================================================
-// NAVIGATION
-// ======================================================
-
-function showScreen(name) {
-  const target =
-    document.querySelector(
-      `.screen[data-screen="${CSS.escape(name)}"]`
-    );
-
-  if (!target) {
-    return;
-  }
-
-  const previous =
-    document.querySelector(
-      `.screen[data-screen="${CSS.escape(currentScreen)}"]`
-    );
-
-  if (previous && previous !== target) {
-    previous.classList.remove("screen-enter");
-  }
-
-  screens.forEach(
-    (screen) => {
-      screen.classList.toggle(
-        "active",
-        screen === target
-      );
-    }
-  );
-
-  currentScreen = name;
-
-  updateNavigation(name);
-
-  requestAnimationFrame(() => {
-    target.classList.remove("screen-enter");
-    void target.offsetWidth;
-    target.classList.add("screen-enter");
   });
 
   window.scrollTo({
@@ -241,2194 +46,885 @@ function showScreen(name) {
     behavior: "smooth"
   });
 
-  if (name === "history") {
+  if (screen === "history") {
     renderHistory();
   }
+
 }
 
 
-function updateNavigation(name) {
-  const navItems =
-    document.querySelectorAll(
-      ".nav-item"
-    );
+/* =========================
+   TOAST
+========================= */
 
-  navItems.forEach(
-    (item) => {
-      const target =
-        item.dataset.go;
+function toast(text) {
 
-      const active =
-        target === name ||
-        (
-          name === "result" &&
-          target === "home"
-        );
+  const el = $("#toast");
 
-      item.classList.toggle(
-        "active",
-        active
-      );
-    }
-  );
+  el.textContent = text;
+
+  el.classList.add("show");
+
+  clearTimeout(toast.timer);
+
+  toast.timer = setTimeout(() => {
+    el.classList.remove("show");
+  }, 2400);
+
 }
 
 
-function goBack() {
-  if (
-    currentScreen === "photo" ||
-    currentScreen === "history" ||
-    currentScreen === "about" ||
-    currentScreen === "result"
-  ) {
-    showScreen("home");
-    return;
+/* =========================
+   SCREEN BUTTONS
+========================= */
+
+$$("[data-screen]").forEach(btn => {
+
+  btn.addEventListener("click", () => {
+    go(btn.dataset.screen);
+  });
+
+});
+
+
+/* =========================
+   FILE UPLOAD
+========================= */
+
+$("#uploadBtn").addEventListener("click", () => {
+  $("#fileInput").click();
+});
+
+
+$("#fileInput").addEventListener("change", e => {
+
+  const file = e.target.files?.[0];
+
+  if (!file) return;
+
+  if (!file.type.startsWith("image/")) {
+    return toast("Выбери изображение.");
   }
 
-  showScreen("home");
-}
-
-
-// ======================================================
-// FILE PICKER
-// ======================================================
-
-function openFilePicker() {
-  if (!fileInput) {
-    return;
+  if (file.size > 20 * 1024 * 1024) {
+    return toast("Файл слишком большой — максимум 20 MB.");
   }
 
-  fileInput.value = "";
-  fileInput.click();
-}
+  state.file = file;
 
+  const reader = new FileReader();
 
-function handleFileSelected(file) {
-  if (!file) {
-    return;
-  }
+  reader.onload = () => {
 
-  const validation =
-    validateFile(file);
+    state.image = reader.result;
 
-  if (!validation.valid) {
-    showToast(validation.message);
-    return;
-  }
+    $("#previewImage").src = state.image;
 
-  selectedFile = file;
+    $("#fileName").textContent =
+      file.name;
 
-  if (selectedObjectUrl) {
-    URL.revokeObjectURL(
-      selectedObjectUrl
-    );
-  }
-
-  selectedObjectUrl =
-    URL.createObjectURL(file);
-
-  if (previewImage) {
-    previewImage.src =
-      selectedObjectUrl;
-
-    previewImage.alt =
-      "Selected photo preview";
-  }
-
-  if (fileFormat) {
-    fileFormat.textContent =
-      getFileFormat(file);
-  }
-
-  if (fileSize) {
-    fileSize.textContent =
+    $("#fileSize").textContent =
       formatBytes(file.size);
-  }
 
-  showScreen("photo");
-}
+    go("photo");
 
-
-function validateFile(file) {
-  if (!ALLOWED_TYPES.has(file.type)) {
-    return {
-      valid: false,
-      message:
-        "Only JPG, PNG and WEBP images are supported."
-    };
-  }
-
-  if (file.size > MAX_FILE_SIZE) {
-    return {
-      valid: false,
-      message:
-        "Image is too large. Maximum size is 15 MB."
-    };
-  }
-
-  if (file.size <= 0) {
-    return {
-      valid: false,
-      message:
-        "The selected image is empty."
-    };
-  }
-
-  return {
-    valid: true
   };
-}
 
+  reader.readAsDataURL(file);
 
-function getFileFormat(file) {
-  if (file.type === "image/jpeg") {
-    return "JPEG";
-  }
+});
 
-  if (file.type === "image/png") {
-    return "PNG";
-  }
 
-  if (file.type === "image/webp") {
-    return "WEBP";
-  }
-
-  return "IMAGE";
-}
-
-
-// ======================================================
-// ANALYSIS
-// ======================================================
-
-async function startAnalysis() {
-  if (analysisInProgress) {
-    return;
-  }
-
-  if (!selectedFile) {
-    showToast(
-      "Choose a photo first."
-    );
-    return;
-  }
-
-  analysisInProgress = true;
-
-  setAnalyzeButtonLoading(true);
-
-  showScreen("loading");
-
-  resetLoadingSteps();
-
-  try {
-    /*
-     * Run the visual loading sequence while
-     * the actual API request happens.
-     *
-     * The sequence is only UI feedback.
-     * It does NOT create fake analysis data.
-     */
-
-    const loadingPromise =
-      runLoadingSequence();
-
-    const analysisPromise =
-      analyzePhoto(selectedFile);
-
-    const result =
-      await analysisPromise;
-
-    await loadingPromise;
-
-    if (!result.success) {
-      throw new Error(
-        result.detail ||
-        "Analysis failed."
-      );
-    }
-
-    /*
-     * IMPORTANT FIX
-     *
-     * Gemini Worker currently returns:
-     *
-     * {
-     *   success: true,
-     *   model: "...",
-     *   analysis: {
-     *     score: 8.8,
-     *     face_count: 1,
-     *     metrics: {...}
-     *   }
-     * }
-     *
-     * The old frontend expected score directly
-     * on the root object.
-     *
-     * normalizeClientResult() now unwraps
-     * result.analysis automatically.
-     */
-
-    currentAnalysis =
-      normalizeClientResult(result);
-
-    saveHistory(
-      currentAnalysis
-    );
-
-    renderResult(
-      currentAnalysis
-    );
-
-    showScreen("result");
-
-    animateResultEntrance();
-
-  } catch (error) {
-    console.error(
-      "FaceBot analysis error:",
-      error
-    );
-
-    showToast(
-      error?.message ||
-      "Analysis failed. Please try again."
-    );
-
-    showScreen("photo");
-
-  } finally {
-    analysisInProgress = false;
-    setAnalyzeButtonLoading(false);
-  }
-}
-
-
-// ======================================================
-// API REQUEST
-// ======================================================
-
-async function analyzePhoto(file) {
-  const formData =
-    new FormData();
-
-  formData.append(
-    "file",
-    file,
-    file.name || "photo.jpg"
-  );
-
-  let response;
-
-  try {
-    response =
-      await fetch(
-        API_ENDPOINT,
-        {
-          method: "POST",
-          body: formData,
-          headers: {
-            Accept:
-              "application/json"
-          }
-        }
-      );
-
-  } catch (error) {
-    throw new Error(
-      "Could not connect to FaceBot analysis server."
-    );
-  }
-
-  const responseText =
-    await response.text();
-
-  let data = null;
-
-  try {
-    data =
-      responseText
-        ? JSON.parse(responseText)
-        : null;
-
-  } catch (error) {
-    throw new Error(
-      `Server returned invalid JSON (${response.status}).`
-    );
-  }
-
-  if (!response.ok) {
-    throw new Error(
-      data?.detail ||
-      `Analysis request failed (${response.status}).`
-    );
-  }
-
-  if (!data) {
-    throw new Error(
-      "Server returned an empty response."
-    );
-  }
-
-  return data;
-}
-
-
-// ======================================================
-// LOADING
-// ======================================================
-
-async function runLoadingSequence() {
-  const steps = [
-    {
-      number: 1,
-      title:
-        "Analyzing photo",
-      subtitle:
-        "Uploading the image…"
-    },
-    {
-      number: 2,
-      title:
-        "Reading facial structure",
-      subtitle:
-        "Inspecting the visible face…"
-    },
-    {
-      number: 3,
-      title:
-        "Preparing feature set",
-      subtitle:
-        "Organizing returned measurements…"
-    },
-    {
-      number: 4,
-      title:
-        "Preparing report",
-      subtitle:
-        "Rendering the real analysis…"
-    }
-  ];
-
-  for (
-    let index = 0;
-    index < steps.length;
-    index++
-  ) {
-    const step =
-      steps[index];
-
-    setLoadingStep(
-      step.number
-    );
-
-    if (loadingTitle) {
-      loadingTitle.textContent =
-        step.title;
-    }
-
-    if (loadingSubtitle) {
-      loadingSubtitle.textContent =
-        step.subtitle;
-    }
-
-    await sleep(
-      index === steps.length - 1
-        ? 360
-        : 520
-    );
-  }
-}
-
-
-function resetLoadingSteps() {
-  const steps =
-    document.querySelectorAll(
-      ".loading-step"
-    );
-
-  steps.forEach(
-    (step) => {
-      step.classList.remove(
-        "active",
-        "done"
-      );
-    }
-  );
-
-  const first =
-    document.querySelector(
-      '.loading-step[data-step="1"]'
-    );
-
-  if (first) {
-    first.classList.add(
-      "active"
-    );
-  }
-
-  if (loadingTitle) {
-    loadingTitle.textContent =
-      "Analyzing photo";
-  }
-
-  if (loadingSubtitle) {
-    loadingSubtitle.textContent =
-      "Uploading the image…";
-  }
-}
-
-
-function setLoadingStep(number) {
-  const steps =
-    document.querySelectorAll(
-      ".loading-step"
-    );
-
-  steps.forEach(
-    (step) => {
-      const stepNumber =
-        Number(
-          step.dataset.step
-        );
-
-      step.classList.toggle(
-        "active",
-        stepNumber === number
-      );
-
-      step.classList.toggle(
-        "done",
-        stepNumber < number
-      );
-    }
-  );
-}
-
-
-function sleep(ms) {
-  return new Promise(
-    (resolve) =>
-      setTimeout(
-        resolve,
-        ms
-      )
-  );
-}
-
-
-// ======================================================
-// RESULT NORMALIZATION
-// ======================================================
-
-function normalizeClientResult(data) {
-  /*
-   * FIX:
-   *
-   * The Worker returns:
-   *
-   * data.analysis
-   *
-   * so prefer analysis when it exists.
-   *
-   * We also support a flat response
-   * for compatibility.
-   */
-
-  const payload =
-    isObject(data?.analysis)
-      ? data.analysis
-      : data;
-
-  const score =
-    normalizeScore(
-      payload?.score
-    );
-
-  const faceCount =
-    toNumberOrZero(
-      payload?.face_count
-    );
-
-  const landmarksCount =
-    nullableNumber(
-      payload?.landmarks_count
-    );
-
-  const metrics =
-    isObject(
-      payload?.metrics
-    )
-      ? payload.metrics
-      : {};
-
-  const production =
-    isObject(
-      payload?.production_features
-    )
-      ? payload.production_features
-      : {};
-
-  const detectedFeatures =
-    toNumberOrZero(
-      payload?.detected_features
-    );
-
-  const featureCount =
-    toNumberOrZero(
-      payload?.feature_count
-    );
-
-  const model =
-    cleanText(
-      data?.model ||
-      payload?.model
-    ) ||
-    "Gemini";
-
-  return {
-    success: true,
-
-    score,
-
-    face_count:
-      faceCount,
-
-    landmarks_count:
-      landmarksCount,
-
-    detected_features:
-      detectedFeatures,
-
-    feature_count:
-      featureCount,
-
-    model,
-
-    metrics,
-
-    production_features:
-      production,
-
-    generated_at:
-      data?.generated_at ||
-      payload?.generated_at ||
-      new Date().toISOString()
-  };
-}
-
-
-// ======================================================
-// RESULT
-// ======================================================
-
-function renderResult(result) {
-  renderScore(
-    result.score
-  );
-
-  if (statFaces) {
-    statFaces.textContent =
-      String(
-        result.face_count
-      );
-  }
-
-  if (statLandmarks) {
-    statLandmarks.textContent =
-      result.landmarks_count === null
-        ? "—"
-        : formatValue(
-            result.landmarks_count
-          );
-  }
-
-  if (statFeatures) {
-    const total =
-      result.feature_count ||
-      result.detected_features ||
-      countLeaves(
-        result.production_features
-      );
-
-    statFeatures.textContent =
-      String(total);
-  }
-
-  if (statModel) {
-    statModel.textContent =
-      shortenModelName(
-        result.model
-      );
-  }
-
-  renderOverview(
-    result.metrics
-  );
-
-  renderMetrics(
-    result.metrics
-  );
-
-  renderProductionFeatures(
-    result.production_features
-  );
-}
-
-
-function renderScore(score) {
-  if (score === null) {
-    if (resultScore) {
-      resultScore.textContent =
-        "—";
-    }
-
-    if (resultProgress) {
-      resultProgress.style.width =
-        "0%";
-    }
-
-    if (resultCaption) {
-      resultCaption.textContent =
-        "No usable face detected";
-    }
-
-    if (scoreRange) {
-      scoreRange.textContent =
-        "NO SCORE";
-    }
-
-    return;
-  }
-
-  if (resultScore) {
-    resultScore.textContent =
-      "0";
-  }
-
-  if (resultProgress) {
-    resultProgress.style.width =
-      "0%";
-  }
-
-  if (resultCaption) {
-    resultCaption.textContent =
-      "Real result returned by analyzer";
-  }
-
-  if (scoreRange) {
-    scoreRange.textContent =
-      "REAL RESULT";
-  }
-
-  requestAnimationFrame(
-    () => {
-      animateScore(
-        score
-      );
-
-      if (resultProgress) {
-        resultProgress.style.width =
-          `${clamp(
-            score * 10,
-            0,
-            100
-          )}%`;
-      }
-    }
-  );
-}
-
-
-function animateScore(target) {
-  if (!resultScore) {
-    return;
-  }
-
-  const duration = 1000;
-  const startTime =
-    performance.now();
-
-  function frame(now) {
-    const progress =
-      clamp(
-        (now - startTime) /
-          duration,
-        0,
-        1
-      );
-
-    const eased =
-      1 -
-      Math.pow(
-        1 - progress,
-        4
-      );
-
-    const value =
-      target * eased;
-
-    resultScore.textContent =
-      formatScore(value);
-
-    if (progress < 1) {
-      requestAnimationFrame(
-        frame
-      );
-    } else {
-      resultScore.textContent =
-        formatScore(target);
-    }
-  }
-
-  requestAnimationFrame(
-    frame
-  );
-}
-
-
-// ======================================================
-// RESULT ENTRANCE ANIMATION
-// ======================================================
-
-function animateResultEntrance() {
-  const animatedGroups = [
-    ".result-hero",
-    ".stats-grid .stat",
-    ".report-section",
-    ".note-card"
-  ];
-
-  animatedGroups.forEach(
-    (selector) => {
-      document
-        .querySelectorAll(selector)
-        .forEach(
-          (element, index) => {
-            element.classList.remove(
-              "reveal"
-            );
-
-            element.style.setProperty(
-              "--reveal-delay",
-              `${index * 70}ms`
-            );
-
-            requestAnimationFrame(
-              () => {
-                element.classList.add(
-                  "reveal"
-                );
-              }
-            );
-          }
-        );
-    }
-  );
-}
-
-
-// ======================================================
-// OVERVIEW
-// ======================================================
-
-function renderOverview(metrics) {
-  if (!overviewGrid) {
-    return;
-  }
-
-  overviewGrid.innerHTML = "";
-
-  const leaves =
-    flattenObject(
-      metrics
-    );
-
-  const entries =
-    leaves.slice(
-      0,
-      8
-    );
-
-  if (metricCount) {
-    metricCount.textContent =
-      String(
-        leaves.length
-      );
-  }
-
-  if (analyzerCount) {
-    analyzerCount.textContent =
-      String(
-        leaves.length
-      );
-  }
-
-  if (!entries.length) {
-    overviewGrid.appendChild(
-      emptyBlock(
-        "No measured structure returned."
-      )
-    );
-
-    return;
-  }
-
-  entries.forEach(
-    ([key, value], index) => {
-      const card =
-        document.createElement(
-          "article"
-        );
-
-      card.className =
-        "overview-card reveal";
-
-      card.style.setProperty(
-        "--reveal-delay",
-        `${index * 55}ms`
-      );
-
-      const label =
-        document.createElement(
-          "div"
-        );
-
-      label.className =
-        "overview-card__label";
-
-      label.textContent =
-        prettifyKey(key);
-
-      const valueElement =
-        document.createElement(
-          "div"
-        );
-
-      valueElement.className =
-        "overview-card__value";
-
-      valueElement.textContent =
-        formatValue(value);
-
-      const source =
-        document.createElement(
-          "div"
-        );
-
-      source.className =
-        "overview-card__source";
-
-      source.textContent =
-        "returned by analyzer";
-
-      card.append(
-        label,
-        valueElement,
-        source
-      );
-
-      overviewGrid.appendChild(
-        card
-      );
-    }
-  );
-}
-
-
-// ======================================================
-// METRICS
-// ======================================================
-
-function renderMetrics(metrics) {
-  if (!metricsContainer) {
-    return;
-  }
-
-  metricsContainer.innerHTML = "";
-
-  const groups =
-    Object.entries(
-      metrics || {}
-    );
-
-  const leaves =
-    flattenObject(
-      metrics
-    );
-
-  if (analyzerCount) {
-    analyzerCount.textContent =
-      String(
-        leaves.length
-      );
-  }
-
-  if (!groups.length) {
-    metricsContainer.appendChild(
-      emptyBlock(
-        "No measurements returned."
-      )
-    );
-
-    return;
-  }
-
-  let cardIndex = 0;
-
-  groups.forEach(
-    ([groupName, groupValue]) => {
-      if (isObject(groupValue)) {
-        Object.entries(
-          groupValue
-        ).forEach(
-          ([key, value]) => {
-            const card =
-              createMetricCard(
-                groupName,
-                key,
-                value
-              );
-
-            card.style.setProperty(
-              "--reveal-delay",
-              `${cardIndex * 45}ms`
-            );
-
-            card.classList.add(
-              "reveal"
-            );
-
-            metricsContainer.appendChild(
-              card
-            );
-
-            cardIndex++;
-          }
-        );
-
-      } else {
-        const card =
-          createMetricCard(
-            "",
-            groupName,
-            groupValue
-          );
-
-        card.style.setProperty(
-          "--reveal-delay",
-          `${cardIndex * 45}ms`
-        );
-
-        card.classList.add(
-          "reveal"
-        );
-
-        metricsContainer.appendChild(
-          card
-        );
-
-        cardIndex++;
-      }
-    }
-  );
-}
-
-
-function createMetricCard(
-  groupName,
-  key,
-  value
-) {
-  const card =
-    document.createElement(
-      "article"
-    );
-
-  card.className =
-    "metric-card";
-
-  const header =
-    document.createElement(
-      "button"
-    );
-
-  header.type = "button";
-
-  header.className =
-    "metric-header";
-
-  const main =
-    document.createElement(
-      "div"
-    );
-
-  main.className =
-    "metric-main";
-
-  const name =
-    document.createElement(
-      "div"
-    );
-
-  name.className =
-    "metric-name";
-
-  name.textContent =
-    prettifyKey(key);
-
-  const metricKey =
-    document.createElement(
-      "div"
-    );
-
-  metricKey.className =
-    "metric-key";
-
-  metricKey.textContent =
-    groupName
-      ? `${groupName}.${key}`
-      : key;
-
-  main.append(
-    name,
-    metricKey
-  );
-
-  const metricValue =
-    document.createElement(
-      "div"
-    );
-
-  metricValue.className =
-    "metric-value";
-
-  metricValue.textContent =
-    formatValue(value);
-
-  const arrow =
-    document.createElement(
-      "span"
-    );
-
-  arrow.className =
-    "metric-arrow";
-
-  arrow.textContent =
-    "+";
-
-  header.append(
-    main,
-    metricValue,
-    arrow
-  );
-
-  const content =
-    document.createElement(
-      "div"
-    );
-
-  content.className =
-    "metric-content";
-
-  const contentInner =
-    document.createElement(
-      "div"
-    );
-
-  const detail =
-    document.createElement(
-      "div"
-    );
-
-  detail.className =
-    "metric-detail";
-
-  const detailLabel =
-    document.createElement(
-      "span"
-    );
-
-  detailLabel.textContent =
-    groupName
-      ? prettifyKey(groupName)
-      : "VALUE";
-
-  const detailValue =
-    document.createElement(
-      "strong"
-    );
-
-  detailValue.textContent =
-    formatValue(value);
-
-  detail.append(
-    detailLabel,
-    detailValue
-  );
-
-  contentInner.appendChild(
-    detail
-  );
-
-  content.appendChild(
-    contentInner
-  );
-
-  card.append(
-    header,
-    content
-  );
-
-  header.addEventListener(
-    "click",
-    () => {
-      card.classList.toggle(
-        "open"
-      );
-    }
-  );
-
-  return card;
-}
-
-
-// ======================================================
-// PRODUCTION / AI FEATURES
-// ======================================================
-
-function renderProductionFeatures(
-  production
-) {
-  if (!featureGroups) {
-    return;
-  }
-
-  featureGroups.innerHTML = "";
-
-  const groups =
-    Object.entries(
-      production || {}
-    );
-
-  const total =
-    countLeaves(
-      production
-    );
-
-  if (featureCount) {
-    featureCount.textContent =
-      String(total);
-  }
-
-  if (!groups.length) {
-    featureGroups.appendChild(
-      emptyBlock(
-        "No feature groups returned."
-      )
-    );
-
-    return;
-  }
-
-  groups.forEach(
-    (
-      [groupName, groupValue],
-      groupIndex
-    ) => {
-      const group =
-        document.createElement(
-          "article"
-        );
-
-      group.className =
-        "feature-group reveal";
-
-      group.style.setProperty(
-        "--reveal-delay",
-        `${groupIndex * 65}ms`
-      );
-
-      const header =
-        document.createElement(
-          "button"
-        );
-
-      header.type = "button";
-
-      header.className =
-        "feature-group__header";
-
-      const title =
-        document.createElement(
-          "span"
-        );
-
-      title.className =
-        "feature-group__title";
-
-      title.textContent =
-        prettifyKey(
-          groupName
-        );
-
-      const count =
-        document.createElement(
-          "span"
-        );
-
-      count.className =
-        "feature-group__count";
-
-      count.textContent =
-        `${countLeaves(
-          groupValue
-        )} VALUES`;
-
-      const arrow =
-        document.createElement(
-          "span"
-        );
-
-      arrow.className =
-        "feature-group__arrow";
-
-      arrow.textContent =
-        "+";
-
-      header.append(
-        title,
-        count,
-        arrow
-      );
-
-      const list =
-        document.createElement(
-          "div"
-        );
-
-      list.className =
-        "feature-list";
-
-      const listWrapper =
-        document.createElement(
-          "div"
-        );
-
-      const inner =
-        document.createElement(
-          "div"
-        );
-
-      inner.className =
-        "feature-list-inner";
-
-      const leaves =
-        flattenObject(
-          groupValue
-        );
-
-      if (isObject(groupValue)) {
-        leaves.forEach(
-          ([key, value]) => {
-            const row =
-              document.createElement(
-                "div"
-              );
-
-            row.className =
-              "feature-row";
-
-            const name =
-              document.createElement(
-                "span"
-              );
-
-            name.className =
-              "feature-row__name";
-
-            name.textContent =
-              prettifyKey(key);
-
-            const valueElement =
-              document.createElement(
-                "span"
-              );
-
-            valueElement.className =
-              "feature-row__value";
-
-            valueElement.textContent =
-              formatValue(value);
-
-            row.append(
-              name,
-              valueElement
-            );
-
-            inner.appendChild(
-              row
-            );
-          }
-        );
-
-      } else {
-        const row =
-          document.createElement(
-            "div"
-          );
-
-        row.className =
-          "feature-row";
-
-        const name =
-          document.createElement(
-            "span"
-          );
-
-        name.className =
-          "feature-row__name";
-
-        name.textContent =
-          prettifyKey(
-            groupName
-          );
-
-        const value =
-          document.createElement(
-            "span"
-          );
-
-        value.className =
-          "feature-row__value";
-
-        value.textContent =
-          formatValue(
-            groupValue
-          );
-
-        row.append(
-          name,
-          value
-        );
-
-        inner.appendChild(
-          row
-        );
-      }
-
-      listWrapper.appendChild(
-        inner
-      );
-
-      list.appendChild(
-        listWrapper
-      );
-
-      group.append(
-        header,
-        list
-      );
-
-      header.addEventListener(
-        "click",
-        () => {
-          group.classList.toggle(
-            "open"
-          );
-        }
-      );
-
-      featureGroups.appendChild(
-        group
-      );
-    }
-  );
-}
-
-
-// ======================================================
-// HISTORY
-// ======================================================
-
-function getHistory() {
-  try {
-    const raw =
-      localStorage.getItem(
-        HISTORY_KEY
-      );
-
-    if (!raw) {
-      return [];
-    }
-
-    const parsed =
-      JSON.parse(raw);
-
-    return Array.isArray(parsed)
-      ? parsed
-      : [];
-
-  } catch (error) {
-    console.warn(
-      "History read error:",
-      error
-    );
-
-    return [];
-  }
-}
-
-
-function saveHistory(result) {
-  try {
-    const history =
-      getHistory();
-
-    const entry = {
-      id:
-        `${Date.now()}_${Math.random()
-          .toString(36)
-          .slice(2, 9)}`,
-
-      created_at:
-        result.generated_at ||
-        new Date().toISOString(),
-
-      score:
-        result.score,
-
-      face_count:
-        result.face_count,
-
-      feature_count:
-        result.feature_count,
-
-      detected_features:
-        result.detected_features,
-
-      model:
-        result.model
-    };
-
-    history.unshift(
-      entry
-    );
-
-    const limited =
-      history.slice(
-        0,
-        50
-      );
-
-    localStorage.setItem(
-      HISTORY_KEY,
-      JSON.stringify(
-        limited
-      )
-    );
-
-    updateHistoryCounters();
-
-  } catch (error) {
-    console.warn(
-      "History save error:",
-      error
-    );
-  }
-}
-
-
-function renderHistory() {
-  if (!historyList) {
-    return;
-  }
-
-  const history =
-    getHistory();
-
-  updateHistoryCounters(
-    history.length
-  );
-
-  historyList.innerHTML = "";
-
-  if (!history.length) {
-    historyList.innerHTML = `
-      <div class="history-empty">
-        No analyses saved yet.
-      </div>
-    `;
-
-    return;
-  }
-
-  history.forEach(
-    (entry, index) => {
-      const item =
-        document.createElement(
-          "article"
-        );
-
-      item.className =
-        "history-item reveal";
-
-      item.style.setProperty(
-        "--reveal-delay",
-        `${index * 55}ms`
-      );
-
-      const left =
-        document.createElement(
-          "div"
-        );
-
-      const date =
-        document.createElement(
-          "div"
-        );
-
-      date.className =
-        "date";
-
-      date.textContent =
-        formatDate(
-          entry.created_at
-        );
-
-      const meta =
-        document.createElement(
-          "div"
-        );
-
-      meta.className =
-        "meta";
-
-      meta.textContent =
-        `${entry.face_count || 0} face · ` +
-        `${entry.feature_count ||
-          entry.detected_features ||
-          0} features`;
-
-      left.append(
-        date,
-        meta
-      );
-
-      const score =
-        document.createElement(
-          "div"
-        );
-
-      score.className =
-        "score";
-
-      score.textContent =
-        entry.score === null ||
-        entry.score === undefined
-          ? "—"
-          : formatScore(
-              entry.score
-            );
-
-      item.append(
-        left,
-        score
-      );
-
-      historyList.appendChild(
-        item
-      );
-    }
-  );
-}
-
-
-function updateHistoryCounters(
-  explicitCount = null
-) {
-  const count =
-    explicitCount === null
-      ? getHistory().length
-      : explicitCount;
-
-  if (historyCount) {
-    historyCount.textContent =
-      `${count} ${
-        count === 1
-          ? "analysis"
-          : "analyses"
-      }`;
-  }
-
-  if (historySummaryCount) {
-    historySummaryCount.textContent =
-      String(count);
-  }
-}
-
-
-// ======================================================
-// RESET
-// ======================================================
-
-function startNewAnalysis() {
-  selectedFile = null;
-  currentAnalysis = null;
-
-  if (selectedObjectUrl) {
-    URL.revokeObjectURL(
-      selectedObjectUrl
-    );
-
-    selectedObjectUrl = null;
-  }
-
-  if (fileInput) {
-    fileInput.value = "";
-  }
-
-  if (previewImage) {
-    previewImage.removeAttribute(
-      "src"
-    );
-  }
-
-  if (fileFormat) {
-    fileFormat.textContent =
-      "—";
-  }
-
-  if (fileSize) {
-    fileSize.textContent =
-      "—";
-  }
-
-  showScreen("home");
-}
-
-
-// ======================================================
-// UI
-// ======================================================
-
-function setAnalyzeButtonLoading(
-  loading
-) {
-  if (!analyzeBtn) {
-    return;
-  }
-
-  analyzeBtn.disabled =
-    loading;
-
-  analyzeBtn.classList.toggle(
-    "is-loading",
-    loading
-  );
-
-  const spans =
-    analyzeBtn.querySelectorAll(
-      "span"
-    );
-
-  if (!spans.length) {
-    return;
-  }
-
-  if (loading) {
-    spans[0].textContent =
-      "Analyzing…";
-
-    if (spans[1]) {
-      spans[1].textContent =
-        "◌";
-    }
-
-  } else {
-    spans[0].textContent =
-      "Analyze photo";
-
-    if (spans[1]) {
-      spans[1].textContent =
-        "→";
-    }
-  }
-}
-
-
-function showToast(message) {
-  if (!toast) {
-    return;
-  }
-
-  toast.textContent =
-    String(message);
-
-  toast.classList.add(
-    "show"
-  );
-
-  clearTimeout(
-    toastTimer
-  );
-
-  toastTimer =
-    setTimeout(
-      () => {
-        toast.classList.remove(
-          "show"
-        );
-      },
-      3200
-    );
-}
-
-
-function emptyBlock(message) {
-  const div =
-    document.createElement(
-      "div"
-    );
-
-  div.className =
-    "history-empty";
-
-  div.textContent =
-    message;
-
-  return div;
-}
-
-
-// ======================================================
-// FORMATTING
-// ======================================================
+/* =========================
+   FILE SIZE
+========================= */
 
 function formatBytes(bytes) {
-  if (!Number.isFinite(bytes)) {
-    return "—";
-  }
 
-  if (bytes < 1024) {
-    return `${bytes} B`;
-  }
-
-  if (
-    bytes <
-    1024 * 1024
-  ) {
-    return `${(
-      bytes / 1024
-    ).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024) {
+    return `${Math.max(
+      1,
+      Math.round(bytes / 1024)
+    )} KB`;
   }
 
   return `${(
     bytes /
-    (1024 * 1024)
-  ).toFixed(2)} MB`;
+    1024 /
+    1024
+  ).toFixed(1)} MB`;
+
 }
 
 
-function formatScore(score) {
-  const number =
-    Number(score);
+/* =========================
+   ANALYSIS
+========================= */
 
-  if (!Number.isFinite(number)) {
-    return "—";
+$("#analyzeBtn").addEventListener(
+  "click",
+  runAnalysis
+);
+
+
+$("#newAnalysis").addEventListener(
+  "click",
+  () => {
+
+    $("#fileInput").value = "";
+
+    state.file = null;
+    state.image = null;
+
+    go("home");
+
+  }
+);
+
+
+async function runAnalysis() {
+
+  if (!state.image || !state.file) {
+    return toast("Сначала выбери фотографию.");
   }
 
-  return number
-    .toFixed(2)
-    .replace(
-      /\.00$/,
-      ""
-    );
-}
+  const btn = $("#analyzeBtn");
+
+  btn.disabled = true;
+
+  go("loading");
 
 
-function formatValue(value) {
-  if (
-    value === null ||
-    value === undefined ||
-    value === ""
+  const steps =
+    $$(".loading-step");
+
+
+  const messages = [
+
+    "Подготовка изображения…",
+
+    "Проверка композиции…",
+
+    "Расчёт визуальных метрик…",
+
+    "Формирование отчёта…"
+
+  ];
+
+
+  for (
+    let i = 0;
+    i < steps.length;
+    i++
   ) {
-    return "—";
-  }
 
-  if (
-    typeof value ===
-    "number"
-  ) {
-    if (
-      !Number.isFinite(value)
-    ) {
-      return "—";
-    }
+    steps.forEach(
+      (step, index) => {
 
-    if (
-      Number.isInteger(value)
-    ) {
-      return String(value);
-    }
-
-    return String(
-      Math.round(
-        value * 100
-      ) / 100
-    );
-  }
-
-  if (
-    typeof value ===
-    "boolean"
-  ) {
-    return value
-      ? "Yes"
-      : "No";
-  }
-
-  if (
-    typeof value ===
-    "object"
-  ) {
-    try {
-      return JSON.stringify(
-        value
-      );
-    } catch {
-      return "—";
-    }
-  }
-
-  return String(value);
-}
-
-
-function formatDate(value) {
-  const date =
-    new Date(value);
-
-  if (
-    Number.isNaN(
-      date.getTime()
-    )
-  ) {
-    return "Unknown date";
-  }
-
-  return date.toLocaleString(
-    undefined,
-    {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit"
-    }
-  );
-}
-
-
-function prettifyKey(key) {
-  return String(
-    key || ""
-  )
-    .replace(
-      /[\_-]+/g,
-      " "
-    )
-    .replace(
-      /([a-z])([A-Z])/g,
-      "$1 $2"
-    )
-    .replace(
-      /\s+/g,
-      " "
-    )
-    .trim()
-    .replace(
-      /^./,
-      (char) =>
-        char.toUpperCase()
-    );
-}
-
-
-function shortenModelName(model) {
-  const value =
-    String(
-      model || ""
-    );
-
-  if (
-    value.length <= 18
-  ) {
-    return value;
-  }
-
-  return `${value.slice(
-    0,
-    16
-  )}…`;
-}
-
-
-// ======================================================
-// OBJECT HELPERS
-// ======================================================
-
-function isObject(value) {
-  return (
-    value !== null &&
-    typeof value ===
-      "object" &&
-    !Array.isArray(value)
-  );
-}
-
-
-function flattenObject(
-  object,
-  prefix = ""
-) {
-  const result = [];
-
-  if (!isObject(object)) {
-    return result;
-  }
-
-  Object.entries(
-    object
-  ).forEach(
-    ([key, value]) => {
-      const path =
-        prefix
-          ? `${prefix}.${key}`
-          : key;
-
-      if (
-        isObject(value)
-      ) {
-        result.push(
-          ...flattenObject(
-            value,
-            path
-          )
+        step.classList.toggle(
+          "active",
+          index === i
         );
-      } else {
-        result.push([
-          path,
-          value
-        ]);
+
+        step.classList.toggle(
+          "done",
+          index < i
+        );
+
       }
-    }
+    );
+
+    $("#loadingText").textContent =
+      messages[i];
+
+    await wait(
+      650 +
+      Math.random() * 300
+    );
+
+  }
+
+
+  const result =
+    await calculateVisualMetrics(
+      state.image
+    );
+
+
+  state.result = result;
+
+  populateResult(result);
+
+  saveHistory(result);
+
+  go("result");
+
+  btn.disabled = false;
+
+}
+
+
+/* =========================
+   WAIT
+========================= */
+
+function wait(ms) {
+
+  return new Promise(resolve =>
+    setTimeout(resolve, ms)
   );
 
-  return result;
 }
 
 
-function countLeaves(object) {
-  return flattenObject(
-    object
-  ).length;
-}
+/* =========================
+   IMAGE ANALYSIS
+========================= */
+
+async function calculateVisualMetrics(src) {
+
+  const img = new Image();
+
+  img.src = src;
+
+  await img.decode();
 
 
-function toNumberOrZero(value) {
-  const number =
-    Number(value);
-
-  return Number.isFinite(
-    number
-  )
-    ? number
-    : 0;
-}
+  const canvas =
+    document.createElement("canvas");
 
 
-function nullableNumber(value) {
-  if (
-    value === null ||
-    value === undefined ||
-    value === ""
-  ) {
-    return null;
-  }
-
-  const number =
-    Number(value);
-
-  return Number.isFinite(
-    number
-  )
-    ? number
-    : null;
-}
+  const max = 700;
 
 
-function normalizeScore(value) {
-  if (
-    value === null ||
-    value === undefined ||
-    value === ""
-  ) {
-    return null;
-  }
-
-  const number =
-    Number(value);
-
-  if (
-    !Number.isFinite(
-      number
-    )
-  ) {
-    return null;
-  }
-
-  return (
-    Math.round(
-      clamp(
-        number,
-        0,
-        10
-      ) * 100
-    ) / 100
-  );
-}
-
-
-function cleanText(value) {
-  if (
-    value === null ||
-    value === undefined
-  ) {
-    return "";
-  }
-
-  return String(
-    value
-  ).trim();
-}
-
-
-function clamp(
-  value,
-  min,
-  max
-) {
-  return Math.min(
-    max,
+  const scale = Math.min(
+    1,
+    max /
     Math.max(
-      min,
-      value
+      img.naturalWidth,
+      img.naturalHeight
     )
   );
-}
 
 
-// ======================================================
-// EVENTS
-// ======================================================
-
-function bindEvents() {
-  if (choosePhotoBtn) {
-    choosePhotoBtn.addEventListener(
-      "click",
-      openFilePicker
+  canvas.width =
+    Math.max(
+      1,
+      Math.round(
+        img.naturalWidth * scale
+      )
     );
-  }
 
-  if (chooseAnotherBtn) {
-    chooseAnotherBtn.addEventListener(
-      "click",
-      openFilePicker
+
+  canvas.height =
+    Math.max(
+      1,
+      Math.round(
+        img.naturalHeight * scale
+      )
     );
-  }
 
-  if (fileInput) {
-    fileInput.addEventListener(
-      "change",
-      () => {
-        const file =
-          fileInput.files?.[0];
 
-        handleFileSelected(
-          file
-        );
-      }
-    );
-  }
-
-  if (analyzeBtn) {
-    analyzeBtn.addEventListener(
-      "click",
-      startAnalysis
-    );
-  }
-
-  if (newAnalysisBtn) {
-    newAnalysisBtn.addEventListener(
-      "click",
-      startNewAnalysis
-    );
-  }
-
-  document
-    .querySelectorAll(
-      "[data-go]"
-    )
-    .forEach(
-      (element) => {
-        element.addEventListener(
-          "click",
-          () => {
-            const target =
-              element.dataset.go;
-
-            if (target) {
-              showScreen(
-                target
-              );
-            }
-          }
-        );
+  const ctx =
+    canvas.getContext(
+      "2d",
+      {
+        willReadFrequently: true
       }
     );
 
-  document
-    .querySelectorAll(
-      "[data-back]"
-    )
-    .forEach(
-      (element) => {
-        element.addEventListener(
-          "click",
-          goBack
-        );
-      }
-    );
-}
 
-
-// ======================================================
-// STARTUP
-// ======================================================
-
-function init() {
-  initTelegram();
-
-  bindEvents();
-
-  updateHistoryCounters();
-
-  showScreen(
-    "home"
+  ctx.drawImage(
+    img,
+    0,
+    0,
+    canvas.width,
+    canvas.height
   );
+
+
+  const data =
+    ctx.getImageData(
+      0,
+      0,
+      canvas.width,
+      canvas.height
+    ).data;
+
+
+  let sum = 0;
+  let sumSq = 0;
+
+  let left = 0;
+  let right = 0;
+
+  const count =
+    data.length / 4;
+
+
+  const gray =
+    new Float32Array(count);
+
+
+  /* =========================
+     GRAYSCALE / BRIGHTNESS
+  ========================= */
+
+  for (
+    let i = 0, p = 0;
+    i < data.length;
+    i += 4, p++
+  ) {
+
+    const g =
+      (
+        0.2126 * data[i] +
+        0.7152 * data[i + 1] +
+        0.0722 * data[i + 2]
+      ) / 255;
+
+
+    gray[p] = g;
+
+    sum += g;
+
+    sumSq += g * g;
+
+
+    const x =
+      p % canvas.width;
+
+
+    if (
+      x <
+      canvas.width / 2
+    ) {
+
+      left += g;
+
+    } else {
+
+      right += g;
+
+    }
+
+  }
+
+
+  /* =========================
+     STATISTICS
+  ========================= */
+
+  const mean =
+    sum / count;
+
+
+  const variance =
+    Math.max(
+      0,
+      sumSq / count -
+      mean * mean
+    );
+
+
+  const std =
+    Math.sqrt(variance);
+
+
+  /* =========================
+     EDGE / SHARPNESS
+  ========================= */
+
+  let edge = 0;
+
+
+  for (
+    let y = 1;
+    y < canvas.height;
+    y += 2
+  ) {
+
+    for (
+      let x = 1;
+      x < canvas.width;
+      x += 2
+    ) {
+
+      const idx =
+        y * canvas.width + x;
+
+
+      edge +=
+        Math.abs(
+          gray[idx] -
+          gray[idx - 1]
+        ) +
+        Math.abs(
+          gray[idx] -
+          gray[idx - canvas.width]
+        );
+
+    }
+
+  }
+
+
+  const edgeNorm =
+    Math.min(
+      1,
+      edge /
+      (
+        canvas.width *
+        canvas.height *
+        0.045
+      )
+    );
+
+
+  /* =========================
+     METRICS
+  ========================= */
+
+  const symmetry =
+    Math.max(
+      0,
+      Math.min(
+        100,
+        Math.round(
+          100 -
+          Math.abs(
+            left - right
+          ) /
+          Math.max(
+            0.001,
+            left + right
+          ) *
+          100
+        )
+      )
+    );
+
+
+  const contrast =
+    Math.max(
+      0,
+      Math.min(
+        100,
+        Math.round(
+          std * 210
+        )
+      )
+    );
+
+
+  const lighting =
+    Math.max(
+      0,
+      Math.min(
+        100,
+        Math.round(
+          (
+            1 -
+            Math.abs(
+              mean - 0.52
+            ) *
+            1.65
+          ) *
+          100
+        )
+      )
+    );
+
+
+  const sharpness =
+    Math.max(
+      0,
+      Math.min(
+        100,
+        Math.round(
+          edgeNorm * 100
+        )
+      )
+    );
+
+
+  const exposure =
+    mean < 0.28
+      ? "Тёмная"
+      : mean > 0.78
+        ? "Светлая"
+        : "Сбаланс.";
+
+
+  const composition =
+    Math.round(
+      (
+        symmetry * 0.35 +
+        contrast * 0.25 +
+        lighting * 0.2 +
+        sharpness * 0.2
+      ) /
+      10 *
+      10
+    ) / 10;
+
+
+  const score =
+    Math.max(
+      1,
+      Math.min(
+        9.9,
+        composition / 10
+      )
+    );
+
+
+  const angle =
+    canvas.width /
+      canvas.height >
+      1.55
+
+      ? "Широкий"
+
+      : canvas.width /
+          canvas.height <
+          0.72
+
+        ? "Вертикальный"
+
+        : "Нейтральный";
+
+
+  const centering =
+    symmetry > 88
+      ? "Высокая"
+      : symmetry > 72
+        ? "Средняя"
+        : "Низкая";
+
+
+  return {
+
+    score:
+      Number(
+        score.toFixed(1)
+      ),
+
+    symmetry,
+
+    contrast,
+
+    lighting,
+
+    sharpness,
+
+    exposure,
+
+    composition:
+      Number(
+        composition.toFixed(1)
+      ),
+
+    centering,
+
+    angle,
+
+    aspect:
+      `${img.naturalWidth}×${img.naturalHeight}`,
+
+    date:
+      new Date().toLocaleString(
+        "ru-RU",
+        {
+          day:"2-digit",
+          month:"2-digit",
+          hour:"2-digit",
+          minute:"2-digit"
+        }
+      )
+
+  };
+
 }
 
 
-init();
+/* =========================
+   RESULT UI
+========================= */
+
+function populateResult(r) {
+
+  $("#score").textContent =
+    r.score.toFixed(1);
+
+
+  requestAnimationFrame(() => {
+
+    $("#scoreBar").style.width =
+      `${r.score * 10}%`;
+
+  });
+
+
+  $("#scoreText").textContent =
+    r.score >= 8
+
+      ? "Сильный визуальный баланс"
+
+      : r.score >= 6
+
+        ? "Сбалансированный кадр"
+
+        : "Есть пространство для улучшения кадра";
+
+
+  $("#symmetry").textContent =
+    `${r.symmetry}%`;
+
+  $("#contrast").textContent =
+    `${r.contrast}%`;
+
+  $("#lighting").textContent =
+    `${r.lighting}%`;
+
+  $("#angle").textContent =
+    r.angle;
+
+
+  $("#composition").textContent =
+    `${r.composition}`;
+
+  $("#sharpness").textContent =
+    `${r.sharpness}%`;
+
+  $("#exposure").textContent =
+    r.exposure;
+
+  $("#centering").textContent =
+    r.centering;
+
+
+  $("#mSym").textContent =
+    `${r.symmetry}%`;
+
+  $("#mContrast").textContent =
+    `${r.contrast}%`;
+
+  $("#mLight").textContent =
+    `${r.lighting}%`;
+
+
+  $("#aspect").textContent =
+    r.aspect;
+
+  $("#centerDetail").textContent =
+    r.centering;
+
+  $("#contrastDetail").textContent =
+    `${r.contrast}%`;
+
+  $("#brightnessDetail").textContent =
+    r.exposure;
+
+
+  $("#tipLight").textContent =
+    r.lighting < 65
+
+      ? "Добавить мягкий фронтальный свет"
+
+      : "Свет уже достаточно ровный";
+
+
+  $("#tipAngle").textContent =
+    r.symmetry < 75
+
+      ? "Попробовать более фронтальный ракурс"
+
+      : "Ракурс выглядит стабильным";
+
+}
+
+
+/* =========================
+   ACCORDIONS
+========================= */
+
+$$(".metric-header").forEach(btn => {
+
+  btn.addEventListener(
+    "click",
+    () => {
+
+      btn
+        .closest(".metric-card")
+        .classList
+        .toggle("open");
+
+    }
+  );
+
+});
+
+
+$$(".feature-group__header").forEach(btn => {
+
+  btn.addEventListener(
+    "click",
+    () => {
+
+      btn
+        .closest(".feature-group")
+        .classList
+        .toggle("open");
+
+    }
+  );
+
+});
+
+
+/* =========================
+   HISTORY
+========================= */
+
+function getHistory() {
+
+  try {
+
+    return JSON.parse(
+      localStorage.getItem(
+        historyKey
+      ) || "[]"
+    );
+
+  } catch {
+
+    return [];
+
+  }
+
+}
+
+
+function saveHistory(result) {
+
+  const items =
+    getHistory();
+
+
+  items.unshift({
+
+    score:
+      result.score,
+
+    date:
+      result.date,
+
+    file:
+      state.file?.name ||
+      "image"
+
+  });
+
+
+  localStorage.setItem(
+
+    historyKey,
+
+    JSON.stringify(
+      items.slice(0, 20)
+    )
+
+  );
+
+}
+
+
+function renderHistory() {
+
+  const items =
+    getHistory();
+
+
+  $("#historyCount").textContent =
+    items.length;
+
+
+  const list =
+    $("#historyList");
+
+
+  if (!items.length) {
+
+    list.innerHTML = `
+      <div class="history-empty">
+        Здесь пока ничего нет.<br>
+        После первого анализа результат
+        появится автоматически.
+      </div>
+    `;
+
+    return;
+
+  }
+
+
+  list.innerHTML =
+    items
+      .map(item => `
+
+        <div class="history-item">
+
+          <div>
+
+            <div class="date">
+              ${escapeHtml(item.date)}
+            </div>
+
+            <div class="meta">
+              ${escapeHtml(item.file)}
+            </div>
+
+          </div>
+
+          <div class="score">
+            ${Number(item.score).toFixed(1)}
+          </div>
+
+        </div>
+
+      `)
+      .join("");
+
+}
+
+
+/* =========================
+   HTML ESCAPE
+========================= */
+
+function escapeHtml(str) {
+
+  return String(str).replace(
+    /[&<>"']/g,
+
+    c => ({
+
+      "&":"&amp;",
+      "<":"&lt;",
+      ">":"&gt;",
+      '"':"&quot;",
+      "'":"&#039;"
+
+    }[c])
+
+  );
+
+}
+
+
+/* =========================
+   INIT
+========================= */
+
+renderHistory();
