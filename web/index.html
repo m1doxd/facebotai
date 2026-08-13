@@ -1,63 +1,925 @@
-<!DOCTYPE html>
-<html lang="en">
+<!doctype html>
+<html lang="ru">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#08090b"><meta name="color-scheme" content="dark">
-<title>FaceBot — PSL AI Analyzer</title>
-<script src="https://telegram.org/js/telegram-web-app.js"></script>
-<link rel="stylesheet" href="./style.css">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#08090b">
+  <title>Sub5 — анализ лица</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;650;700;750&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="style.css">
 </head>
+
 <body>
-<div class="app">
-<header class="topbar"><div class="brand"><div class="brand-mark">F</div><div><div class="brand-name">FaceBot</div><div class="brand-subtitle">PSL AI Analyzer</div></div></div><div class="status"><span class="status-dot"></span><span>AI READY</span></div></header>
-<main>
-<section class="screen active" data-screen="home">
-<div class="hero-copy"><div class="eyebrow">FACIAL ANALYSIS</div><h1>Read your<br><span>facial geometry.</span></h1><p>Upload a clear front-facing photo and let the FaceBot AI analyzer inspect the visible facial structure.</p></div>
-<button class="upload-card" id="choosePhotoBtn" type="button"><div class="upload-icon"><span>+</span></div><div class="upload-copy"><strong>Start an analysis</strong><span>JPG, PNG or WEBP · up to 15 MB</span></div><span class="chevron">↗</span></button>
-<div class="home-grid"><button class="mini-card" data-go="history" type="button"><span class="mini-label">HISTORY</span><strong id="historyCount">0 analyses</strong><span class="mini-arrow">↗</span><span class="mini-line"></span></button><button class="mini-card" data-go="about" type="button"><span class="mini-label">ENGINE</span><strong>How it works</strong><span class="mini-arrow">↗</span><span class="mini-line"></span></button></div>
-<div class="trust-row"><span>AI ANALYSIS</span><i></i><span>VISIBLE FEATURES</span><i></i><span>LOCAL HISTORY</span></div>
-<div class="home-footnote"><span class="home-footnote__index">01</span><div><strong>Production endpoint</strong><p>The interface displays the real response returned by the configured FaceBot Gemini Worker.</p></div></div>
-</section>
+  <div class="app">
 
-<section class="screen" data-screen="photo">
-<div class="screen-title"><button class="back-btn" data-back type="button">←</button><div><div class="eyebrow">NEW ANALYSIS</div><h2>Photo</h2></div></div>
-<div class="preview-card"><div class="preview-frame"><img id="previewImage" alt="Selected photo preview"><div class="preview-corners"><span></span><span></span><span></span><span></span></div><div class="preview-overlay">FACE PREVIEW</div></div><div class="file-info"><div><span>FORMAT</span><strong id="fileFormat">—</strong></div><div><span>SIZE</span><strong id="fileSize">—</strong></div></div></div>
-<div class="photo-note"><span class="photo-note__mark">i</span><p>Use one visible face, front-facing when possible, with enough light and minimal obstruction.</p></div>
-<button class="primary-btn" id="analyzeBtn" type="button"><span>Analyze photo</span><span>→</span></button>
-<button class="secondary-btn" id="chooseAnotherBtn" type="button">Choose another photo</button>
-<input id="fileInput" type="file" accept="image/jpeg,image/png,image/webp" hidden>
-</section>
+    <header class="topbar">
+      <button class="brand" data-screen="home" aria-label="На главную">
+        <span class="brand-mark">S5</span>
 
-<section class="screen" data-screen="loading">
-<div class="loading-screen"><div class="scan-orb"><div class="scan-ring"></div><div class="scan-ring scan-ring--outer"></div><span>F</span></div><div class="eyebrow">FACEBOT ENGINE</div><h2>Analyzing photo</h2><p id="loadingSubtitle">Uploading image…</p><div class="loading-steps">
-<div class="loading-step active" data-step="1"><span></span><b>01</b> Uploading image</div><div class="loading-step" data-step="2"><span></span><b>02</b> Inspecting visible face</div><div class="loading-step" data-step="3"><span></span><b>03</b> Extracting feature values</div><div class="loading-step" data-step="4"><span></span><b>04</b> Preparing report</div>
-</div></div>
-</section>
+        <span>
+          <span class="brand-name">SUB5</span>
+          <span class="brand-subtitle">FACE ANALYSIS</span>
+        </span>
+      </button>
 
-<section class="screen" data-screen="result">
-<div class="screen-title result-title"><div><div class="eyebrow">ANALYSIS COMPLETE</div><h2>Face Report</h2></div><button class="icon-btn" id="newAnalysisBtn" type="button">+</button></div>
-<div class="result-hero"><div class="result-score-label">PSL AI SCORE</div><div class="result-score"><span id="resultScore">—</span><small>/10</small></div><div class="score-track"><div id="resultProgress"></div></div><div class="score-meta"><span id="resultCaption">Gemini visual analysis</span><span>REAL RESULT</span></div></div>
-<div class="stats-grid"><div class="stat"><span>FACES</span><strong id="statFaces">—</strong><small>detected</small></div><div class="stat"><span>LANDMARKS</span><strong id="statLandmarks">—</strong><small>returned</small></div><div class="stat"><span>FEATURES</span><strong id="statFeatures">—</strong><small>production</small></div><div class="stat"><span>MODEL</span><strong id="statModel">—</strong><small>inference</small></div></div>
-<div class="report-section"><div class="section-header"><div><div class="eyebrow">ANALYSIS OVERVIEW</div><h3>Measured structure</h3></div><span id="metricCount">0</span></div><div class="overview-grid" id="overviewGrid"></div></div>
-<div class="report-section"><div class="section-header"><div><div class="eyebrow">FACE ANALYZER</div><h3>Measurements</h3></div><span id="analyzerCount">0</span></div><div class="metrics" id="metrics"></div></div>
-<div class="report-section"><div class="section-header"><div><div class="eyebrow">AI FEATURES</div><h3>Feature matrix</h3></div><span id="featureCount">0</span></div><div class="feature-groups" id="featureGroups"></div></div>
-<div class="note-card"><span class="note-icon">i</span><p>The score and feature values shown here are returned by the configured Gemini analysis endpoint. The UI does not invent additional category scores.</p></div>
-</section>
+      <div class="status">
+        <i class="status-dot"></i>
+        SYSTEM READY
+      </div>
+    </header>
 
-<section class="screen" data-screen="history">
-<div class="screen-title"><button class="back-btn" data-back type="button">←</button><div><div class="eyebrow">LOCAL ARCHIVE</div><h2>History</h2></div></div>
-<div class="history-summary"><span class="eyebrow">SAVED LOCALLY</span><strong id="historySummaryCount">0</strong><span>analyses</span></div><div id="historyList" class="history-list"></div>
-</section>
+    <main>
 
-<section class="screen" data-screen="about">
-<div class="screen-title"><button class="back-btn" data-back type="button">←</button><div><div class="eyebrow">FACEBOT</div><h2>How it works</h2></div></div>
-<div class="about-intro"><div class="eyebrow">AI PIPELINE</div><p>One photo is sent to the FaceBot Gemini Worker, which validates the upload, analyzes the visible face and returns structured JSON.</p></div>
-<div class="about-stack"><article class="about-card"><span>01</span><div><strong>Photo upload</strong><p>The Mini App validates JPG, PNG and WEBP files up to 15 MB.</p></div></article><article class="about-card"><span>02</span><div><strong>Gemini analysis</strong><p>The Worker sends the image to the configured Gemini model using the server-side API key.</p></div></article><article class="about-card"><span>03</span><div><strong>Structured result</strong><p>The Worker normalizes the score, metrics and feature groups into a stable API response.</p></div></article><article class="about-card"><span>04</span><div><strong>Face Report</strong><p>The Mini App renders the returned values and saves a compact history locally.</p></div></article></div>
-</section>
-</main>
-<nav class="bottom-nav"><button class="nav-item active" data-go="home" type="button"><span>⌂</span><small>Home</small></button><button class="nav-item" data-go="history" type="button"><span>◷</span><small>History</small></button><button class="nav-item" data-go="about" type="button"><span>i</span><small>About</small></button></nav>
-</div>
-<div class="toast" id="toast"></div><script src="./app.js"></script>
+      <!-- HOME -->
+      <section id="home" class="screen active">
+
+        <div class="hero-copy reveal">
+          <div class="eyebrow">PRIVATE VISUAL ANALYSIS</div>
+
+          <h1>
+            Узнай свой<br>
+            <span>визуальный профиль.</span>
+          </h1>
+
+          <p>
+            Загрузи фотографию. Приложение локально обработает изображение
+            и покажет структурированный отчёт по визуальным признакам.
+          </p>
+        </div>
+
+        <input id="fileInput" type="file" accept="image/*" hidden>
+
+        <button
+          class="upload-card reveal"
+          style="--reveal-delay:70ms"
+          id="uploadBtn"
+        >
+          <span class="upload-icon">
+            <span>↑</span>
+          </span>
+
+          <span class="upload-copy">
+            <strong>Загрузить фотографию</strong>
+            <span>JPG, PNG, WEBP · до 20 MB</span>
+          </span>
+
+          <span class="chevron">↗</span>
+        </button>
+
+        <div class="home-grid">
+
+          <button
+            class="mini-card reveal"
+            style="--reveal-delay:120ms"
+            data-screen="history"
+          >
+            <span class="mini-label">HISTORY</span>
+            <strong>Прошлые анализы</strong>
+            <span class="mini-arrow">↗</span>
+            <span class="mini-line"></span>
+          </button>
+
+          <button
+            class="mini-card reveal"
+            style="--reveal-delay:160ms"
+            data-screen="about"
+          >
+            <span class="mini-label">METHOD</span>
+            <strong>Как это работает</strong>
+            <span class="mini-arrow">↗</span>
+            <span class="mini-line"></span>
+          </button>
+
+        </div>
+
+        <div class="trust-row">
+          <span>LOCAL PROCESSING</span>
+          <i></i>
+          <span>NO ACCOUNT</span>
+          <i></i>
+          <span>NO UPLOAD</span>
+        </div>
+
+        <div class="home-footnote">
+          <span class="home-footnote__index">01</span>
+
+          <div>
+            <strong>Сначала фотография.</strong>
+
+            <p>
+              Лучше использовать фронтальный снимок
+              при ровном освещении.
+            </p>
+          </div>
+        </div>
+
+      </section>
+
+
+      <!-- PHOTO -->
+      <section id="photo" class="screen">
+
+        <div class="screen-title">
+          <button class="back-btn" data-screen="home">←</button>
+
+          <div>
+            <div class="eyebrow">INPUT</div>
+            <h2>Фотография</h2>
+          </div>
+        </div>
+
+        <div class="preview-card">
+
+          <div class="preview-frame">
+
+            <img
+              id="previewImage"
+              alt="Предпросмотр"
+            >
+
+            <div class="preview-corners">
+              <span></span>
+              <span></span>
+              <span></span>
+              <span></span>
+            </div>
+
+            <div class="preview-overlay">
+              READY FOR SCAN
+            </div>
+
+          </div>
+
+          <div class="file-info">
+
+            <div>
+              <span>ФАЙЛ</span>
+              <strong id="fileName">—</strong>
+            </div>
+
+            <div>
+              <span>РАЗМЕР</span>
+              <strong id="fileSize">—</strong>
+            </div>
+
+          </div>
+
+        </div>
+
+        <div class="photo-note">
+          <span class="photo-note__mark">i</span>
+
+          <p>
+            Для демонстрационного режима оценка выполняется локально
+            на основе изображения и не является медицинским или
+            объективным рейтингом внешности.
+          </p>
+        </div>
+
+        <button id="analyzeBtn" class="primary-btn">
+          <span>Запустить анализ</span>
+          <span>→</span>
+        </button>
+
+        <button class="secondary-btn" data-screen="home">
+          Выбрать другое фото
+        </button>
+
+      </section>
+
+
+      <!-- LOADING -->
+      <section id="loading" class="screen">
+
+        <div class="loading-screen">
+
+          <div class="scan-orb">
+            <span>S5</span>
+            <i class="scan-ring"></i>
+            <i class="scan-ring scan-ring--outer"></i>
+          </div>
+
+          <div class="eyebrow">LOCAL ENGINE</div>
+
+          <h2>Сканирование</h2>
+
+          <p id="loadingText">
+            Подготовка изображения…
+          </p>
+
+          <div class="loading-steps">
+
+            <div class="loading-step active">
+              <span></span>
+              <b>01</b>
+              Подготовка изображения
+            </div>
+
+            <div class="loading-step">
+              <span></span>
+              <b>02</b>
+              Анализ композиции
+            </div>
+
+            <div class="loading-step">
+              <span></span>
+              <b>03</b>
+              Расчёт визуальных метрик
+            </div>
+
+            <div class="loading-step">
+              <span></span>
+              <b>04</b>
+              Формирование отчёта
+            </div>
+
+          </div>
+
+        </div>
+
+      </section>
+
+
+      <!-- RESULT -->
+      <section id="result" class="screen">
+
+        <div class="screen-title result-title">
+
+          <button class="back-btn" data-screen="home">
+            ←
+          </button>
+
+          <div>
+            <div class="eyebrow">ANALYSIS COMPLETE</div>
+            <h2>Результат</h2>
+          </div>
+
+          <button
+            class="icon-btn"
+            id="newAnalysis"
+            title="Новый анализ"
+          >
+            ＋
+          </button>
+
+        </div>
+
+
+        <div class="result-hero">
+
+          <div class="result-score-label">
+            VISUAL SCORE
+          </div>
+
+          <div class="result-score">
+            <span id="score">—</span>
+            <small>/ 10</small>
+          </div>
+
+          <div class="score-track">
+            <div id="scoreBar"></div>
+          </div>
+
+          <div class="score-meta">
+            <span id="scoreText">
+              Расчёт завершён
+            </span>
+
+            <span>
+              DEMO MODEL
+            </span>
+          </div>
+
+        </div>
+
+
+        <div class="stats-grid">
+
+          <div class="stat">
+            <span>СИММЕТРИЯ</span>
+            <strong id="symmetry">—</strong>
+            <small>визуальный баланс</small>
+          </div>
+
+          <div class="stat">
+            <span>КОНТРАСТ</span>
+            <strong id="contrast">—</strong>
+            <small>тональный диапазон</small>
+          </div>
+
+          <div class="stat">
+            <span>СВЕТ</span>
+            <strong id="lighting">—</strong>
+            <small>качество кадра</small>
+          </div>
+
+          <div class="stat">
+            <span>РАКУРС</span>
+            <strong id="angle">—</strong>
+            <small>ориентация</small>
+          </div>
+
+        </div>
+
+
+        <!-- OVERVIEW -->
+        <div class="report-section">
+
+          <div class="section-header">
+
+            <div>
+              <div class="eyebrow">OVERVIEW</div>
+              <h3>Обзор</h3>
+            </div>
+
+            <span>04</span>
+
+          </div>
+
+          <div class="overview-grid">
+
+            <div class="overview-card">
+              <div class="overview-card__label">
+                Композиция
+              </div>
+
+              <div
+                class="overview-card__value"
+                id="composition"
+              >
+                —
+              </div>
+
+              <div class="overview-card__source">
+                анализ кадра
+              </div>
+            </div>
+
+            <div class="overview-card">
+              <div class="overview-card__label">
+                Чёткость
+              </div>
+
+              <div
+                class="overview-card__value"
+                id="sharpness"
+              >
+                —
+              </div>
+
+              <div class="overview-card__source">
+                детализация
+              </div>
+            </div>
+
+            <div class="overview-card">
+              <div class="overview-card__label">
+                Экспозиция
+              </div>
+
+              <div
+                class="overview-card__value"
+                id="exposure"
+              >
+                —
+              </div>
+
+              <div class="overview-card__source">
+                яркость
+              </div>
+            </div>
+
+            <div class="overview-card">
+              <div class="overview-card__label">
+                Центровка
+              </div>
+
+              <div
+                class="overview-card__value"
+                id="centering"
+              >
+                —
+              </div>
+
+              <div class="overview-card__source">
+                положение объекта
+              </div>
+            </div>
+
+          </div>
+
+        </div>
+
+
+        <!-- METRICS -->
+        <div class="report-section">
+
+          <div class="section-header">
+
+            <div>
+              <div class="eyebrow">METRICS</div>
+              <h3>Метрики</h3>
+            </div>
+
+            <span>03</span>
+
+          </div>
+
+          <div class="metrics">
+
+            <article class="metric-card">
+
+              <button class="metric-header">
+
+                <div class="metric-main">
+                  <div class="metric-name">
+                    Визуальная симметрия
+                  </div>
+
+                  <div class="metric-key">
+                    BALANCE / LEFT-RIGHT
+                  </div>
+                </div>
+
+                <div
+                  class="metric-value"
+                  id="mSym"
+                >
+                  —
+                </div>
+
+                <div class="metric-arrow">
+                  +
+                </div>
+
+              </button>
+
+              <div class="metric-content">
+                <div>
+                  <div class="metric-detail">
+                    <span>Интерпретация</span>
+
+                    <strong>
+                      Насколько равномерно распределены
+                      визуальные элементы кадра.
+                    </strong>
+                  </div>
+                </div>
+              </div>
+
+            </article>
+
+
+            <article class="metric-card">
+
+              <button class="metric-header">
+
+                <div class="metric-main">
+                  <div class="metric-name">
+                    Тональный диапазон
+                  </div>
+
+                  <div class="metric-key">
+                    CONTRAST / DYNAMIC RANGE
+                  </div>
+                </div>
+
+                <div
+                  class="metric-value"
+                  id="mContrast"
+                >
+                  —
+                </div>
+
+                <div class="metric-arrow">
+                  +
+                </div>
+
+              </button>
+
+              <div class="metric-content">
+                <div>
+                  <div class="metric-detail">
+                    <span>Интерпретация</span>
+
+                    <strong>
+                      Разница между тёмными и светлыми
+                      участками изображения.
+                    </strong>
+                  </div>
+                </div>
+              </div>
+
+            </article>
+
+
+            <article class="metric-card">
+
+              <button class="metric-header">
+
+                <div class="metric-main">
+                  <div class="metric-name">
+                    Качество освещения
+                  </div>
+
+                  <div class="metric-key">
+                    LIGHT / EXPOSURE
+                  </div>
+                </div>
+
+                <div
+                  class="metric-value"
+                  id="mLight"
+                >
+                  —
+                </div>
+
+                <div class="metric-arrow">
+                  +
+                </div>
+
+              </button>
+
+              <div class="metric-content">
+                <div>
+                  <div class="metric-detail">
+                    <span>Интерпретация</span>
+
+                    <strong>
+                      Оценивает равномерность и пригодность
+                      освещения для кадра.
+                    </strong>
+                  </div>
+                </div>
+              </div>
+
+            </article>
+
+          </div>
+
+        </div>
+
+
+        <!-- DETAILS -->
+        <div class="report-section">
+
+          <div class="section-header">
+
+            <div>
+              <div class="eyebrow">FEATURE GROUPS</div>
+              <h3>Детали</h3>
+            </div>
+
+            <span>02</span>
+
+          </div>
+
+          <div class="feature-groups">
+
+            <article class="feature-group">
+
+              <button class="feature-group__header">
+
+                <span class="feature-group__title">
+                  Кадр
+                </span>
+
+                <span class="feature-group__count">
+                  04
+                </span>
+
+                <span class="feature-group__arrow">
+                  +
+                </span>
+
+              </button>
+
+              <div class="feature-list">
+                <div>
+
+                  <div class="feature-list-inner">
+
+                    <div class="feature-row">
+                      <span class="feature-row__name">
+                        Соотношение сторон
+                      </span>
+
+                      <span
+                        class="feature-row__value"
+                        id="aspect"
+                      >
+                        —
+                      </span>
+                    </div>
+
+                    <div class="feature-row">
+                      <span class="feature-row__name">
+                        Центральность
+                      </span>
+
+                      <span
+                        class="feature-row__value"
+                        id="centerDetail"
+                      >
+                        —
+                      </span>
+                    </div>
+
+                    <div class="feature-row">
+                      <span class="feature-row__name">
+                        Контраст
+                      </span>
+
+                      <span
+                        class="feature-row__value"
+                        id="contrastDetail"
+                      >
+                        —
+                      </span>
+                    </div>
+
+                    <div class="feature-row">
+                      <span class="feature-row__name">
+                        Яркость
+                      </span>
+
+                      <span
+                        class="feature-row__value"
+                        id="brightnessDetail"
+                      >
+                        —
+                      </span>
+                    </div>
+
+                  </div>
+
+                </div>
+              </div>
+
+            </article>
+
+
+            <article class="feature-group">
+
+              <button class="feature-group__header">
+
+                <span class="feature-group__title">
+                  Рекомендации
+                </span>
+
+                <span class="feature-group__count">
+                  03
+                </span>
+
+                <span class="feature-group__arrow">
+                  +
+                </span>
+
+              </button>
+
+              <div class="feature-list">
+                <div>
+
+                  <div class="feature-list-inner">
+
+                    <div class="feature-row">
+                      <span class="feature-row__name">
+                        Свет
+                      </span>
+
+                      <span
+                        class="feature-row__value"
+                        id="tipLight"
+                      >
+                        —
+                      </span>
+                    </div>
+
+                    <div class="feature-row">
+                      <span class="feature-row__name">
+                        Ракурс
+                      </span>
+
+                      <span
+                        class="feature-row__value"
+                        id="tipAngle"
+                      >
+                        —
+                      </span>
+                    </div>
+
+                    <div class="feature-row">
+                      <span class="feature-row__name">
+                        Фон
+                      </span>
+
+                      <span class="feature-row__value">
+                        Нейтральнее = чище кадр
+                      </span>
+                    </div>
+
+                  </div>
+
+                </div>
+              </div>
+
+            </article>
+
+          </div>
+
+        </div>
+
+
+        <div class="note-card">
+
+          <span class="note-icon">
+            i
+          </span>
+
+          <p>
+            Результат — визуальная демонстрация на основе изображения,
+            а не объективная мера привлекательности, здоровья
+            или человеческой ценности.
+          </p>
+
+        </div>
+
+      </section>
+
+
+      <!-- HISTORY -->
+      <section id="history" class="screen">
+
+        <div class="screen-title">
+
+          <button class="back-btn" data-screen="home">
+            ←
+          </button>
+
+          <div>
+            <div class="eyebrow">ARCHIVE</div>
+            <h2>История</h2>
+          </div>
+
+        </div>
+
+        <div class="history-summary">
+
+          <span class="eyebrow">
+            ANALYSES
+          </span>
+
+          <strong id="historyCount">
+            0
+          </strong>
+
+          <span>
+            сохранено
+          </span>
+
+        </div>
+
+        <div
+          id="historyList"
+          class="history-list"
+        ></div>
+
+      </section>
+
+
+      <!-- ABOUT -->
+      <section id="about" class="screen">
+
+        <div class="screen-title">
+
+          <button class="back-btn" data-screen="home">
+            ←
+          </button>
+
+          <div>
+            <div class="eyebrow">METHOD</div>
+            <h2>О системе</h2>
+          </div>
+
+        </div>
+
+        <div class="about-intro">
+
+          <div class="eyebrow">
+            SUB5 / LOCAL DEMO
+          </div>
+
+          <p>
+            Минималистичный интерфейс для локального анализа изображения.
+            Здесь намеренно нет регистрации, серверной загрузки фотографии
+            или выдачи псевдонаучного «объективного» рейтинга человека.
+          </p>
+
+        </div>
+
+        <div class="about-stack">
+
+          <div class="about-card">
+
+            <span>01</span>
+
+            <div>
+              <strong>
+                Фото остаётся в браузере
+              </strong>
+
+              <p>
+                Изображение читается через File API
+                и используется только для демонстрационного расчёта.
+              </p>
+            </div>
+
+          </div>
+
+
+          <div class="about-card">
+
+            <span>02</span>
+
+            <div>
+              <strong>
+                Метрики — визуальные
+              </strong>
+
+              <p>
+                Яркость, контраст, пропорции и центрирование
+                относятся к самому кадру, а не к ценности человека.
+              </p>
+            </div>
+
+          </div>
+
+
+          <div class="about-card">
+
+            <span>03</span>
+
+            <div>
+              <strong>
+                Интерфейс без перегруза
+              </strong>
+
+              <p>
+                Тёмная тема, плавные переходы, раскрывающиеся детали
+                и нижняя навигация сохраняют стиль твоего исходного CSS.
+              </p>
+            </div>
+
+          </div>
+
+        </div>
+
+      </section>
+
+    </main>
+  </div>
+
+
+  <!-- BOTTOM NAV -->
+  <nav class="bottom-nav">
+
+    <button
+      class="nav-item active"
+      data-screen="home"
+    >
+      <span>⌂</span>
+      <small>Главная</small>
+    </button>
+
+    <button
+      class="nav-item"
+      data-screen="history"
+    >
+      <span>◷</span>
+      <small>История</small>
+    </button>
+
+    <button
+      class="nav-item"
+      data-screen="about"
+    >
+      <span>ⓘ</span>
+      <small>О системе</small>
+    </button>
+
+  </nav>
+
+
+  <div
+    id="toast"
+    class="toast"
+  ></div>
+
+
+  <script src="app.js"></script>
 </body>
 </html>
