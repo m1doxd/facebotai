@@ -1,0 +1,3 @@
+name = "facebot-gemini"
+main = "gemini-worker.js"
+compatibility_date = "2026-08-12"
