@@ -5,16 +5,17 @@
  * FaceMetric / FaceBot
  * ============================================================
  *
- * Новый renderer:
+ * Новый frontend renderer:
  *
- * - весь UI на русском;
- * - оценка 0–10;
- * - лицо сохраняется на экране результата;
- * - модель не показывается пользователю;
- * - вместо вложенных технических вкладок используются
- *   понятные карточки и шкалы;
- * - показатели 0–10 отображаются как красный → зелёный;
- * - API Gemini остаётся прежним.
+ * - все пользовательские тексты на русском;
+ * - итоговая оценка 1–10;
+ * - лицо остаётся на экране результата;
+ * - оценка появляется поверх изображения;
+ * - Gemini model НЕ показывается пользователю;
+ * - вместо бесполезных раскрывающихся карточек используются
+ *   понятные показатели со шкалами красный → жёлтый → зелёный;
+ * - сохраняется существующая система экранов и загрузки;
+ * - API остаётся тем же.
  * ============================================================
  */
 
@@ -32,8 +33,7 @@ const API_ENDPOINT =
 const HEALTH_ENDPOINT =
   "https://facebot-gemini.snow4lyt.workers.dev/api/health";
 
-const HISTORY_KEY =
-  "facemetric_history_v1";
+const HISTORY_KEY = "facemetric_history_v1";
 
 const tg =
   window.Telegram &&
@@ -85,9 +85,7 @@ const loadingText =
   document.getElementById("loading-text");
 
 const loadingSteps =
-  document.querySelectorAll(
-    ".loading-step"
-  );
+  document.querySelectorAll(".loading-step");
 
 const resultScore =
   document.getElementById("result-score");
@@ -156,120 +154,80 @@ let analysisRequestId = 0;
 // ============================================================
 
 const LABELS = {
+  face_geometry: "Геометрия лица",
+  facial_width_height_balance: "Баланс ширины и высоты",
+  face_aspect_ratio: "Соотношение лица",
+  midface_proportion: "Пропорции средней трети",
 
-  face_geometry:
-    "Геометрия лица",
+  symmetry: "Симметрия",
+  overall_symmetry: "Общая симметрия",
+  left_right_balance: "Баланс левой и правой стороны",
 
-  symmetry:
-    "Симметрия",
+  eyes: "Глаза",
+  eye_spacing: "Расстояние между глазами",
+  eye_aspect_ratio: "Форма глаз",
+  eye_alignment: "Выравнивание глаз",
+  eye_area_balance: "Баланс области глаз",
 
-  eyes:
-    "Глаза",
+  eyebrows: "Брови",
+  brow_position: "Положение бровей",
+  brow_shape: "Форма бровей",
+  brow_symmetry: "Симметрия бровей",
 
-  eyebrows:
-    "Брови",
+  nose: "Нос",
+  nose_width: "Ширина носа",
+  nose_length: "Длина носа",
+  nose_proportion: "Пропорции носа",
 
-  nose:
-    "Нос",
+  jaw: "Челюсть",
+  jaw_width: "Ширина челюсти",
+  jaw_definition: "Выраженность челюсти",
+  jaw_shape: "Форма челюсти",
 
-  jaw:
-    "Челюсть",
+  chin: "Подбородок",
+  chin_prominence: "Выраженность подбородка",
+  chin_proportion: "Пропорции подбородка",
 
-  chin:
-    "Подбородок",
+  cheeks: "Скулы",
+  cheek_prominence: "Выраженность скул",
+  cheek_definition: "Определённость скул",
 
-  cheeks:
-    "Скулы",
+  lips_mouth: "Губы и рот",
+  mouth_width: "Ширина рта",
+  lip_proportion: "Пропорции губ",
+  mouth_symmetry: "Симметрия рта",
 
-  lips_mouth:
-    "Губы и рот",
+  midface: "Средняя треть",
+  midface_balance: "Баланс средней трети",
 
-  midface:
-    "Средняя часть лица",
+  overall_harmony: "Общая гармония",
+  frontal_harmony: "Гармония анфас",
+  proportions: "Пропорции",
 
-  overall_harmony:
-    "Общая гармония",
+  facial_definition: "Выраженность черт",
+  angularity: "Угловатость",
 
-  frontal_harmony:
-    "Фронтальная гармония",
+  confidence: "Уверенность анализа",
 
-  facial_definition:
-    "Выраженность лица",
+  dimorphism: "Визуальная выраженность черт",
 
-  angularity:
-    "Угловатость",
+  face_count: "Количество лиц",
+  feature_count: "Количество измерений",
+  detected_features: "Обнаруженные признаки",
+  landmarks_count: "Точки лица"
+};
 
-  proportions:
-    "Пропорции",
-
-  left_right_balance:
-    "Баланс левой и правой стороны",
-
-  overall_symmetry:
-    "Общая симметрия",
-
-  eye_spacing:
-    "Расстояние между глазами",
-
-  eye_aspect_ratio:
-    "Форма глаз",
-
-  eye_alignment:
-    "Выравнивание глаз",
-
-  eye_area_balance:
-    "Баланс площади глаз",
-
-  brow_position:
-    "Положение бровей",
-
-  brow_shape:
-    "Форма бровей",
-
-  brow_symmetry:
-    "Симметрия бровей",
-
-  nose_width:
-    "Ширина носа",
-
-  nose_length:
-    "Длина носа",
-
-  nose_proportion:
-    "Пропорции носа",
-
-  jaw_width:
-    "Ширина челюсти",
-
-  jaw_definition:
-    "Выраженность челюсти",
-
-  jaw_shape:
-    "Форма челюсти",
-
-  chin_prominence:
-    "Выраженность подбородка",
-
-  chin_proportion:
-    "Пропорции подбородка",
-
-  cheek_prominence:
-    "Выраженность скул",
-
-  cheek_definition:
-    "Выраженность скул",
-
-  mouth_width:
-    "Ширина рта",
-
-  lip_proportion:
-    "Пропорции губ",
-
-  mouth_symmetry:
-    "Симметрия рта",
-
-  midface_balance:
-    "Баланс средней части лица"
+const GROUP_LABELS = {
+  face_geometry: "Геометрия лица",
+  symmetry: "Симметрия",
+  eyes: "Глаза",
+  eyebrows: "Брови",
+  nose: "Нос",
+  jaw: "Челюсть",
+  chin: "Подбородок",
+  cheeks: "Скулы",
+  lips_mouth: "Губы и рот",
+  midface: "Средняя треть"
 };
 
 
@@ -278,42 +236,36 @@ const LABELS = {
 // ============================================================
 
 function initTelegram() {
-
   if (!tg) {
     return;
   }
 
   try {
-
     tg.ready();
 
-    if (
-      typeof tg.expand === "function"
-    ) {
+    if (typeof tg.expand === "function") {
       tg.expand();
     }
 
-    if (
-      typeof tg.setHeaderColor ===
-      "function"
-    ) {
+    if (typeof tg.setHeaderColor === "function") {
       tg.setHeaderColor("#08090b");
     }
 
-    if (
-      typeof tg.setBackgroundColor ===
-      "function"
-    ) {
+    if (typeof tg.setBackgroundColor === "function") {
       tg.setBackgroundColor("#08090b");
     }
 
+    if (
+      typeof tg.enableClosingConfirmation ===
+      "function"
+    ) {
+      tg.enableClosingConfirmation();
+    }
   } catch (error) {
-
     console.warn(
-      "Telegram WebApp initialization:",
+      "Telegram initialization warning:",
       error
     );
-
   }
 }
 
@@ -323,45 +275,37 @@ function initTelegram() {
 // ============================================================
 
 function showScreen(name) {
-
   const target =
-    document.getElementById(
-      `screen-${name}`
-    );
+    document.getElementById(`screen-${name}`);
 
   if (!target) {
     console.warn(
       `Screen not found: screen-${name}`
     );
+
     return;
   }
 
-  screens.forEach(
-    (screen) => {
+  screens.forEach((screen) => {
+    const isTarget = screen === target;
 
-      const active =
-        screen === target;
+    screen.classList.toggle(
+      "active",
+      isTarget
+    );
 
-      screen.classList.toggle(
-        "active",
-        active
+    if (isTarget) {
+      screen.classList.remove(
+        "screen-enter"
       );
 
-      if (active) {
+      void screen.offsetWidth;
 
-        screen.classList.remove(
-          "screen-enter"
-        );
-
-        void screen.offsetWidth;
-
-        screen.classList.add(
-          "screen-enter"
-        );
-      }
-
+      screen.classList.add(
+        "screen-enter"
+      );
     }
-  );
+  });
 
   currentScreen = name;
 
@@ -378,55 +322,35 @@ function showScreen(name) {
 
   if (name === "result") {
     activateDefaultResultTab();
-    ensureResultFace();
   }
 }
-
 
 function updateNavigation(name) {
-
   document
     .querySelectorAll(".nav-item")
-    .forEach(
-      (item) => {
+    .forEach((item) => {
+      const target =
+        item.dataset.screen;
 
-        const target =
-          item.dataset.screen;
-
-        const active =
-          target === name ||
-          (
-            name === "result" &&
-            target === "home"
-          ) ||
-          (
-            name === "analysis" &&
-            target === "home"
-          );
-
-        item.classList.toggle(
-          "active",
-          active
+      const active =
+        target === name ||
+        (
+          name === "result" &&
+          target === "home"
+        ) ||
+        (
+          name === "analysis" &&
+          target === "home"
         );
 
-      }
-    );
+      item.classList.toggle(
+        "active",
+        active
+      );
+    });
 }
 
-
 function goBack() {
-
-  if (
-    currentScreen === "analysis" ||
-    currentScreen === "result" ||
-    currentScreen === "history" ||
-    currentScreen === "about"
-  ) {
-
-    showScreen("home");
-    return;
-  }
-
   showScreen("home");
 }
 
@@ -436,9 +360,7 @@ function goBack() {
 // ============================================================
 
 function openFilePicker() {
-
   if (!fileInput) {
-
     showToast(
       "Не найден загрузчик фотографии."
     );
@@ -449,13 +371,10 @@ function openFilePicker() {
   fileInput.value = "";
 
   try {
-
     fileInput.click();
-
   } catch (error) {
-
     console.error(
-      "File picker error:",
+      "Could not open file picker:",
       error
     );
 
@@ -465,9 +384,7 @@ function openFilePicker() {
   }
 }
 
-
 function handleFileSelected(file) {
-
   if (!file) {
     return;
   }
@@ -476,7 +393,6 @@ function handleFileSelected(file) {
     validateFile(file);
 
   if (!validation.valid) {
-
     showToast(
       validation.message
     );
@@ -489,7 +405,6 @@ function handleFileSelected(file) {
   selectedFile = file;
 
   if (selectedObjectUrl) {
-
     URL.revokeObjectURL(
       selectedObjectUrl
     );
@@ -501,38 +416,24 @@ function handleFileSelected(file) {
     URL.createObjectURL(file);
 
   if (uploadName) {
-
     uploadName.textContent =
       `${file.name} · ${formatBytes(file.size)}`;
   }
 
-  /*
-   * ВАЖНО:
-   * Одно и то же изображение используется
-   * и на экране анализа, и на экране результата.
-   */
-
   if (analysisImage) {
-
     analysisImage.src =
       selectedObjectUrl;
 
     analysisImage.alt =
       "Фотография для анализа";
 
-    analysisImage.style.display =
-      "";
+    analysisImage.style.animation =
+      "none";
 
-    analysisImage.style.visibility =
-      "visible";
+    void analysisImage.offsetWidth;
 
-    analysisImage.style.opacity =
-      "1";
+    analysisImage.style.animation = "";
   }
-
-  setAnalysisState(
-    "АНАЛИЗ"
-  );
 
   resetAnalysisPreview();
 
@@ -541,24 +442,15 @@ function handleFileSelected(file) {
   startAnalysis(file);
 }
 
-
 function validateFile(file) {
-
   if (!file) {
-
     return {
       valid: false,
-      message:
-        "Фотография не выбрана."
+      message: "Фотография не выбрана."
     };
   }
 
-  if (
-    !ALLOWED_TYPES.has(
-      file.type
-    )
-  ) {
-
+  if (!ALLOWED_TYPES.has(file.type)) {
     return {
       valid: false,
       message:
@@ -567,7 +459,6 @@ function validateFile(file) {
   }
 
   if (file.size <= 0) {
-
     return {
       valid: false,
       message:
@@ -575,11 +466,7 @@ function validateFile(file) {
     };
   }
 
-  if (
-    file.size >
-    MAX_FILE_SIZE
-  ) {
-
+  if (file.size > MAX_FILE_SIZE) {
     return {
       valid: false,
       message:
@@ -598,9 +485,7 @@ function validateFile(file) {
 // ============================================================
 
 function resetAnalysisPreview() {
-
   if (analysisScore) {
-
     analysisScore.classList.remove(
       "show",
       "float"
@@ -608,13 +493,11 @@ function resetAnalysisPreview() {
   }
 
   if (analysisScoreValue) {
-
     analysisScoreValue.textContent =
       "—";
   }
 
   if (analysisState) {
-
     analysisState.textContent =
       "АНАЛИЗ";
   }
@@ -622,88 +505,58 @@ function resetAnalysisPreview() {
   clearLandmarks();
 }
 
-
 function setAnalysisState(text) {
-
-  if (!analysisState) {
-    return;
+  if (analysisState) {
+    analysisState.textContent = text;
   }
-
-  analysisState.textContent =
-    text;
 }
 
-
 function showAnalysisPreviewScore(score) {
-
   if (
     score === null ||
     score === undefined ||
-    !Number.isFinite(
-      Number(score)
-    )
+    !Number.isFinite(Number(score))
   ) {
     return;
   }
 
-  /*
-   * БЫЛО:
-   * score * 10
-   *
-   * СТАЛО:
-   * 8.8 -> 8,8 / 10
-   */
+  const normalized =
+    clamp(
+      Number(score),
+      0,
+      10
+    );
 
   const displayScore =
-    formatScore10(score);
+    formatScore(normalized);
 
   if (analysisScoreValue) {
-
     analysisScoreValue.textContent =
       displayScore;
   }
 
   if (analysisScore) {
+    analysisScore.classList.add("show");
 
-    analysisScore.classList.add(
-      "show"
-    );
-
-    /*
-     * Оценка сначала находится поверх лица.
-     * Потом немного уходит в сторону,
-     * но фотография НЕ исчезает.
-     */
-
-    setTimeout(
-      () => {
-
-        if (
-          currentScreen === "analysis"
-        ) {
-
-          analysisScore.classList.add(
-            "float"
-          );
-        }
-
-      },
-      1200
-    );
+    setTimeout(() => {
+      if (
+        currentScreen === "analysis"
+      ) {
+        analysisScore.classList.add(
+          "float"
+        );
+      }
+    }, 900);
   }
 }
 
-
 function clearLandmarks() {
-
   if (!landmarkCanvas) {
     return;
   }
 
   const context =
-    landmarkCanvas.getContext(
-      "2d"
-    );
+    landmarkCanvas.getContext("2d");
 
   if (!context) {
     return;
@@ -723,13 +576,11 @@ function clearLandmarks() {
 // ============================================================
 
 async function startAnalysis(file) {
-
   if (analysisInProgress) {
     return;
   }
 
   if (!file) {
-
     showToast(
       "Фотография не выбрана."
     );
@@ -744,12 +595,9 @@ async function startAnalysis(file) {
 
   resetLoadingSteps();
 
-  setAnalysisState(
-    "АНАЛИЗ"
-  );
+  setAnalysisState("АНАЛИЗ");
 
   try {
-
     const analysisPromise =
       analyzePhoto(file);
 
@@ -771,7 +619,6 @@ async function startAnalysis(file) {
       !result ||
       result.success !== true
     ) {
-
       throw new Error(
         result?.detail ||
         result?.error ||
@@ -780,15 +627,11 @@ async function startAnalysis(file) {
     }
 
     currentAnalysis =
-      normalizeClientResult(
-        result
-      );
+      normalizeClientResult(result);
 
     completeLoadingSteps();
 
-    setAnalysisState(
-      "ГОТОВО"
-    );
+    setAnalysisState("ГОТОВО");
 
     showAnalysisPreviewScore(
       currentAnalysis.score
@@ -797,11 +640,6 @@ async function startAnalysis(file) {
     saveHistory(
       currentAnalysis
     );
-
-    /*
-     * Небольшая пауза нужна только для
-     * визуального перехода.
-     */
 
     await sleep(700);
 
@@ -816,19 +654,9 @@ async function startAnalysis(file) {
       currentAnalysis
     );
 
-    /*
-     * Гарантируем, что фотография
-     * остаётся доступной на result screen.
-     */
-
-    ensureResultFace();
-
-    showScreen(
-      "result"
-    );
+    showScreen("result");
 
   } catch (error) {
-
     if (
       requestId !==
       analysisRequestId
@@ -841,29 +669,20 @@ async function startAnalysis(file) {
       error
     );
 
-    setAnalysisState(
-      "ОШИБКА"
-    );
+    setAnalysisState("ОШИБКА");
 
     showToast(
-      getFriendlyErrorMessage(
-        error
-      )
+      getFriendlyErrorMessage(error)
     );
 
-    showScreen(
-      "home"
-    );
+    showScreen("home");
 
   } finally {
-
     if (
       requestId ===
       analysisRequestId
     ) {
-
-      analysisInProgress =
-        false;
+      analysisInProgress = false;
     }
   }
 }
@@ -874,19 +693,10 @@ async function startAnalysis(file) {
 // ============================================================
 
 async function analyzePhoto(file) {
-
-  if (!file) {
-
-    throw new Error(
-      "Фотография не выбрана."
-    );
-  }
-
   const validation =
     validateFile(file);
 
   if (!validation.valid) {
-
     throw new Error(
       validation.message
     );
@@ -895,42 +705,28 @@ async function analyzePhoto(file) {
   const formData =
     new FormData();
 
-  /*
-   * Worker ожидает именно:
-   *
-   * file
-   */
-
   formData.append(
     "file",
     file,
-    file.name ||
-      "photo.jpg"
+    file.name || "photo.jpg"
   );
 
   let response;
 
   try {
-
     response =
       await fetch(
         API_ENDPOINT,
         {
           method: "POST",
-
           body: formData,
-
           headers: {
-            Accept:
-              "application/json"
+            Accept: "application/json"
           },
-
           cache: "no-store"
         }
       );
-
   } catch (error) {
-
     console.error(
       "FaceMetric fetch error:",
       error
@@ -951,28 +747,16 @@ async function analyzePhoto(file) {
 
   console.log(
     "FaceMetric API response:",
-    responseText.slice(
-      0,
-      3000
-    )
+    responseText.slice(0, 3000)
   );
 
   let data = null;
 
-  if (
-    responseText &&
-    responseText.trim()
-  ) {
-
+  if (responseText.trim()) {
     try {
-
       data =
-        JSON.parse(
-          responseText
-        );
-
+        JSON.parse(responseText);
     } catch (error) {
-
       console.error(
         "Invalid JSON:",
         error
@@ -985,21 +769,16 @@ async function analyzePhoto(file) {
   }
 
   if (!response.ok) {
-
-    const detail =
+    throw new Error(
       data?.detail ||
       data?.error ||
       getHttpErrorMessage(
         response.status
-      );
-
-    throw new Error(
-      detail
+      )
     );
   }
 
   if (!data) {
-
     throw new Error(
       "Сервер вернул пустой ответ."
     );
@@ -1010,25 +789,200 @@ async function analyzePhoto(file) {
 
 
 // ============================================================
-// RESULT NORMALIZATION
+// HEALTH CHECK
+// ============================================================
+
+async function checkWorkerHealth() {
+  try {
+    const response =
+      await fetch(
+        HEALTH_ENDPOINT,
+        {
+          method: "GET",
+          cache: "no-store",
+          headers: {
+            Accept: "application/json"
+          }
+        }
+      );
+
+    if (!response.ok) {
+      return false;
+    }
+
+    const data =
+      await response.json();
+
+    console.log(
+      "Gemini Worker health:",
+      data
+    );
+
+    return data?.success === true;
+
+  } catch (error) {
+    console.warn(
+      "Health check failed:",
+      error
+    );
+
+    return false;
+  }
+}
+
+
+// ============================================================
+// LOADING
+// ============================================================
+
+async function runLoadingSequence(
+  analysisPromise
+) {
+  const steps = [
+    {
+      index: 0,
+      title: "Обрабатываем фотографию",
+      text: "Подготавливаем изображение"
+    },
+    {
+      index: 1,
+      title: "Определяем лицо",
+      text: "Ищем основные точки и контуры лица"
+    },
+    {
+      index: 2,
+      title: "Измеряем пропорции",
+      text: "Анализируем геометрию и черты"
+    },
+    {
+      index: 3,
+      title: "Анализируем симметрию",
+      text: "Сравниваем левую и правую стороны"
+    },
+    {
+      index: 4,
+      title: "Формируем результат",
+      text: "Собираем итоговые показатели"
+    }
+  ];
+
+  for (
+    let i = 0;
+    i < steps.length;
+    i++
+  ) {
+    const step =
+      steps[i];
+
+    setLoadingStep(
+      step.index
+    );
+
+    if (loadingTitle) {
+      loadingTitle.textContent =
+        step.title;
+    }
+
+    if (loadingText) {
+      loadingText.textContent =
+        step.text;
+    }
+
+    if (
+      i <
+      steps.length - 1
+    ) {
+      await sleep(500);
+    } else {
+      await Promise.race([
+        analysisPromise.catch(
+          () => null
+        ),
+        sleep(1500)
+      ]);
+    }
+  }
+}
+
+function resetLoadingSteps() {
+  loadingSteps.forEach(
+    (step) => {
+      step.classList.remove(
+        "active",
+        "done"
+      );
+    }
+  );
+
+  const first =
+    document.querySelector(
+      '.loading-step[data-step="0"]'
+    );
+
+  if (first) {
+    first.classList.add(
+      "active"
+    );
+  }
+
+  if (loadingTitle) {
+    loadingTitle.textContent =
+      "Обрабатываем фотографию";
+  }
+
+  if (loadingText) {
+    loadingText.textContent =
+      "Подготавливаем изображение";
+  }
+}
+
+function setLoadingStep(index) {
+  loadingSteps.forEach(
+    (step) => {
+      const stepIndex =
+        Number(step.dataset.step);
+
+      step.classList.toggle(
+        "active",
+        stepIndex === index
+      );
+
+      step.classList.toggle(
+        "done",
+        stepIndex < index
+      );
+    }
+  );
+}
+
+function completeLoadingSteps() {
+  loadingSteps.forEach(
+    (step) => {
+      step.classList.remove(
+        "active"
+      );
+
+      step.classList.add(
+        "done"
+      );
+    }
+  );
+}
+
+function sleep(ms) {
+  return new Promise(
+    (resolve) =>
+      setTimeout(resolve, ms)
+  );
+}
+
+
+// ============================================================
+// NORMALIZATION
 // ============================================================
 
 function normalizeClientResult(data) {
-
-  /*
-   * Совместимо с ответом:
-   *
-   * {
-   *   success: true,
-   *   model: "...",
-   *   score: 8.8,
-   *   metrics: {...},
-   *   production_features: {...}
-   * }
-   */
-
   return {
-
     success: true,
 
     score:
@@ -1056,21 +1010,8 @@ function normalizeClientResult(data) {
         data.feature_count
       ),
 
-    /*
-     * Модель сохраняем для внутренней
-     * совместимости, но НЕ показываем.
-     */
-
-    model:
-      cleanText(
-        data.model
-      ) ||
-      "Gemini",
-
     metrics:
-      isObject(
-        data.metrics
-      )
+      isObject(data.metrics)
         ? data.metrics
         : {},
 
@@ -1093,7 +1034,6 @@ function normalizeClientResult(data) {
 // ============================================================
 
 function renderResult(result) {
-
   renderScore(
     result.score
   );
@@ -1103,7 +1043,8 @@ function renderResult(result) {
   );
 
   renderOverview(
-    result.metrics
+    result.metrics,
+    result.production_features
   );
 
   renderHarmony(
@@ -1130,156 +1071,7 @@ function renderResult(result) {
     result.production_features
   );
 
-  renderHealth(
-    result
-  );
-
-  ensureResultFace();
-}
-
-
-// ============================================================
-// RESULT PHOTO
-// ============================================================
-
-function ensureResultFace() {
-
-  if (!selectedObjectUrl) {
-    return;
-  }
-
-  /*
-   * Ищем возможные элементы фотографии
-   * на result screen.
-   */
-
-  const candidates = [
-    document.getElementById(
-      "result-image"
-    ),
-
-    document.querySelector(
-      "#screen-result img"
-    ),
-
-    document.querySelector(
-      ".result-image"
-    ),
-
-    document.querySelector(
-      ".result-photo"
-    ),
-
-    document.querySelector(
-      ".result-face"
-    )
-  ].filter(Boolean);
-
-  if (!candidates.length) {
-
-    /*
-     * Если отдельного result-image нет,
-     * создаём его внутри result screen.
-     */
-
-    const resultScreen =
-      document.getElementById(
-        "screen-result"
-      );
-
-    if (!resultScreen) {
-      return;
-    }
-
-    let wrapper =
-      resultScreen.querySelector(
-        ".result-face-container"
-      );
-
-    if (!wrapper) {
-
-      wrapper =
-        document.createElement(
-          "div"
-        );
-
-      wrapper.className =
-        "result-face-container";
-
-      /*
-       * Помещаем фото в начало
-       * результата, чтобы оно не терялось.
-       */
-
-      resultScreen.prepend(
-        wrapper
-      );
-    }
-
-    let image =
-      wrapper.querySelector(
-       ("img")
-      );
-
-    if (!image) {
-
-      image =
-        document.createElement(
-          "img"
-        );
-
-      image.id =
-        "result-image";
-
-      image.alt =
-        "Результат анализа лица";
-
-      wrapper.appendChild(
-        image
-      );
-    }
-
-    image.src =
-      selectedObjectUrl;
-
-    image.style.display =
-      "block";
-
-    image.style.visibility =
-      "visible";
-
-    image.style.opacity =
-      "1";
-
-    return;
-  }
-
-  candidates.forEach(
-    (image) => {
-
-      if (
-        image instanceof
-        HTMLImageElement
-      ) {
-
-        image.src =
-          selectedObjectUrl;
-
-        image.alt =
-          "Результат анализа лица";
-
-        image.style.display =
-          "block";
-
-        image.style.visibility =
-          "visible";
-
-        image.style.opacity =
-          "1";
-      }
-
-    }
-  );
+  renderHealth();
 }
 
 
@@ -1288,28 +1080,22 @@ function ensureResultFace() {
 // ============================================================
 
 function renderScore(score) {
-
   if (
     score === null ||
     score === undefined ||
-    !Number.isFinite(
-      Number(score)
-    )
+    !Number.isFinite(Number(score))
   ) {
-
     if (resultScore) {
-      resultScore.textContent =
-        "—";
+      resultScore.textContent = "—";
     }
 
     if (scoreProgress) {
-      scoreProgress.style.width =
-        "0%";
+      scoreProgress.style.width = "0%";
     }
 
     if (scoreStatus) {
       scoreStatus.textContent =
-        "Оценку не удалось определить";
+        "Не удалось получить итоговую оценку";
     }
 
     return;
@@ -1323,26 +1109,30 @@ function renderScore(score) {
     );
 
   /*
-   * Теперь UI тоже 0–10,
+   * ВАЖНО:
+   * Теперь UI показывает 1–10,
    * а не 0–100.
    */
 
   if (resultScore) {
-
     resultScore.textContent =
-      formatScore10(
-        normalized
+      normalized.toFixed(
+        normalized % 1 === 0
+          ? 0
+          : 1
       );
   }
 
   if (scoreProgress) {
-
     scoreProgress.style.width =
-      `${normalized * 10}%`;
+      `${clamp(
+        normalized * 10,
+        0,
+        100
+      )}%`;
   }
 
   if (scoreStatus) {
-
     scoreStatus.textContent =
       getScoreStatus(
         normalized
@@ -1350,15 +1140,13 @@ function renderScore(score) {
   }
 }
 
-
 function getScoreStatus(score) {
-
-  if (score < 3) {
-    return "Низкая согласованность визуальных параметров";
+  if (score < 4) {
+    return "Низкая выраженность положительных показателей";
   }
 
-  if (score < 5) {
-    return "Умеренная согласованность визуальных параметров";
+  if (score < 5.5) {
+    return "Средний результат";
   }
 
   if (score < 7) {
@@ -1366,10 +1154,44 @@ function getScoreStatus(score) {
   }
 
   if (score < 8.5) {
-    return "Высокая согласованность визуальных параметров";
+    return "Высокий результат";
   }
 
-  return "Очень высокая согласованность визуальных параметров";
+  if (score < 9.5) {
+    return "Очень высокий результат";
+  }
+
+  return "Исключительно высокий результат";
+}
+
+
+// ============================================================
+// FACE PRESERVATION
+// ============================================================
+
+function preserveResultFace() {
+  /*
+   * Мы намеренно НЕ удаляем изображение после анализа.
+   *
+   * Если HTML содержит #analysis-frame,
+   * оставляем его видимым.
+   */
+
+  if (!analysisFrame) {
+    return;
+  }
+
+  analysisFrame.classList.add(
+    "result-face-visible"
+  );
+
+  analysisFrame.removeAttribute(
+    "hidden"
+  );
+
+  analysisFrame.style.display = "";
+  analysisFrame.style.visibility = "visible";
+  analysisFrame.style.opacity = "1";
 }
 
 
@@ -1378,54 +1200,37 @@ function getScoreStatus(score) {
 // ============================================================
 
 function renderStats(result) {
-
   if (!statsGrid) {
     return;
   }
 
-  statsGrid.innerHTML = "";
-
   /*
-   * MODEL УБРАН.
-   *
-   * Пользователю не нужно знать,
-   * какой технический backend использовался.
+   * Не показываем Gemini/model.
    */
 
+  statsGrid.innerHTML = "";
+
   const stats = [
-
     {
-      label:
-        "ЛИЦО",
-
+      label: "ЛИЦО",
       value:
-        String(
-          result.face_count
-        ),
-
+        String(result.face_count),
       detail:
         "обнаружено"
     },
-
     {
-      label:
-        "ТОЧКИ",
-
+      label: "ТОЧКИ",
       value:
         result.landmarks_count === null
           ? "—"
           : formatValue(
               result.landmarks_count
             ),
-
       detail:
-        "ориентиров"
+        "лицевой геометрии"
     },
-
     {
-      label:
-        "ПОКАЗАТЕЛИ",
-
+      label: "ИЗМЕРЕНИЯ",
       value:
         String(
           result.feature_count ||
@@ -1434,16 +1239,13 @@ function renderStats(result) {
             result.metrics
           )
         ),
-
       detail:
-        "измерено"
+        "показателей"
     }
-
   ];
 
   stats.forEach(
     (stat) => {
-
       const card =
         document.createElement(
           "article"
@@ -1485,7 +1287,6 @@ function renderStats(result) {
       statsGrid.appendChild(
         card
       );
-
     }
   );
 }
@@ -1495,56 +1296,99 @@ function renderStats(result) {
 // OVERVIEW
 // ============================================================
 
-function renderOverview(metrics) {
-
+function renderOverview(
+  metrics,
+  production
+) {
   if (!overviewGrid) {
     return;
   }
 
-  overviewGrid.innerHTML =
-    "";
+  overviewGrid.innerHTML = "";
 
-  /*
-   * Здесь больше НЕ выводим:
-   *
-   * face_geometry
-   * eye_area_balance
-   * measurement data
-   *
-   * в техническом виде.
-   */
+  const sections = [
+    {
+      title: "Гармония",
+      values:
+        getProductionValues(
+          production,
+          [
+            "overall_harmony",
+            "frontal_harmony",
+            "proportions"
+          ]
+        )
+    },
+    {
+      title: "Геометрия лица",
+      values:
+        getGroup(
+          metrics,
+          ["face_geometry"]
+        )
+    },
+    {
+      title: "Симметрия",
+      values:
+        getGroup(
+          metrics,
+          ["symmetry"]
+        )
+    }
+  ];
 
-  const entries =
-    getHumanOverviewMetrics(
-      metrics
-    );
+  let rendered = 0;
 
-  if (!entries.length) {
+  sections.forEach(
+    (section) => {
+      if (!section.values.length) {
+        return;
+      }
 
-    overviewGrid.appendChild(
-      createEmptyBlock(
-        "Измерения не были возвращены."
-      )
-    );
-
-    return;
-  }
-
-  entries.forEach(
-    (entry) => {
-
-      const card =
-        createScoreCard(
-          entry.label,
-          entry.value,
-          entry.description
+      const wrapper =
+        document.createElement(
+          "section"
         );
 
+      wrapper.className =
+        "overview-section";
+
+      const title =
+        document.createElement(
+          "h3"
+        );
+
+      title.textContent =
+        section.title;
+
+      wrapper.appendChild(title);
+
+      section.values.forEach(
+        ([key, value]) => {
+          wrapper.appendChild(
+            createScaleCard(
+              key,
+              value
+            )
+          );
+
+          rendered++;
+        }
+      );
+
       overviewGrid.appendChild(
-        card
+        wrapper
       );
     }
   );
+
+  if (!rendered) {
+    overviewGrid.appendChild(
+      createEmptyBlock(
+        "Измерения не были получены."
+      )
+    );
+  }
 }
 
 
@@ -1556,55 +1400,92 @@ function renderHarmony(
   metrics,
   production
 ) {
-
   if (!harmonyContent) {
     return;
   }
 
-  harmonyContent.innerHTML =
-    "";
+  harmonyContent.innerHTML = "";
 
   const values = [];
 
-  addProductionMetric(
-    values,
-    production,
-    "overall_harmony",
-    "Общая гармония"
+  const productionValues =
+    getProductionValues(
+      production,
+      [
+        "overall_harmony",
+        "frontal_harmony",
+        "proportions"
+      ]
+    );
+
+  values.push(
+    ...productionValues
   );
 
-  addProductionMetric(
-    values,
-    production,
-    "frontal_harmony",
-    "Гармония лица спереди"
+  const geometry =
+    getGroup(
+      metrics,
+      ["face_geometry"]
+    );
+
+  if (geometry.length) {
+    values.push(
+      ...geometry
+    );
+  }
+
+  const midface =
+    getGroup(
+      metrics,
+      ["midface"]
+    );
+
+  if (midface.length) {
+    values.push(
+      ...midface
+    );
+  }
+
+  if (!values.length) {
+    harmonyContent.appendChild(
+      createEmptyBlock(
+        "Показатели гармонии не были получены."
+      )
+    );
+
+    return;
+  }
+
+  const heading =
+    document.createElement(
+      "div"
+    );
+
+  heading.className =
+    "section-intro";
+
+  heading.innerHTML =
+    `
+      <strong>Гармония лица</strong>
+      <span>
+        Чем ближе показатель к 10, тем выше
+        выраженность соответствующей характеристики.
+      </span>
+    `;
+
+  harmonyContent.appendChild(
+    heading
   );
 
-  addProductionMetric(
-    values,
-    production,
-    "proportions",
-    "Пропорции"
-  );
-
-  addMetricGroup(
-    values,
-    metrics,
-    "face_geometry",
-    "Геометрия лица"
-  );
-
-  addMetricGroup(
-    values,
-    metrics,
-    "midface",
-    "Средняя часть лица"
-  );
-
-  renderScoreList(
-    harmonyContent,
-    values,
-    "Гармония"
+  values.forEach(
+    ([key, value]) => {
+      harmonyContent.appendChild(
+        createScaleCard(
+          key,
+          value
+        )
+      );
+    }
   );
 }
 
@@ -1614,93 +1495,19 @@ function renderHarmony(
 // ============================================================
 
 function renderMetrics(metrics) {
-
   if (!metricsContent) {
     return;
   }
 
-  metricsContent.innerHTML =
-    "";
+  metricsContent.innerHTML = "";
 
   const entries =
-    [];
-
-  Object.entries(
-    metrics || {}
-  ).forEach(
-    ([groupName, groupValue]) => {
-
-      if (
-        !isObject(
-          groupValue
-        )
-      ) {
-
-        if (
-          isNumericScore(
-            groupValue
-          )
-        ) {
-
-          entries.push({
-            label:
-              getRussianLabel(
-                groupName
-              ),
-
-            value:
-              Number(
-                groupValue
-              ),
-
-            group:
-              ""
-          });
-        }
-
-        return;
-      }
-
-      Object.entries(
-        groupValue
-      ).forEach(
-        ([key, value]) => {
-
-          if (
-            isNumericScore(
-              value
-            )
-          ) {
-
-            entries.push({
-
-              label:
-                getRussianLabel(
-                  key
-                ),
-
-              value:
-                Number(
-                  value
-                ),
-
-              group:
-                getRussianLabel(
-                  groupName
-                )
-            });
-          }
-
-        }
-      );
-    }
-  );
+    flattenObject(metrics);
 
   if (!entries.length) {
-
     metricsContent.appendChild(
       createEmptyBlock(
-        "Измерения не были возвращены."
+        "Подробные измерения не были получены."
       )
     );
 
@@ -1708,20 +1515,18 @@ function renderMetrics(metrics) {
   }
 
   /*
-   * Без бессмысленных accordion-вкладок.
+   * Никаких вкладок.
+   * Каждый показатель сразу виден.
    */
 
   entries.forEach(
-    (entry) => {
-
+    ([path, value]) => {
       metricsContent.appendChild(
-        createScoreCard(
-          entry.label,
-          entry.value,
-          entry.group
+        createScaleCard(
+          path,
+          value
         )
       );
-
     }
   );
 }
@@ -1735,48 +1540,77 @@ function renderAngularity(
   metrics,
   production
 ) {
-
   if (!angularityContent) {
     return;
   }
 
-  angularityContent.innerHTML =
-    "";
+  angularityContent.innerHTML = "";
 
   const values = [];
 
-  addMetricGroup(
-    values,
-    metrics,
-    "jaw",
-    "Челюсть"
+  values.push(
+    ...getGroup(
+      metrics,
+      ["jaw"]
+    )
   );
 
-  addMetricGroup(
-    values,
-    metrics,
-    "cheeks",
-    "Скулы"
+  values.push(
+    ...getGroup(
+      metrics,
+      ["cheeks"]
+    )
   );
 
-  addProductionMetric(
-    values,
-    production,
-    "angularity",
-    "Угловатость"
+  values.push(
+    ...getProductionValues(
+      production,
+      [
+        "angularity",
+        "facial_definition"
+      ]
+    )
   );
 
-  addProductionMetric(
-    values,
-    production,
-    "facial_definition",
-    "Выраженность лица"
+  if (!values.length) {
+    angularityContent.appendChild(
+      createEmptyBlock(
+        "Показатели угловатости не были получены."
+      )
+    );
+
+    return;
+  }
+
+  const heading =
+    document.createElement(
+      "div"
+    );
+
+  heading.className =
+    "section-intro";
+
+  heading.innerHTML =
+    `
+      <strong>Угловатость и выраженность</strong>
+      <span>
+        Визуальная шкала выраженности черт лица.
+      </span>
+    `;
+
+  angularityContent.appendChild(
+    heading
   );
 
-  renderScoreList(
-    angularityContent,
-    values,
-    "Угловатость"
+  values.forEach(
+    ([key, value]) => {
+      angularityContent.appendChild(
+        createScaleCard(
+          key,
+          value
+        )
+      );
+    }
   );
 }
 
@@ -1789,65 +1623,80 @@ function renderSymmetry(
   metrics,
   production
 ) {
-
   if (!symmetryContent) {
     return;
   }
 
-  symmetryContent.innerHTML =
-    "";
+  symmetryContent.innerHTML = "";
 
   const values = [];
 
-  addMetricGroup(
-    values,
-    metrics,
-    "symmetry",
-    "Симметрия"
+  values.push(
+    ...getGroup(
+      metrics,
+      ["symmetry"]
+    )
   );
 
-  addMetricKey(
-    values,
-    metrics,
-    "eyes",
-    "eye_alignment",
-    "Выравнивание глаз"
+  const eyeAlignment =
+    getGroup(
+      metrics,
+      ["eyes"]
+    ).filter(
+      ([key]) =>
+        key === "eye_alignment"
+    );
+
+  values.push(
+    ...eyeAlignment
   );
 
-  addMetricKey(
-    values,
-    metrics,
-    "eyebrows",
-    "brow_symmetry",
-    "Симметрия бровей"
+  values.push(
+    ...getProductionValues(
+      production,
+      ["symmetry"]
+    )
   );
 
-  addMetricKey(
-    values,
-    metrics,
-    "lips_mouth",
-    "mouth_symmetry",
-    "Симметрия рта"
+  if (!values.length) {
+    symmetryContent.appendChild(
+      createEmptyBlock(
+        "Показатели симметрии не были получены."
+      )
+    );
+
+    return;
+  }
+
+  const heading =
+    document.createElement(
+      "div"
+    );
+
+  heading.className =
+    "section-intro";
+
+  heading.innerHTML =
+    `
+      <strong>Симметрия</strong>
+      <span>
+        Показатели баланса между сторонами лица.
+      </span>
+    `;
+
+  symmetryContent.appendChild(
+    heading
   );
 
-  addProductionMetric(
-    values,
-    production,
-    "symmetry",
-    "Общая симметрия"
-  );
-
-  addProductionMetric(
-    values,
-    production,
-    "left_right_balance",
-    "Баланс сторон"
-  );
-
-  renderScoreList(
-    symmetryContent,
-    values,
-    "Симметрия"
+  values.forEach(
+    ([key, value]) => {
+      symmetryContent.appendChild(
+        createScaleCard(
+          key,
+          value
+        )
+      );
+    }
   );
 }
 
@@ -1860,64 +1709,37 @@ function renderDimorphism(
   metrics,
   production
 ) {
-
   if (!dimorphismContent) {
     return;
   }
 
-  dimorphismContent.innerHTML =
-    "";
+  dimorphismContent.innerHTML = "";
 
-  /*
-   * Никаких придуманных биологических
-   * выводов здесь не делаем.
-   *
-   * Если backend действительно вернул
-   * числовой визуальный показатель —
-   * показываем его.
-   */
-
-  const values = [];
-
-  if (
-    isObject(
-      production
-    ) &&
-    isNumericScore(
-      production.dimorphism
-    )
-  ) {
-
-    values.push({
-
-      label:
-        "Визуальный показатель",
-
-      value:
-        Number(
-          production.dimorphism
-        ),
-
-      group:
-        "Визуальная характеристика"
-    });
-  }
+  const values =
+    getProductionValues(
+      production,
+      ["dimorphism"]
+    );
 
   if (!values.length) {
-
     dimorphismContent.appendChild(
       createEmptyBlock(
-        "Отдельный показатель в этом анализе не рассчитывался."
+        "Отдельный показатель визуальной выраженности черт не был возвращён."
       )
     );
 
     return;
   }
 
-  renderScoreList(
-    dimorphismContent,
-    values,
-    "Диморфизм"
+  values.forEach(
+    ([key, value]) => {
+      dimorphismContent.appendChild(
+        createScaleCard(
+          key,
+          value
+        )
+      );
+    }
   );
 }
 
@@ -1927,13 +1749,11 @@ function renderDimorphism(
 // ============================================================
 
 function renderHealth() {
-
   if (!healthContent) {
     return;
   }
 
-  healthContent.innerHTML =
-    "";
+  healthContent.innerHTML = "";
 
   const icon =
     document.createElement(
@@ -1943,8 +1763,7 @@ function renderHealth() {
   icon.className =
     "note-icon";
 
-  icon.textContent =
-    "i";
+  icon.textContent = "i";
 
   const text =
     document.createElement(
@@ -1952,7 +1771,7 @@ function renderHealth() {
     );
 
   text.textContent =
-    "Этот раздел не является медицинской диагностикой. Система не определяет заболевания или состояние здоровья. Здесь отображаются только визуальные параметры, полученные из изображения.";
+    "Этот раздел не является медицинской диагностикой. Система не определяет заболевания или состояние здоровья. Здесь отображаются только визуальные характеристики, полученные из изображения.";
 
   healthContent.append(
     icon,
@@ -1962,58 +1781,61 @@ function renderHealth() {
 
 
 // ============================================================
-// SCORE CARD
+// SCALE CARD
 // ============================================================
 
-function createScoreCard(
-  label,
-  value,
-  description = ""
+function createScaleCard(
+  key,
+  value
 ) {
-
   const card =
     document.createElement(
       "article"
     );
 
   card.className =
-    "score-card";
+    "scale-card";
 
-  const top =
+  const numeric =
+    normalizeMetricValue(
+      value
+    );
+
+  const label =
     document.createElement(
       "div"
     );
 
-  top.className =
-    "score-card__top";
+  label.className =
+    "scale-card__top";
 
-  const title =
+  const name =
     document.createElement(
-      "div"
+      "span"
     );
 
-  title.className =
-    "score-card__title";
+  name.className =
+    "scale-card__name";
 
-  title.textContent =
-    label;
+  name.textContent =
+    getRussianLabel(key);
 
-  const number =
+  const score =
     document.createElement(
       "strong"
     );
 
-  number.className =
-    "score-card__number";
+  score.className =
+    "scale-card__score";
 
-  number.textContent =
-    formatScore10(
-      value
-    );
+  score.textContent =
+    numeric === null
+      ? "—"
+      : `${formatMetricScore(numeric)}/10`;
 
-  top.append(
-    title,
-    number
+  label.append(
+    name,
+    score
   );
 
   const track =
@@ -2022,7 +1844,7 @@ function createScoreCard(
     );
 
   track.className =
-    "score-track";
+    "metric-scale";
 
   const fill =
     document.createElement(
@@ -2030,442 +1852,306 @@ function createScoreCard(
     );
 
   fill.className =
-    "score-track__fill";
+    "metric-scale__fill";
 
-  const normalized =
-    clamp(
-      Number(value),
-      0,
-      10
+  if (numeric !== null) {
+    const percent =
+      clamp(
+        numeric * 10,
+        0,
+        100
+      );
+
+    fill.style.width =
+      `${percent}%`;
+
+    fill.style.setProperty(
+      "--metric-value",
+      `${percent}%`
     );
 
-  fill.style.width =
-    `${normalized * 10}%`;
-
-  /*
-   * Добавляем числовой класс,
-   * чтобы CSS мог использовать
-   * разные состояния.
-   */
-
-  card.dataset.score =
-    String(
-      normalized
-    );
-
-  if (normalized < 4) {
-
-    card.classList.add(
-      "score-low"
-    );
-
-  } else if (
-    normalized < 6.5
-  ) {
-
-    card.classList.add(
-      "score-medium"
-    );
-
-  } else if (
-    normalized < 8
-  ) {
-
-    card.classList.add(
-      "score-good"
-    );
-
+    fill.dataset.level =
+      getMetricLevel(numeric);
   } else {
-
-    card.classList.add(
-      "score-excellent"
-    );
+    fill.style.width = "0%";
   }
 
-  track.append(
+  track.appendChild(
     fill
   );
 
-  card.append(
-    top,
-    track
-  );
-
-  if (description) {
-
-    const desc =
-      document.createElement(
-        "div"
-      );
-
-    desc.className =
-      "score-card__description";
-
-    desc.textContent =
-      description;
-
-    card.appendChild(
-      desc
+  const scale =
+    document.createElement(
+      "div"
     );
-  }
+
+  scale.className =
+    "metric-scale__labels";
+
+  scale.innerHTML =
+    `
+      <span>Слабее</span>
+      <span>Средне</span>
+      <span>Выражено</span>
+    `;
+
+  card.append(
+    label,
+    track,
+    scale
+  );
 
   return card;
 }
 
 
 // ============================================================
-// SCORE LIST
+// METRIC LEVEL
 // ============================================================
 
-function renderScoreList(
-  container,
-  values,
-  sectionName
-) {
+function getMetricLevel(value) {
+  if (value < 4) {
+    return "low";
+  }
 
-  container.innerHTML =
-    "";
+  if (value < 7) {
+    return "medium";
+  }
+
+  return "high";
+}
+
+function normalizeMetricValue(value) {
+  if (
+    value === null ||
+    value === undefined ||
+    value === ""
+  ) {
+    return null;
+  }
+
+  const number =
+    Number(value);
+
+  if (
+    !Number.isFinite(number)
+  ) {
+    return null;
+  }
 
   /*
-   * Удаляем дубликаты.
+   * Backend ожидается 0–10.
    */
 
-  const unique =
-    [];
+  return clamp(
+    number,
+    0,
+    10
+  );
+}
 
-  const seen =
-    new Set();
+function formatMetricScore(value) {
+  const rounded =
+    Math.round(
+      value * 10
+    ) / 10;
 
-  values.forEach(
-    (entry) => {
+  return String(
+    rounded
+  ).replace(
+    ".",
+    ","
+  );
+}
 
-      if (
-        !entry ||
-        !isNumericScore(
-          entry.value
-        )
-      ) {
-        return;
-      }
 
-      const key =
-        `${entry.label}:${entry.value}`;
+// ============================================================
+// HISTORY
+// ============================================================
 
-      if (
-        seen.has(key)
-      ) {
-        return;
-      }
-
-      seen.add(key);
-
-      unique.push(
-        entry
+function getHistory() {
+  try {
+    const raw =
+      localStorage.getItem(
+        HISTORY_KEY
       );
+
+    if (!raw) {
+      return [];
     }
+
+    const parsed =
+      JSON.parse(raw);
+
+    return Array.isArray(parsed)
+      ? parsed
+      : [];
+
+  } catch (error) {
+    console.warn(
+      "History read error:",
+      error
+    );
+
+    return [];
+  }
+}
+
+function saveHistory(result) {
+  try {
+    const history =
+      getHistory();
+
+    const entry = {
+      id:
+        `${Date.now()}_${Math.random()
+          .toString(36)
+          .slice(2, 9)}`,
+
+      created_at:
+        result.generated_at ||
+        new Date().toISOString(),
+
+      score:
+        result.score,
+
+      face_count:
+        result.face_count,
+
+      feature_count:
+        result.feature_count,
+
+      detected_features:
+        result.detected_features
+    };
+
+    history.unshift(entry);
+
+    localStorage.setItem(
+      HISTORY_KEY,
+      JSON.stringify(
+        history.slice(0, 50)
+      )
+    );
+
+    updateHistoryCount();
+
+  } catch (error) {
+    console.warn(
+      "History save error:",
+      error
+    );
+  }
+}
+
+function renderHistory() {
+  if (!historyList) {
+    return;
+  }
+
+  const history =
+    getHistory();
+
+  updateHistoryCount(
+    history.length
   );
 
-  if (!unique.length) {
+  historyList.innerHTML = "";
 
-    container.appendChild(
+  if (!history.length) {
+    historyList.appendChild(
       createEmptyBlock(
-        `Для раздела «${sectionName}» нет доступных измерений.`
+        "Пока нет сохранённых анализов."
       )
     );
 
     return;
   }
 
-  unique.forEach(
+  history.forEach(
     (entry) => {
-
-      const card =
-        createScoreCard(
-          entry.label,
-          entry.value,
-          entry.group || ""
+      const item =
+        document.createElement(
+          "article"
         );
 
-      container.appendChild(
-        card
+      item.className =
+        "history-item";
+
+      const left =
+        document.createElement(
+          "div"
+        );
+
+      const date =
+        document.createElement(
+          "div"
+        );
+
+      date.className = "date";
+
+      date.textContent =
+        formatDate(
+          entry.created_at
+        );
+
+      const meta =
+        document.createElement(
+          "div"
+        );
+
+      meta.className = "meta";
+
+      meta.textContent =
+        `${entry.face_count || 0} лицо · ` +
+        `${entry.feature_count ||
+          entry.detected_features ||
+          0} измерений`;
+
+      left.append(
+        date,
+        meta
+      );
+
+      const score =
+        document.createElement(
+          "div"
+        );
+
+      score.className = "score";
+
+      score.textContent =
+        entry.score === null ||
+        entry.score === undefined
+          ? "—"
+          : formatScore(
+              entry.score
+            );
+
+      item.append(
+        left,
+        score
+      );
+
+      historyList.appendChild(
+        item
       );
     }
   );
 }
 
-
-// ============================================================
-// HELPERS FOR RESULT GROUPS
-// ============================================================
-
-function addProductionMetric(
-  target,
-  production,
-  key,
-  label
+function updateHistoryCount(
+  explicitCount = null
 ) {
+  const count =
+    explicitCount === null
+      ? getHistory().length
+      : explicitCount;
 
-  if (
-    !isObject(
-      production
-    )
-  ) {
-    return;
+  if (historyCount) {
+    historyCount.textContent =
+      String(count);
   }
-
-  const value =
-    production[key];
-
-  if (
-    isNumericScore(
-      value
-    )
-  ) {
-
-    target.push({
-
-      label,
-
-      value:
-        Number(
-          value
-        ),
-
-      group:
-        "Итоговый показатель"
-    });
-  }
-}
-
-
-function addMetricGroup(
-  target,
-  metrics,
-  groupName,
-  russianGroupName
-) {
-
-  if (
-    !isObject(
-      metrics
-    )
-  ) {
-    return;
-  }
-
-  const group =
-    metrics[groupName];
-
-  if (
-    !isObject(
-      group
-    )
-  ) {
-    return;
-  }
-
-  Object.entries(
-    group
-  ).forEach(
-    ([key, value]) => {
-
-      if (
-        isNumericScore(
-          value
-        )
-      ) {
-
-        target.push({
-
-          label:
-            getRussianLabel(
-              key
-            ),
-
-          value:
-            Number(
-              value
-            ),
-
-          group:
-            russianGroupName
-        });
-      }
-
-    }
-  );
-}
-
-
-function addMetricKey(
-  target,
-  metrics,
-  groupName,
-  key,
-  label
-) {
-
-  if (
-    !isObject(
-      metrics
-    )
-  ) {
-    return;
-  }
-
-  const group =
-    metrics[groupName];
-
-  if (
-    !isObject(
-      group
-    )
-  ) {
-    return;
-  }
-
-  const value =
-    group[key];
-
-  if (
-    isNumericScore(
-      value
-    )
-  ) {
-
-    target.push({
-
-      label,
-
-      value:
-        Number(
-          value
-        ),
-
-      group:
-        getRussianLabel(
-          groupName
-        )
-    });
-  }
-}
-
-
-// ============================================================
-// HUMAN OVERVIEW
-// ============================================================
-
-function getHumanOverviewMetrics(
-  metrics
-) {
-
-  const result =
-    [];
-
-  const preferred = [
-
-    [
-      "face_geometry",
-      "face_aspect_ratio",
-      "Соотношение сторон лица",
-      "Общее соотношение геометрии лица"
-    ],
-
-    [
-      "face_geometry",
-      "facial_width_height_balance",
-      "Баланс ширины и высоты лица",
-      "Баланс основных пропорций"
-    ],
-
-    [
-      "face_geometry",
-      "midface_proportion",
-      "Пропорция средней части лица",
-      "Баланс средней зоны лица"
-    ],
-
-    [
-      "symmetry",
-      "overall_symmetry",
-      "Общая симметрия",
-      "Согласованность левой и правой стороны"
-    ],
-
-    [
-      "eyes",
-      "eye_spacing",
-      "Расстояние между глазами",
-      "Баланс расстояния между глазами"
-    ],
-
-    [
-      "jaw",
-      "jaw_definition",
-      "Выраженность челюсти",
-      "Насколько чётко выражена линия челюсти"
-    ],
-
-    [
-      "cheeks",
-      "cheek_definition",
-      "Выраженность скул",
-      "Выраженность скуловой зоны"
-    ],
-
-    [
-      "lips_mouth",
-      "mouth_symmetry",
-      "Симметрия рта",
-      "Баланс левой и правой стороны рта"
-    ]
-
-  ];
-
-  preferred.forEach(
-    (item) => {
-
-      const [
-        group,
-        key,
-        label,
-        description
-      ] = item;
-
-      const value =
-        metrics?.[group]?.[key];
-
-      /*
-       * Некоторые geometry-значения могут
-       * быть ratio, а не оценкой 0–10.
-       *
-       * Поэтому overview не превращаем
-       * насильно в score-bar, если значение
-       * не находится в диапазоне 0–10.
-       */
-
-      if (
-        isNumericScore(
-          value
-        )
-      ) {
-
-        result.push({
-
-          label,
-
-          value:
-            Number(
-              value
-            ),
-
-          description
-        });
-      }
-    }
-  );
-
-  return result;
 }
 
 
@@ -2474,7 +2160,6 @@ function getHumanOverviewMetrics(
 // ============================================================
 
 function bindResultTabs() {
-
   if (!reportTabs) {
     return;
   }
@@ -2491,11 +2176,9 @@ function bindResultTabs() {
 
   tabs.forEach(
     (tab) => {
-
       tab.addEventListener(
         "click",
         () => {
-
           const target =
             tab.dataset.tab;
 
@@ -2505,7 +2188,6 @@ function bindResultTabs() {
 
           tabs.forEach(
             (item) => {
-
               item.classList.toggle(
                 "active",
                 item === tab
@@ -2515,7 +2197,6 @@ function bindResultTabs() {
 
           panels.forEach(
             (panel) => {
-
               panel.classList.toggle(
                 "active",
                 panel.dataset.panel ===
@@ -2523,16 +2204,14 @@ function bindResultTabs() {
               );
             }
           );
-
         }
       );
-
     }
   );
 }
 
-
 function activateDefaultResultTab() {
+  preserveResultFace();
 
   if (!reportTabs) {
     return;
@@ -2559,259 +2238,22 @@ function activateDefaultResultTab() {
 
   tabs.forEach(
     (tab) => {
-
       tab.classList.toggle(
         "active",
         tab === firstTab
       );
-
     }
   );
 
   panels.forEach(
     (panel) => {
-
       panel.classList.toggle(
         "active",
         panel.dataset.panel ===
           "overview"
       );
-
     }
   );
-}
-
-
-// ============================================================
-// HISTORY
-// ============================================================
-
-function getHistory() {
-
-  try {
-
-    const raw =
-      localStorage.getItem(
-        HISTORY_KEY
-      );
-
-    if (!raw) {
-      return [];
-    }
-
-    const parsed =
-      JSON.parse(
-        raw
-      );
-
-    return Array.isArray(
-      parsed
-    )
-      ? parsed
-      : [];
-
-  } catch (error) {
-
-    console.warn(
-      "History read error:",
-      error
-    );
-
-    return [];
-  }
-}
-
-
-function saveHistory(result) {
-
-  try {
-
-    const history =
-      getHistory();
-
-    const entry = {
-
-      id:
-        `${Date.now()}_${Math.random()
-          .toString(36)
-          .slice(2, 9)}`,
-
-      created_at:
-        result.generated_at ||
-        new Date().toISOString(),
-
-      score:
-        result.score,
-
-      face_count:
-        result.face_count,
-
-      feature_count:
-        result.feature_count,
-
-      detected_features:
-        result.detected_features,
-
-      model:
-        result.model
-    };
-
-    history.unshift(
-      entry
-    );
-
-    localStorage.setItem(
-      HISTORY_KEY,
-      JSON.stringify(
-        history.slice(
-          0,
-          50
-        )
-      )
-    );
-
-    updateHistoryCount();
-
-  } catch (error) {
-
-    console.warn(
-      "History save error:",
-      error
-    );
-  }
-}
-
-
-function renderHistory() {
-
-  if (!historyList) {
-    return;
-  }
-
-  const history =
-    getHistory();
-
-  updateHistoryCount(
-    history.length
-  );
-
-  historyList.innerHTML =
-    "";
-
-  if (!history.length) {
-
-    const empty =
-      document.createElement(
-        "div"
-      );
-
-    empty.className =
-      "history-empty";
-
-    empty.textContent =
-      "Пока нет сохранённых анализов.";
-
-    historyList.appendChild(
-      empty
-    );
-
-    return;
-  }
-
-  history.forEach(
-    (entry) => {
-
-      const item =
-        document.createElement(
-          "article"
-        );
-
-      item.className =
-        "history-item";
-
-      const left =
-        document.createElement(
-          "div"
-        );
-
-      const date =
-        document.createElement(
-          "div"
-        );
-
-      date.className =
-        "date";
-
-      date.textContent =
-        formatDate(
-          entry.created_at
-        );
-
-      const meta =
-        document.createElement(
-          "div"
-        );
-
-      meta.className =
-        "meta";
-
-      meta.textContent =
-        `${entry.face_count || 0} лицо · ` +
-        `${entry.feature_count ||
-          entry.detected_features ||
-          0} показателей`;
-
-      left.append(
-        date,
-        meta
-      );
-
-      const score =
-        document.createElement(
-          "div"
-        );
-
-      score.className =
-        "score";
-
-      score.textContent =
-        entry.score === null ||
-        entry.score === undefined
-          ? "—"
-          : formatScore10(
-              entry.score
-            );
-
-      item.append(
-        left,
-        score
-      );
-
-      historyList.appendChild(
-        item
-      );
-
-    }
-  );
-}
-
-
-function updateHistoryCount(
-  explicitCount = null
-) {
-
-  const count =
-    explicitCount === null
-      ? getHistory().length
-      : explicitCount;
-
-  if (historyCount) {
-
-    historyCount.textContent =
-      String(
-        count
-      );
-  }
 }
 
 
@@ -2820,42 +2262,31 @@ function updateHistoryCount(
 // ============================================================
 
 function startNewAnalysis() {
-
   analysisRequestId++;
 
-  analysisInProgress =
-    false;
+  analysisInProgress = false;
 
-  selectedFile =
-    null;
-
-  currentAnalysis =
-    null;
+  selectedFile = null;
+  currentAnalysis = null;
 
   if (selectedObjectUrl) {
-
     URL.revokeObjectURL(
       selectedObjectUrl
     );
 
-    selectedObjectUrl =
-      null;
+    selectedObjectUrl = null;
   }
 
   if (fileInput) {
-
-    fileInput.value =
-      "";
+    fileInput.value = "";
   }
 
   if (uploadName) {
-
     uploadName.textContent =
       "JPG, PNG или WEBP · до 15 MB";
   }
 
   if (analysisImage) {
-
     analysisImage.removeAttribute(
       "src"
     );
@@ -2865,316 +2296,129 @@ function startNewAnalysis() {
 
   resetLoadingSteps();
 
-  showScreen(
-    "home"
-  );
+  showScreen("home");
 }
 
 
 // ============================================================
-// LOADING
+// TOAST
 // ============================================================
 
-async function runLoadingSequence(
-  analysisPromise
-) {
+function showToast(message) {
+  if (!toast) {
+    return;
+  }
 
-  const steps = [
+  toast.textContent =
+    String(
+      message ||
+      "Произошла ошибка."
+    );
 
-    {
-      index: 0,
-      title:
-        "Обрабатываем фотографию",
-      text:
-        "Подготавливаем изображение"
-    },
+  toast.classList.add("show");
 
-    {
-      index: 1,
-      title:
-        "Анализируем лицо",
-      text:
-        "Определяем видимые параметры лица"
-    },
+  clearTimeout(
+    toastTimer
+  );
 
-    {
-      index: 2,
-      title:
-        "Измеряем пропорции",
-      text:
-        "Собираем основные показатели"
-    },
+  toastTimer =
+    setTimeout(
+      () => {
+        toast.classList.remove(
+          "show"
+        );
+      },
+      4000
+    );
+}
 
-    {
-      index: 3,
-      title:
-        "Проверяем симметрию",
-      text:
-        "Сравниваем левую и правую стороны"
-    },
 
-    {
-      index: 4,
-      title:
-        "Формируем результат",
-      text:
-        "Подготавливаем итоговый отчёт"
-    }
+// ============================================================
+// ERRORS
+// ============================================================
 
-  ];
+function getFriendlyErrorMessage(error) {
+  const message =
+    String(
+      error?.message ||
+      ""
+    );
 
-  for (
-    let i = 0;
-    i < steps.length;
-    i++
+  if (
+    message.includes(
+      "Failed to fetch"
+    )
   ) {
-
-    const step =
-      steps[i];
-
-    setLoadingStep(
-      step.index
-    );
-
-    if (loadingTitle) {
-
-      loadingTitle.textContent =
-        step.title;
-    }
-
-    if (loadingText) {
-
-      loadingText.textContent =
-        step.text;
-    }
-
-    if (
-      i <
-      steps.length - 1
-    ) {
-
-      await sleep(500);
-
-    } else {
-
-      await Promise.race([
-
-        analysisPromise.catch(
-          () => null
-        ),
-
-        sleep(1500)
-
-      ]);
-    }
-  }
-}
-
-
-function resetLoadingSteps() {
-
-  loadingSteps.forEach(
-    (step) => {
-
-      step.classList.remove(
-        "active",
-        "done"
-      );
-
-    }
-  );
-
-  const first =
-    document.querySelector(
-      '.loading-step[data-step="0"]'
-    );
-
-  if (first) {
-
-    first.classList.add(
-      "active"
+    return (
+      "Не удалось подключиться к серверу анализа. Проверь Worker и CORS."
     );
   }
 
-  if (loadingTitle) {
-
-    loadingTitle.textContent =
-      "Обрабатываем фотографию";
-  }
-
-  if (loadingText) {
-
-    loadingText.textContent =
-      "Подготавливаем изображение";
-  }
-}
-
-
-function setLoadingStep(index) {
-
-  loadingSteps.forEach(
-    (step) => {
-
-      const stepIndex =
-        Number(
-          step.dataset.step
-        );
-
-      step.classList.toggle(
-        "active",
-        stepIndex === index
-      );
-
-      step.classList.toggle(
-        "done",
-        stepIndex < index
-      );
-
-    }
-  );
-}
-
-
-function completeLoadingSteps() {
-
-  loadingSteps.forEach(
-    (step) => {
-
-      step.classList.remove(
-        "active"
-      );
-
-      step.classList.add(
-        "done"
-      );
-
-    }
-  );
-}
-
-
-// ============================================================
-// EVENTS
-// ============================================================
-
-function bindEvents() {
-
-  if (uploadButton) {
-
-    uploadButton.addEventListener(
-      "click",
-      (event) => {
-
-        event.preventDefault();
-
-        openFilePicker();
-      }
-    );
-
-  } else {
-
-    console.error(
-      "FaceMetric: #upload-btn not found."
-    );
-  }
-
-
-  if (fileInput) {
-
-    fileInput.addEventListener(
-      "change",
-      (event) => {
-
-        const file =
-          event.target.files?.[0];
-
-        handleFileSelected(
-          file
-        );
-      }
-    );
-
-  } else {
-
-    console.error(
-      "FaceMetric: #file-input not found."
-    );
-  }
-
-
-  document
-    .querySelectorAll(
-      "[data-screen]"
+  if (
+    message.includes(
+      "NetworkError"
     )
-    .forEach(
-      (element) => {
-
-        element.addEventListener(
-          "click",
-          (event) => {
-
-            if (
-              element ===
-              uploadButton
-            ) {
-              return;
-            }
-
-            const target =
-              element.dataset.screen;
-
-            if (target) {
-
-              showScreen(
-                target
-              );
-            }
-          }
-        );
-      }
-    );
-
-
-  document
-    .querySelectorAll(
-      ".back-btn"
-    )
-    .forEach(
-      (button) => {
-
-        button.addEventListener(
-          "click",
-          () => {
-
-            const target =
-              button.dataset.screen;
-
-            if (target) {
-
-              showScreen(
-                target
-              );
-
-            } else {
-
-              goBack();
-            }
-          }
-        );
-      }
-    );
-
-
-  if (newAnalysisButton) {
-
-    newAnalysisButton.addEventListener(
-      "click",
-      startNewAnalysis
+  ) {
+    return (
+      "Сетевая ошибка при подключении к серверу анализа."
     );
   }
 
+  if (
+    message.includes("413")
+  ) {
+    return "Фотография слишком большая.";
+  }
 
-  bindResultTabs();
+  if (
+    message.includes("429")
+  ) {
+    return (
+      "Слишком много запросов. Попробуй немного позже."
+    );
+  }
+
+  if (
+    message.includes("401") ||
+    message.includes("403")
+  ) {
+    return (
+      "Сервер не смог авторизоваться в Gemini API."
+    );
+  }
+
+  return (
+    message ||
+    "Анализ не выполнен. Попробуй ещё раз."
+  );
+}
+
+function getHttpErrorMessage(status) {
+  if (status === 400) {
+    return "Некорректный запрос к серверу анализа.";
+  }
+
+  if (status === 401) {
+    return "Ошибка авторизации сервера.";
+  }
+
+  if (status === 403) {
+    return "Доступ к серверу анализа запрещён.";
+  }
+
+  if (status === 413) {
+    return "Фотография слишком большая.";
+  }
+
+  if (status === 429) {
+    return "Слишком много запросов. Попробуй позже.";
+  }
+
+  if (status >= 500) {
+    return "Ошибка сервера анализа.";
+  }
+
+  return `Ошибка сервера (${status}).`;
 }
 
 
@@ -3183,67 +2427,54 @@ function bindEvents() {
 // ============================================================
 
 function formatBytes(bytes) {
-
-  if (
-    !Number.isFinite(
-      bytes
-    )
-  ) {
+  if (!Number.isFinite(bytes)) {
     return "—";
   }
 
   if (bytes < 1024) {
-    return `${bytes} Б`;
+    return `${bytes} B`;
   }
 
-  if (
-    bytes <
-    1024 * 1024
-  ) {
+  if (bytes < 1024 * 1024) {
     return `${(
       bytes / 1024
-    ).toFixed(1)} КБ`;
+    ).toFixed(1)} KB`;
   }
 
   return `${(
     bytes /
     (1024 * 1024)
-  ).toFixed(2)} МБ`;
+  ).toFixed(2)} MB`;
 }
 
-
-function formatScore10(score) {
-
+function formatScore(score) {
   const number =
     Number(score);
 
   if (
-    !Number.isFinite(
-      number
-    )
+    !Number.isFinite(number)
   ) {
     return "—";
   }
 
-  return (
-    Math.round(
-      clamp(
-        number,
-        0,
-        10
-      ) * 10
-    ) / 10
-  )
-    .toFixed(1)
-    .replace(
-      ".",
-      ","
+  const normalized =
+    clamp(
+      number,
+      0,
+      10
     );
+
+  return String(
+    Math.round(
+      normalized * 10
+    ) / 10
+  ).replace(
+    ".",
+    ","
+  );
 }
 
-
 function formatValue(value) {
-
   if (
     value === null ||
     value === undefined ||
@@ -3252,75 +2483,49 @@ function formatValue(value) {
     return "—";
   }
 
-  if (
-    typeof value ===
-    "number"
-  ) {
-
+  if (typeof value === "number") {
     if (
-      !Number.isFinite(
-        value
-      )
+      !Number.isFinite(value)
     ) {
       return "—";
     }
 
     return String(
-      Number(
-        value.toFixed(2)
-      )
+      Math.round(
+        value * 100
+      ) / 100
     ).replace(
       ".",
       ","
     );
   }
 
-  if (
-    typeof value ===
-    "boolean"
-  ) {
-
+  if (typeof value === "boolean") {
     return value
       ? "Да"
       : "Нет";
   }
 
-  if (
-    typeof value ===
-    "object"
-  ) {
-
+  if (typeof value === "object") {
     try {
-
-      return JSON.stringify(
-        value
-      );
-
+      return JSON.stringify(value);
     } catch {
-
       return "—";
     }
   }
 
-  return String(
-    value
-  );
+  return String(value);
 }
 
-
 function formatDate(value) {
-
   const date =
-    new Date(
-      value
-    );
+    new Date(value);
 
   if (
     Number.isNaN(
       date.getTime()
     )
   ) {
-
     return "Неизвестная дата";
   }
 
@@ -3338,25 +2543,26 @@ function formatDate(value) {
 
 
 // ============================================================
-// LABELS
+// LABEL HELPERS
 // ============================================================
 
 function getRussianLabel(key) {
+  const raw =
+    String(key || "");
 
-  if (
-    LABELS[key]
-  ) {
-    return LABELS[key];
-  }
+  const lastPart =
+    raw.includes(".")
+      ? raw.split(".").pop()
+      : raw;
 
-  return prettifyKey(
-    key
+  return (
+    LABELS[lastPart] ||
+    LABELS[raw] ||
+    prettifyKey(lastPart)
   );
 }
 
-
 function prettifyKey(key) {
-
   return String(
     key || ""
   )
@@ -3380,22 +2586,17 @@ function prettifyKey(key) {
     );
 }
 
-
 function prettifyPath(path) {
+  const parts =
+    String(path || "")
+      .split(".");
 
-  return String(
-    path || ""
-  )
-    .split(".")
+  return parts
     .map(
       (part) =>
-        getRussianLabel(
-          part
-        )
+        getRussianLabel(part)
     )
-    .join(
-      " · "
-    );
+    .join(" · ");
 }
 
 
@@ -3404,95 +2605,64 @@ function prettifyPath(path) {
 // ============================================================
 
 function isObject(value) {
-
   return (
     value !== null &&
     typeof value === "object" &&
-    !Array.isArray(
-      value
-    )
+    !Array.isArray(value)
   );
 }
-
 
 function flattenObject(
   object,
   prefix = ""
 ) {
-
   const result = [];
 
-  if (
-    !isObject(
-      object
-    )
-  ) {
+  if (!isObject(object)) {
     return result;
   }
 
-  Object.entries(
-    object
-  ).forEach(
-    ([key, value]) => {
+  Object.entries(object)
+    .forEach(
+      ([key, value]) => {
+        const path =
+          prefix
+            ? `${prefix}.${key}`
+            : key;
 
-      const path =
-        prefix
-          ? `${prefix}.${key}`
-          : key;
-
-      if (
-        isObject(
-          value
-        )
-      ) {
-
-        result.push(
-          ...flattenObject(
-            value,
-            path
-          )
-        );
-
-      } else {
-
-        result.push([
-          path,
-          value
-        ]);
+        if (isObject(value)) {
+          result.push(
+            ...flattenObject(
+              value,
+              path
+            )
+          );
+        } else {
+          result.push([
+            path,
+            value
+          ]);
+        }
       }
-
-    }
-  );
+    );
 
   return result;
 }
 
-
 function countLeaves(object) {
-
-  return flattenObject(
-    object
-  ).length;
+  return flattenObject(object).length;
 }
 
-
 function toNumberOrZero(value) {
-
   const number =
-    Number(
-      value
-    );
+    Number(value);
 
-  return Number.isFinite(
-    number
-  )
+  return Number.isFinite(number)
     ? number
     : 0;
 }
 
-
 function nullableNumber(value) {
-
   if (
     value === null ||
     value === undefined ||
@@ -3502,20 +2672,14 @@ function nullableNumber(value) {
   }
 
   const number =
-    Number(
-      value
-    );
+    Number(value);
 
-  return Number.isFinite(
-    number
-  )
+  return Number.isFinite(number)
     ? number
     : null;
 }
 
-
 function normalizeScore(value) {
-
   if (
     value === null ||
     value === undefined ||
@@ -3525,14 +2689,10 @@ function normalizeScore(value) {
   }
 
   const number =
-    Number(
-      value
-    );
+    Number(value);
 
   if (
-    !Number.isFinite(
-      number
-    )
+    !Number.isFinite(number)
   ) {
     return null;
   }
@@ -3548,45 +2708,11 @@ function normalizeScore(value) {
   );
 }
 
-
-function isNumericScore(value) {
-
-  const number =
-    Number(
-      value
-    );
-
-  return (
-    Number.isFinite(
-      number
-    ) &&
-    number >= 0 &&
-    number <= 10
-  );
-}
-
-
-function cleanText(value) {
-
-  if (
-    value === null ||
-    value === undefined
-  ) {
-    return "";
-  }
-
-  return String(
-    value
-  ).trim();
-}
-
-
 function clamp(
   value,
   min,
   max
 ) {
-
   return Math.min(
     max,
     Math.max(
@@ -3596,11 +2722,7 @@ function clamp(
   );
 }
 
-
-function createEmptyBlock(
-  message
-) {
-
+function createEmptyBlock(message) {
   const div =
     document.createElement(
       "div"
@@ -3616,188 +2738,157 @@ function createEmptyBlock(
 }
 
 
-function sleep(ms) {
-
-  return new Promise(
-    (resolve) =>
-      setTimeout(
-        resolve,
-        ms
-      )
-  );
-}
-
-
 // ============================================================
-// ERROR HANDLING
+// METRIC GROUP HELPERS
 // ============================================================
 
-function getFriendlyErrorMessage(
-  error
+function getGroup(
+  object,
+  names
 ) {
-
-  const message =
-    String(
-      error?.message ||
-      ""
-    );
-
-  if (
-    message.includes(
-      "Failed to fetch"
-    )
-  ) {
-
-    return (
-      "Не удалось подключиться к серверу анализа. Проверь Worker и CORS."
-    );
+  if (!isObject(object)) {
+    return [];
   }
 
-  if (
-    message.includes(
-      "NetworkError"
-    )
-  ) {
+  const result = [];
 
-    return (
-      "Сетевая ошибка при подключении к серверу анализа."
-    );
-  }
+  names.forEach(
+    (name) => {
+      const group =
+        object[name];
 
-  if (
-    message.includes(
-      "413"
-    )
-  ) {
-
-    return (
-      "Фотография слишком большая."
-    );
-  }
-
-  if (
-    message.includes(
-      "429"
-    )
-  ) {
-
-    return (
-      "Gemini временно ограничил количество запросов. Попробуй позже."
-    );
-  }
-
-  if (
-    message.includes(
-      "401"
-    ) ||
-    message.includes(
-      "403"
-    )
-  ) {
-
-    return (
-      "Ошибка авторизации Worker. Проверь настройки Gemini API."
-    );
-  }
-
-  return (
-    message ||
-    "Анализ не выполнен. Попробуй ещё раз."
-  );
-}
-
-
-function getHttpErrorMessage(status) {
-
-  if (status === 400) {
-    return "Некорректный запрос к серверу анализа.";
-  }
-
-  if (status === 401) {
-    return "Ошибка авторизации Gemini API.";
-  }
-
-  if (status === 403) {
-    return "Доступ к Gemini API запрещён.";
-  }
-
-  if (status === 413) {
-    return "Файл слишком большой.";
-  }
-
-  if (status === 429) {
-    return "Слишком много запросов. Попробуй позже.";
-  }
-
-  if (status >= 500) {
-    return "Ошибка сервера анализа.";
-  }
-
-  return `Ошибка сервера (${status}).`;
-}
-
-
-// ============================================================
-// HEALTH CHECK
-// ============================================================
-
-async function checkWorkerHealth() {
-
-  try {
-
-    const response =
-      await fetch(
-        HEALTH_ENDPOINT,
-        {
-          method: "GET",
-          cache: "no-store",
-          headers: {
-            Accept:
-              "application/json"
-          }
-        }
-      );
-
-    if (!response.ok) {
-
-      console.warn(
-        "Health check:",
-        response.status
-      );
-
-      return false;
+      if (isObject(group)) {
+        result.push(
+          ...Object.entries(group)
+        );
+      }
     }
+  );
 
-    const data =
-      await response.json();
+  return result;
+}
 
-    console.log(
-      "Gemini Worker health:",
-      data
-    );
-
-    return (
-      data?.success === true
-    );
-
-  } catch (error) {
-
-    console.warn(
-      "Health check error:",
-      error
-    );
-
-    return false;
+function getProductionValues(
+  production,
+  names
+) {
+  if (!isObject(production)) {
+    return [];
   }
+
+  const result = [];
+
+  names.forEach(
+    (name) => {
+      if (
+        production[name] !==
+        undefined
+      ) {
+        result.push([
+          name,
+          production[name]
+        ]);
+      }
+    }
+  );
+
+  return result;
 }
 
 
 // ============================================================
-// START
+// EVENTS
+// ============================================================
+
+function bindEvents() {
+  if (uploadButton) {
+    uploadButton.addEventListener(
+      "click",
+      (event) => {
+        event.preventDefault();
+
+        openFilePicker();
+      }
+    );
+  }
+
+  if (fileInput) {
+    fileInput.addEventListener(
+      "change",
+      (event) => {
+        const file =
+          event.target.files?.[0];
+
+        handleFileSelected(file);
+      }
+    );
+  }
+
+  document
+    .querySelectorAll(
+      "[data-screen]"
+    )
+    .forEach(
+      (element) => {
+        element.addEventListener(
+          "click",
+          (event) => {
+            if (
+              element ===
+              uploadButton
+            ) {
+              return;
+            }
+
+            const target =
+              element.dataset.screen;
+
+            if (target) {
+              showScreen(target);
+            }
+          }
+        );
+      }
+    );
+
+  document
+    .querySelectorAll(
+      ".back-btn"
+    )
+    .forEach(
+      (button) => {
+        button.addEventListener(
+          "click",
+          () => {
+            const target =
+              button.dataset.screen;
+
+            if (target) {
+              showScreen(target);
+            } else {
+              goBack();
+            }
+          }
+        );
+      }
+    );
+
+  if (newAnalysisButton) {
+    newAnalysisButton.addEventListener(
+      "click",
+      startNewAnalysis
+    );
+  }
+
+  bindResultTabs();
+}
+
+
+// ============================================================
+// STARTUP
 // ============================================================
 
 function init() {
-
   initTelegram();
 
   bindEvents();
@@ -3806,32 +2897,31 @@ function init() {
 
   activateDefaultResultTab();
 
-  showScreen(
-    "home"
-  );
+  showScreen("home");
 
   checkWorkerHealth()
     .then(
       (healthy) => {
-
         if (!healthy) {
-
           console.warn(
-            "FaceMetric: Worker health check failed."
+            "FaceMetric: Gemini Worker health check failed."
           );
         }
       }
     )
     .catch(
       (error) => {
-
         console.warn(
-          "Background health check:",
+          "Background health check failed:",
           error
         );
       }
     );
 }
 
+
+// ============================================================
+// START
+// ============================================================
 
 init();
