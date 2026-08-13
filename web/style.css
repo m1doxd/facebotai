@@ -2156,3 +2156,5 @@ button:focus-visible,
     transition-duration:.001ms!important;
   }
 }
+
+.api-key-modal{position:fixed;inset:0;background:rgba(0,0,0,.75);display:flex;align-items:center;justify-content:center;z-index:9999}.api-key-card{background:#11141a;border:1px solid #252b36;border-radius:20px;padding:28px;width:min(420px,90vw);color:#fff}.api-key-card input{width:100%;margin:15px 0;padding:12px;border-radius:10px;background:#08090b;color:white;border:1px solid #333}.api-key-card button{width:100%;padding:12px;border-radius:10px;background:#fff;color:#000;border:0}.api-help{margin-top:18px;color:#aaa;font-size:13px;line-height:1.6}
