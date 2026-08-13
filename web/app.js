@@ -1,6 +1,6 @@
 
 // Gemini BYOK
-function getGeminiApiKey(){ return localStorage.getItem("facemetric_gemini_key") || ""; }
+function getGeminiApiKey(){ return localStorage.getItem("facemetric_gemini_key") || localStorage.getItem("gemini_api_key") || ""; }
 function setGeminiApiKey(k){ localStorage.setItem("facemetric_gemini_key", k.trim()); }
 function initGeminiKeyModal(){
   const m=document.getElementById("apiKeyModal");
