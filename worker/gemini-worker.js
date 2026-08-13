@@ -567,8 +567,27 @@ and the quality of the usable image.
 
 Do not make the score artificially high.
 
+STRICT CALIBRATION:
+- Most ordinary faces must fall around 4.5-6.5.
+- Scores above 7 are uncommon and require clearly above-average visible harmony.
+- Scores above 8 are rare.
+- Scores 9+ are exceptional and should almost never occur.
+- Never increase scores to be polite or avoid criticism.
+
 The score is an appearance-analysis score, not a measure
 of human worth.
+
+============================================================
+SCORE DISTRIBUTION CALIBRATION
+
+Use realistic population distribution:
+0-2.99: very uncommon / severe visible imbalance
+3-4.49: below average
+4.5-5.99: average range
+6-6.99: above average
+7-7.99: strong features
+8-8.99: rare
+9+: exceptional
 
 ============================================================
 COMMUNITY-STYLE TIER
