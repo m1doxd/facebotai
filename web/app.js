@@ -35,11 +35,7 @@ function getGeminiApiKey() {
 
 function setGeminiApiKey(key) {
   const value = String(key || "").trim();
-
-  if (!value) {
-    return false;
-  }
-
+  if (!value) return false;
   return writeStorage(GEMINI_STORAGE_KEY, value);
 }
 
@@ -52,10 +48,39 @@ function clearGeminiApiKey() {
   }
 }
 
+function setGeminiKeyBusy(busy) {
+  const button = document.getElementById("saveGeminiKeyBtn");
+  const input = document.getElementById("geminiApiKeyInput");
+  const toggle = document.getElementById("toggleGeminiKeyBtn");
+  if (button) {
+    button.disabled = busy;
+    button.textContent = busy ? "Проверяем ключ…" : "Проверить и сохранить";
+  }
+  if (input) input.disabled = busy;
+  if (toggle) toggle.disabled = busy;
+}
+
+function showGeminiKeyError(message) {
+  const error = document.getElementById("geminiApiKeyError");
+  if (!error) {
+    showToast(message);
+    return;
+  }
+  error.textContent = message;
+  error.hidden = false;
+}
+
+function clearGeminiKeyError() {
+  const error = document.getElementById("geminiApiKeyError");
+  if (error) {
+    error.textContent = "";
+    error.hidden = true;
+  }
+}
+
 function openGeminiKeyModal(options = {}) {
   const modal = document.getElementById("apiKeyModal");
   const input = document.getElementById("geminiApiKeyInput");
-  const error = document.getElementById("geminiApiKeyError");
 
   if (!modal || !input) {
     console.error("FaceMetric: Gemini API key modal is missing from index.html.");
@@ -63,40 +88,79 @@ function openGeminiKeyModal(options = {}) {
     return false;
   }
 
-  const currentKey = getGeminiApiKey();
-
-  input.value = currentKey;
-
-  if (error) {
-    error.textContent = "";
-    error.hidden = true;
-  }
+  input.value = getGeminiApiKey();
+  clearGeminiKeyError();
+  setGeminiKeyBusy(false);
 
   modal.hidden = false;
   modal.classList.add("show");
   modal.setAttribute("aria-hidden", "false");
 
-  // Prevent accidental analysis while the key is missing.
   if (options.focus !== false) {
     window.setTimeout(() => {
       input.focus();
       input.select();
     }, 0);
   }
-
   return true;
 }
 
 function closeGeminiKeyModal() {
   const modal = document.getElementById("apiKeyModal");
-
-  if (!modal) {
-    return;
-  }
-
+  if (!modal) return;
   modal.classList.remove("show");
   modal.hidden = true;
   modal.setAttribute("aria-hidden", "true");
+}
+
+async function validateGeminiApiKey(key) {
+  const value = String(key || "").trim();
+  if (!value) {
+    throw new Error("Введите Gemini API ключ.");
+  }
+
+  let response;
+  try {
+    response = await fetchWithTimeout(
+      `${HEALTH_ENDPOINT.replace(/\/api\/health$/, "")}/api/validate-key`,
+      {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "X-Gemini-Key": value
+        },
+        cache: "no-store"
+      },
+      15000
+    );
+  } catch (error) {
+    if (isAbortError(error)) {
+      throw new Error("Проверка ключа заняла слишком много времени. Попробуйте ещё раз.");
+    }
+    throw new Error("Не удалось связаться с сервером проверки ключа.");
+  }
+
+  let data = null;
+  const text = await response.text();
+  if (text.trim()) {
+    try { data = JSON.parse(text); } catch { /* handled below */ }
+  }
+
+  if (!response.ok || !data?.success) {
+    const code = data?.code || "";
+    if (code === "GEMINI_INVALID_KEY") {
+      throw new Error("Ключ недействителен. Создайте новый ключ в Google AI Studio и вставьте его сюда.");
+    }
+    if (code === "GEMINI_KEY_REQUIRED") {
+      throw new Error("Введите Gemini API ключ.");
+    }
+    if (response.status === 403) {
+      throw new Error("Ключ не имеет доступа к Gemini API. Проверьте настройки ключа в Google AI Studio.");
+    }
+    throw new Error(data?.detail || `Не удалось проверить ключ (${response.status}).`);
+  }
+
+  return data;
 }
 
 function initGeminiKeyModal() {
@@ -104,76 +168,62 @@ function initGeminiKeyModal() {
   const input = document.getElementById("geminiApiKeyInput");
   const saveButton = document.getElementById("saveGeminiKeyBtn");
   const form = document.getElementById("geminiApiKeyForm");
-  const error = document.getElementById("geminiApiKeyError");
+  const toggleButton = document.getElementById("toggleGeminiKeyBtn");
 
   if (!modal || !input || !saveButton) {
-    console.error(
-      "FaceMetric: Gemini API key modal elements were not found."
-    );
+    console.error("FaceMetric: Gemini API key modal elements were not found.");
     return;
   }
 
   const savedKey = getGeminiApiKey();
-
   modal.hidden = Boolean(savedKey);
   modal.classList.toggle("show", !savedKey);
   modal.setAttribute("aria-hidden", savedKey ? "true" : "false");
 
-  const showKeyError = message => {
-    if (!error) {
-      showToast(message);
-      return;
-    }
-
-    error.textContent = message;
-    error.hidden = false;
-  };
-
-  const saveKey = event => {
+  const saveKey = async event => {
     event?.preventDefault();
-
+    clearGeminiKeyError();
     const key = input.value.trim();
-
     if (!key) {
-      showKeyError("Введите Gemini API ключ.");
+      showGeminiKeyError("Введите Gemini API ключ.");
       input.focus();
       return;
     }
 
-    // Gemini keys normally start with AIza, but do not hard-code
-    // a strict format check: Google can change key formats.
-    if (!setGeminiApiKey(key)) {
-      showKeyError(
-        "Не удалось сохранить ключ в браузере. Проверь разрешение localStorage."
-      );
-      return;
+    setGeminiKeyBusy(true);
+    try {
+      await validateGeminiApiKey(key);
+      if (!setGeminiApiKey(key)) {
+        throw new Error("Не удалось сохранить ключ в браузере. Проверьте разрешение localStorage.");
+      }
+      closeGeminiKeyModal();
+      showToast("✓ Gemini подключён. Ключ сохранён в этом браузере.");
+    } catch (error) {
+      showGeminiKeyError(error?.message || "Не удалось проверить Gemini API ключ.");
+    } finally {
+      setGeminiKeyBusy(false);
     }
-
-    if (error) {
-      error.textContent = "";
-      error.hidden = true;
-    }
-
-    closeGeminiKeyModal();
-    showToast("Gemini API ключ сохранён в этом браузере.");
   };
 
   saveButton.addEventListener("click", saveKey);
   form?.addEventListener("submit", saveKey);
 
-  input.addEventListener("input", () => {
-    if (error) {
-      error.textContent = "";
-      error.hidden = true;
-    }
+  toggleButton?.addEventListener("click", () => {
+    const showing = input.type === "text";
+    input.type = showing ? "password" : "text";
+    toggleButton.textContent = showing ? "Показать" : "Скрыть";
+    toggleButton.setAttribute("aria-label", showing ? "Показать API ключ" : "Скрыть API ключ");
+    input.focus();
   });
 
-  // Do not allow the mandatory BYOK modal to be dismissed without
-  // entering a key. Escape is intentionally ignored while it is required.
+  input.addEventListener("input", clearGeminiKeyError);
+
+  modal.addEventListener("click", event => {
+    if (event.target === modal && getGeminiApiKey()) closeGeminiKeyModal();
+  });
+
   modal.addEventListener("keydown", event => {
-    if (event.key === "Escape" && getGeminiApiKey()) {
-      closeGeminiKeyModal();
-    }
+    if (event.key === "Escape" && getGeminiApiKey()) closeGeminiKeyModal();
   });
 
   if (!savedKey) {
@@ -970,10 +1020,9 @@ async function analyzePhoto(file, signal) {
 
   if (!response.ok) {
     throw new Error(
-      data?.detail ||
-      data?.error ||
-      getHttpErrorMessage(
-        response.status
+      getGeminiUserError(
+        response.status,
+        data
       )
     );
   }
@@ -4218,40 +4267,51 @@ function getFriendlyErrorMessage(
 }
 
 
-function getHttpErrorMessage(
-  status
-) {
-  if (status === 400) {
-    return "Некорректный запрос к серверу анализа.";
+function getGeminiUserError(status, data = null) {
+  const code = data?.code || "";
+
+  if (code === "GEMINI_KEY_REQUIRED") {
+    return "Для анализа нужен Gemini API ключ. Откройте окно подключения и добавьте свой ключ.";
   }
 
-  if (status === 401) {
-    return "Ошибка авторизации сервера.";
+  if (code === "GEMINI_INVALID_KEY" || status === 401) {
+    return "Gemini API ключ недействителен. Нажмите «Изменить ключ» и укажите действующий ключ.";
   }
 
   if (status === 403) {
-    return "Доступ к серверу анализа запрещён.";
+    return "Gemini API отклонил ключ. Проверьте доступ ключа к Gemini API в Google AI Studio.";
+  }
+
+  if (status === 429 || code === "GEMINI_QUOTA_EXCEEDED") {
+    return "Лимит этого Gemini API ключа исчерпан. Используйте другой ключ или попробуйте позже.";
+  }
+
+  if (code === "GEMINI_UNAVAILABLE" || status === 502 || status === 503) {
+    return "Gemini временно недоступен. Попробуйте ещё раз через несколько секунд.";
+  }
+
+  if (status === 400) {
+    return data?.detail || "Gemini отклонил запрос. Проверьте ключ и фотографию.";
   }
 
   if (status === 404) {
-    return "Endpoint анализа не найден. Используется /api/analyze.";
+    return "Сервис анализа не найден. Проверьте адрес Gemini Worker.";
   }
 
   if (status === 413) {
     return "Фотография слишком большая.";
   }
 
-  if (status === 429) {
-    return "Слишком много запросов. Попробуй позже.";
-  }
-
   if (status >= 500) {
-    return "Ошибка сервера анализа.";
+    return "Сервис анализа временно недоступен. Попробуйте ещё раз.";
   }
 
-  return `Ошибка сервера (${status}).`;
+  return data?.detail || data?.error || `Ошибка сервера (${status}).`;
 }
 
+function getHttpErrorMessage(status) {
+  return getGeminiUserError(status);
+}
 
 function isAbortError(error) {
   return (
