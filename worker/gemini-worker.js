@@ -9,7 +9,11 @@ const ALLOWED_TYPES = new Set([
 ]);
 
 const DEFAULT_MODEL = "gemini-3.6-flash";
-const WORKER_BUILD = "2026-08-13-byok-russian-v1";
+
+// Deployment marker: 2026-08-13-cors-fix-v2
+// This intentionally changes the Worker source so Git/Cloudflare
+// detects a new deployment.
+const WORKER_BUILD = "2026-08-13-byok-quota-modal-v1";
 
 const SCORE_MIN = 0;
 const SCORE_MAX = 10;
@@ -35,7 +39,9 @@ export default {
         success: true,
         service: "facebot-gemini",
         status: "ok",
-        model: env.GEMINI_MODEL || DEFAULT_MODEL
+        model: env.GEMINI_MODEL || DEFAULT_MODEL,
+        build: WORKER_BUILD,
+        cors_headers: "Content-Type,Accept,X-Gemini-Key"
       });
     }
 
@@ -44,10 +50,17 @@ export default {
     // ========================================================
 
     if (url.pathname === "/api/validate-key") {
-      if (request.method !== "POST") {
-        return json({ success: false, detail: "Method not allowed." }, 405);
+      if (request.method !== "GET" && request.method !== "POST") {
+        return json(
+          {
+            success: false,
+            detail: "Method not allowed."
+          },
+          405
+        );
       }
-      return await validateGeminiKey(request);
+
+      return await validateGeminiKey(request, env);
     }
 
     // ========================================================
@@ -106,57 +119,111 @@ export default {
 // VALIDATE USER GEMINI KEY
 // ============================================================
 
-async function validateGeminiKey(request) {
-  const apiKey = request.headers.get("X-Gemini-Key")?.trim() || "";
+async function validateGeminiKey(request, env) {
+  const apiKey =
+    request.headers.get("X-Gemini-Key")?.trim() || "";
 
   if (!apiKey) {
-    return json({
-      success: false,
-      code: "GEMINI_KEY_REQUIRED",
-      detail: "Gemini API key is required."
-    }, 400);
+    return json(
+      {
+        success: false,
+        code: "GEMINI_KEY_REQUIRED",
+        detail: "Gemini API key is required."
+      },
+      400
+    );
   }
 
-  const model = DEFAULT_MODEL;
   const endpoint =
-    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}`;
+    "https://generativelanguage.googleapis.com/v1beta/models";
+
+  let response;
 
   try {
-    const response = await fetch(endpoint, {
+    response = await fetch(endpoint, {
       method: "GET",
-      headers: { "x-goog-api-key": apiKey }
+      headers: {
+        "x-goog-api-key": apiKey
+      }
     });
+  } catch (error) {
+    console.error("GEMINI KEY VALIDATION NETWORK ERROR:", error);
 
-    const raw = await response.text();
-    let data = null;
-    try { data = raw ? JSON.parse(raw) : null; } catch { /* ignore */ }
-
-    if (!response.ok) {
-      const googleMessage = data?.error?.message || "Gemini API rejected the key.";
-      const status = response.status;
-      return json({
+    return json(
+      {
         success: false,
-        code: status === 401 || status === 403 || status === 400
-          ? "GEMINI_INVALID_KEY"
-          : "GEMINI_UNAVAILABLE",
-        detail: googleMessage
-      }, status === 401 ? 401 : status === 403 ? 403 : status >= 500 ? 502 : 400);
-    }
+        code: "GEMINI_UNAVAILABLE",
+        detail: "Не удалось подключиться к Gemini для проверки ключа."
+      },
+      502
+    );
+  }
 
+  let data = null;
+  const raw = await response.text();
+
+  if (raw.trim()) {
+    try {
+      data = JSON.parse(raw);
+    } catch {
+      data = null;
+    }
+  }
+
+  if (response.ok) {
     return json({
       success: true,
       code: "GEMINI_KEY_VALID",
-      detail: "Gemini API key is valid.",
-      model
+      model: env.GEMINI_MODEL || DEFAULT_MODEL
     });
-  } catch (error) {
-    console.error("GEMINI KEY VALIDATION ERROR:", error);
-    return json({
-      success: false,
-      code: "GEMINI_UNAVAILABLE",
-      detail: "Could not connect to Gemini API."
-    }, 502);
   }
+
+  const message =
+    data?.error?.message ||
+    `Gemini key validation failed (HTTP ${response.status}).`;
+
+  const lower = message.toLowerCase();
+
+  if (response.status === 429) {
+    return json(
+      {
+        success: false,
+        code: "GEMINI_QUOTA_EXCEEDED",
+        detail: "Лимит Gemini API исчерпан. Используйте другой ключ или попробуйте позже.",
+        gemini_status: 429
+      },
+      429
+    );
+  }
+
+  if (
+    response.status === 401 ||
+    response.status === 403 ||
+    lower.includes("api key") &&
+      (lower.includes("invalid") || lower.includes("not valid") || lower.includes("expired"))
+  ) {
+    return json(
+      {
+        success: false,
+        code: "GEMINI_INVALID_KEY",
+        detail: "Gemini API ключ недействителен или не имеет доступа к Gemini API.",
+        gemini_status: response.status
+      },
+      401
+    );
+  }
+
+  return json(
+    {
+      success: false,
+      code: "GEMINI_API_ERROR",
+      detail: message,
+      gemini_status: response.status
+    },
+    response.status >= 400 && response.status < 600
+      ? response.status
+      : 502
+  );
 }
 
 // ============================================================
@@ -954,7 +1021,6 @@ with the remaining fields populated as reasonably as possible.
     return json(
       {
         success: false,
-        code: "GEMINI_UNAVAILABLE",
         detail:
           "Could not connect to Gemini API.",
         error:
@@ -1052,6 +1118,32 @@ with the remaining fields populated as reasonably as possible.
       geminiData?.error?.message ||
       `Gemini API error (${geminiResponse.status}).`;
 
+    const lowerMessage = message.toLowerCase();
+
+    let code = "GEMINI_API_ERROR";
+    let detail = message;
+    let status = geminiResponse.status;
+
+    if (geminiResponse.status === 429) {
+      code = "GEMINI_QUOTA_EXCEEDED";
+      detail =
+        "Лимит Gemini API исчерпан. Введите другой Gemini API ключ или попробуйте позже.";
+      status = 429;
+    } else if (
+      geminiResponse.status === 401 ||
+      geminiResponse.status === 403 ||
+      (geminiResponse.status === 400 &&
+        lowerMessage.includes("api key") &&
+        (lowerMessage.includes("invalid") ||
+          lowerMessage.includes("not valid") ||
+          lowerMessage.includes("expired")))
+    ) {
+      code = "GEMINI_INVALID_KEY";
+      detail =
+        "Gemini API ключ недействителен или не имеет доступа к Gemini API.";
+      status = 401;
+    }
+
     console.error(
       "GEMINI API ERROR:",
       JSON.stringify(
@@ -1061,24 +1153,14 @@ with the remaining fields populated as reasonably as possible.
       )
     );
 
-    let code = "GEMINI_API_ERROR";
-    if (geminiResponse.status === 401 || geminiResponse.status === 403) {
-      code = "GEMINI_INVALID_KEY";
-    } else if (geminiResponse.status === 429) {
-      code = "GEMINI_QUOTA_EXCEEDED";
-    } else if (geminiResponse.status >= 500) {
-      code = "GEMINI_UNAVAILABLE";
-    }
-
     return json(
       {
         success: false,
         code,
-        detail: message,
-        gemini_status: geminiResponse.status,
-        gemini_error: geminiData?.error || null
+        detail,
+        gemini_status: geminiResponse.status
       },
-      geminiResponse.status
+      status
     );
   }
 
@@ -2558,7 +2640,7 @@ function corsHeaders() {
       "GET,POST,OPTIONS",
 
     "Access-Control-Allow-Headers":
-      "Content-Type,Accept,X-Gemini-Key"
+      "Content-Type, Accept, X-Gemini-Key"
   };
 }
 
