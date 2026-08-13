@@ -603,44 +603,51 @@ function sleep(ms) {
 // ======================================================
 
 function normalizeClientResult(data) {
+  const analysis =
+    data?.analysis &&
+    typeof data.analysis === "object"
+      ? data.analysis
+      : data;
+
   return {
     success: true,
 
     score:
-      normalizeScore(data.score),
+      normalizeScore(analysis.score),
 
     face_count:
-      toNumberOrZero(data.face_count),
+      toNumberOrZero(analysis.face_count),
 
     landmarks_count:
-      nullableNumber(data.landmarks_count),
+      nullableNumber(analysis.landmarks_count),
 
     detected_features:
       toNumberOrZero(
-        data.detected_features
+        analysis.detected_features
       ),
 
     feature_count:
       toNumberOrZero(
-        data.feature_count
+        analysis.feature_count
       ),
 
     model:
-      cleanText(data.model) ||
+      cleanText(data.model || analysis.model) ||
       "Gemini",
 
     metrics:
-      isObject(data.metrics)
-        ? data.metrics
+      isObject(analysis.metrics)
+        ? analysis.metrics
         : {},
 
     production_features:
-      isObject(data.production_features)
-        ? data.production_features
+      isObject(analysis.production_features)
+        ? analysis.production_features
         : {},
 
     generated_at:
       data.generated_at ||
+      analysis.generated_at ||
       new Date().toISOString()
   };
 }
