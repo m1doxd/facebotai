@@ -10,16 +10,25 @@ const ALLOWED_TYPES = new Set([
 
 const DEFAULT_MODEL = "gemini-3.6-flash";
 
+const SCORE_MIN = 0;
+const SCORE_MAX = 10;
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
-    // CORS preflight
+    // ========================================================
+    // CORS
+    // ========================================================
+
     if (request.method === "OPTIONS") {
       return json(null, 204);
     }
 
-    // Health check
+    // ========================================================
+    // HEALTH
+    // ========================================================
+
     if (url.pathname === "/api/health") {
       return json({
         success: true,
@@ -29,7 +38,10 @@ export default {
       });
     }
 
-    // Main analysis endpoint
+    // ========================================================
+    // ANALYZE
+    // ========================================================
+
     if (url.pathname === "/api/analyze") {
       if (request.method !== "POST") {
         return json(
@@ -44,18 +56,24 @@ export default {
       try {
         return await analyze(request, env);
       } catch (error) {
-        console.error("WORKER UNCAUGHT ERROR:", error);
-        console.error("ERROR STACK:", error?.stack);
+        console.error("FACEBOT WORKER ERROR:", error);
+        console.error("STACK:", error?.stack);
 
         return json(
           {
             success: false,
-            detail: error?.message || "Internal server error."
+            detail:
+              error?.message ||
+              "Internal server error."
           },
           500
         );
       }
     }
+
+    // ========================================================
+    // DEFAULT
+    // ========================================================
 
     return new Response(
       "FaceBot Gemini Worker is running.",
@@ -63,7 +81,8 @@ export default {
         status: 200,
         headers: {
           ...corsHeaders(),
-          "Content-Type": "text/plain; charset=UTF-8"
+          "Content-Type":
+            "text/plain; charset=UTF-8"
         }
       }
     );
@@ -72,7 +91,7 @@ export default {
 
 
 // ============================================================
-// ANALYZE
+// MAIN ANALYSIS
 // ============================================================
 
 async function analyze(request, env) {
@@ -82,7 +101,8 @@ async function analyze(request, env) {
     return json(
       {
         success: false,
-        detail: "GEMINI_API_KEY is not configured."
+        detail:
+          "GEMINI_API_KEY is not configured."
       },
       500
     );
@@ -90,8 +110,6 @@ async function analyze(request, env) {
 
   const contentType =
     request.headers.get("content-type") || "";
-
-  console.log("CONTENT-TYPE:", contentType);
 
   if (
     !contentType
@@ -108,9 +126,9 @@ async function analyze(request, env) {
     );
   }
 
-  // ----------------------------------------------------------
-  // Parse multipart/form-data
-  // ----------------------------------------------------------
+  // ========================================================
+  // PARSE FILE
+  // ========================================================
 
   let formData;
 
@@ -120,11 +138,6 @@ async function analyze(request, env) {
     console.error(
       "FORM DATA PARSE ERROR:",
       error
-    );
-
-    console.error(
-      "FORM DATA ERROR STACK:",
-      error?.stack
     );
 
     return json(
@@ -150,16 +163,13 @@ async function analyze(request, env) {
       {
         success: false,
         detail:
-          "No image file was provided. Expected field: file"
+          "No image file was provided. Expected field: file."
       },
       400
     );
   }
 
   const mimeType = file.type || "";
-
-  console.log("FILE TYPE:", mimeType);
-  console.log("FILE SIZE:", file.size);
 
   if (!ALLOWED_TYPES.has(mimeType)) {
     return json(
@@ -194,9 +204,9 @@ async function analyze(request, env) {
     );
   }
 
-  // ----------------------------------------------------------
-  // Convert image to base64
-  // ----------------------------------------------------------
+  // ========================================================
+  // IMAGE -> BASE64
+  // ========================================================
 
   let base64;
 
@@ -226,110 +236,558 @@ async function analyze(request, env) {
     );
   }
 
-  // ----------------------------------------------------------
-  // Prompt
-  // ----------------------------------------------------------
+  // ========================================================
+  // GEMINI PROMPT
+  // ========================================================
 
   const prompt = `
-You are the facial-analysis engine for FaceBot.
+You are the visual facial-analysis engine for FaceBot.
 
-Analyze ONLY visible facial geometry in the supplied photograph.
+Your job is to analyze the visible facial geometry in the supplied
+photograph and return structured JSON.
 
-Rules:
+IMPORTANT:
 
-- Analyze only what is visibly present.
-- Do not identify the person.
-- Do not infer race or ethnicity.
-- Do not infer health or medical conditions.
-- Do not infer personality, intelligence, sexuality, criminality, or other sensitive traits.
-- Do not claim to have run MediaPipe.
-- Do not claim to have run ExtraTrees.
-- Do not invent exact physical measurements in millimeters.
-- Do not invent invisible landmarks.
-- If the image is unclear, use lower confidence.
-- If no usable face is visible, return face_count = 0 and score = null.
-- Return ONLY valid JSON.
-- All numeric scores must be between 0 and 10.
-- Do not automatically give high scores.
+This is a visual geometry analysis system.
 
-Return exactly this structure:
+Do NOT identify the person.
+
+Do NOT infer:
+- race,
+- ethnicity,
+- health,
+- medical conditions,
+- personality,
+- intelligence,
+- sexuality,
+- criminality,
+- political affiliation,
+- religion,
+- or other sensitive personal attributes.
+
+You may evaluate visible facial appearance and geometry.
+
+Do not claim to have used MediaPipe, OpenCV, ExtraTrees,
+or another tool unless it was actually provided to you.
+
+Do not invent exact millimeter measurements.
+
+Do not invent landmarks that cannot reasonably be located.
+
+If the image quality is poor, use lower confidence.
+
+If the face is not usable, return:
+face_count = 0
+score = null
+
+============================================================
+VIEW / POSE ANALYSIS
+============================================================
+
+First determine what kind of image this is.
+
+Possible view values:
+
+- "frontal"
+- "near_frontal"
+- "profile"
+- "near_profile"
+- "three_quarter"
+- "unknown"
+
+A frontal image is the preferred primary analysis view.
+
+A profile image is optional.
+
+A three-quarter image must NOT be treated as a perfect frontal
+or perfect profile image.
+
+Estimate visible head roll.
+
+The roll angle means the clockwise/counter-clockwise rotation
+of the face in the image.
+
+Use:
+
+positive roll = face tilted clockwise
+negative roll = face tilted counter-clockwise
+
+The frontend will later use this value to rotate the image
+and create an aligned analysis view.
+
+DO NOT generate or modify the image yourself.
+
+Return only the estimated correction angle.
+
+============================================================
+FACE USABILITY
+============================================================
+
+Estimate:
+
+- face detection confidence
+- frontal suitability
+- profile suitability
+- image quality
+- pose confidence
+
+Use values between 0 and 1.
+
+A face can be detected but still be unsuitable for accurate
+measurement.
+
+For example:
+
+face_count = 1
+face_quality = 0.91
+frontal_suitability = 0.95
+
+is good.
+
+============================================================
+LANDMARK REPRESENTATION
+============================================================
+
+When possible, return approximate normalized landmark positions.
+
+Coordinates must use:
+
+x = 0.0 to 1.0
+y = 0.0 to 1.0
+
+Origin:
+
+top-left = (0,0)
+
+bottom-right = (1,1)
+
+Only return landmarks that are visibly identifiable.
+
+The purpose of these landmarks is future frontend visualization.
+
+Do not pretend these coordinates are medical-grade measurements.
+
+Useful landmark names may include:
+
+- left_eye_inner
+- left_eye_outer
+- right_eye_inner
+- right_eye_outer
+- left_brow_inner
+- left_brow_outer
+- right_brow_inner
+- right_brow_outer
+- nose_bridge
+- nose_tip
+- nose_left
+- nose_right
+- mouth_left
+- mouth_right
+- upper_lip_center
+- lower_lip_center
+- chin
+- left_jaw
+- right_jaw
+- left_cheekbone
+- right_cheekbone
+- forehead_center
+
+============================================================
+METRIC SYSTEM
+============================================================
+
+Every numeric metric score must be between 0 and 10.
+
+Do not give every metric a high score.
+
+Use the following conceptual groups.
+
+------------------------------------------------------------
+FACE GEOMETRY
+------------------------------------------------------------
+
+- face_aspect_ratio
+- facial_width_height_balance
+- midface_proportion
+- lower_face_proportion
+- upper_face_proportion
+- facial_thirds_balance
+
+------------------------------------------------------------
+SYMMETRY
+------------------------------------------------------------
+
+- overall_symmetry
+- left_right_balance
+- eye_alignment
+- brow_symmetry
+- mouth_symmetry
+- jaw_symmetry
+
+------------------------------------------------------------
+EYES
+------------------------------------------------------------
+
+- eye_spacing
+- eye_aspect_ratio
+- eye_alignment
+- eye_area_balance
+- eye_shape_harmony
+
+------------------------------------------------------------
+EYEBROWS
+------------------------------------------------------------
+
+- brow_position
+- brow_shape
+- brow_length
+- brow_symmetry
+- brow_eye_relationship
+
+------------------------------------------------------------
+NOSE
+------------------------------------------------------------
+
+- nose_width
+- nose_length
+- nose_proportion
+- nose_face_relationship
+- nose_symmetry
+
+------------------------------------------------------------
+JAW
+------------------------------------------------------------
+
+- jaw_width
+- jaw_definition
+- jaw_shape
+- jaw_symmetry
+- lower_face_definition
+
+------------------------------------------------------------
+CHIN
+------------------------------------------------------------
+
+- chin_prominence
+- chin_proportion
+- chin_width
+- chin_face_relationship
+
+------------------------------------------------------------
+CHEEKS / CHEEKBONES
+------------------------------------------------------------
+
+- cheek_prominence
+- cheek_definition
+- cheek_symmetry
+- cheek_jaw_relationship
+
+------------------------------------------------------------
+LIPS / MOUTH
+------------------------------------------------------------
+
+- mouth_width
+- lip_proportion
+- mouth_symmetry
+- lip_shape
+- mouth_face_relationship
+
+------------------------------------------------------------
+MIDFACE
+------------------------------------------------------------
+
+- midface_balance
+- midface_length
+- midface_eye_relationship
+- midface_lower_face_relationship
+
+============================================================
+ANGULARITY
+============================================================
+
+Estimate visible structural definition only.
+
+Return:
+
+- angularity
+- facial_definition
+- jaw_definition
+- cheek_definition
+- chin_definition
+
+Do not interpret these as biological or medical characteristics.
+
+============================================================
+VISUAL DIMORPHISM
+============================================================
+
+This is an optional visual-appearance category.
+
+Only evaluate visible facial morphology.
+
+Do NOT infer biological sex with certainty.
+
+Use:
+
+- dimorphism
+- jaw_dimorphism
+- brow_dimorphism
+- cheek_dimorphism
+- chin_dimorphism
+- facial_width_dimorphism
+
+If the image is insufficient for this category,
+return lower confidence or null.
+
+============================================================
+HARMONY
+============================================================
+
+Return separate scores for:
+
+- overall_harmony
+- frontal_harmony
+- profile_harmony
+- proportions
+- symmetry_harmony
+- feature_harmony
+- facial_definition
+- angularity
+
+Profile harmony MUST be null if no useful profile view exists.
+
+============================================================
+OVERALL SCORE
+============================================================
+
+Return one overall visual harmony score from 0 to 10.
+
+This score should reflect the visible facial geometry
+and the quality of the usable image.
+
+Do not make the score artificially high.
+
+The score is an appearance-analysis score, not a measure
+of human worth.
+
+============================================================
+COMMUNITY-STYLE TIER
+============================================================
+
+Return a community-style label based on the score.
+
+Use this fixed application mapping:
+
+1.0 - 1.99:
+"Sub 3"
+
+2.0 - 3.99:
+"Sub 5"
+
+4.0 - 4.99:
+"LTN"
+
+5.0 - 5.49:
+"MTN"
+
+5.5 - 6.49:
+"HTN"
+
+6.5 - 7.49:
+"Chadlite"
+
+7.5 - 8.99:
+"Chad"
+
+9.0 - 9.49:
+"Adamlite"
+
+9.5 - 9.99:
+"Near True Adam"
+
+10.0:
+"True Adam"
+
+Also return:
+
+- tier
+- tier_level
+
+tier_level should be one of:
+
+"low"
+"mid"
+"high"
+"base"
+
+For example:
+
+6.1 -> HTN / mid
+6.4 -> HTN / high
+7.0 -> Chadlite / mid
+8.2 -> Chad / mid
+
+Do NOT use these labels for people outside the score
+calculation. They are only the application's display labels.
+
+============================================================
+METRIC VISUALIZATION
+============================================================
+
+For important metrics, return a visualization object.
+
+Example:
+
+{
+  "value": 7.2,
+  "score": 8.1,
+  "status": "good",
+  "ideal_min": 7.0,
+  "ideal_max": 9.0,
+  "unit": "ratio",
+  "landmarks": [
+    "left_eye_inner",
+    "right_eye_inner"
+  ]
+}
+
+status must be one of:
+
+"good"
+"average"
+"poor"
+"uncertain"
+
+If a reliable ideal range cannot be established from the
+visible image, use:
+
+ideal_min = null
+ideal_max = null
+status = "uncertain"
+
+Do not invent scientific reference ranges.
+
+The frontend will later use these fields to visually explain
+which part of the face the metric represents.
+
+============================================================
+OUTPUT FORMAT
+============================================================
+
+Return ONLY valid JSON.
+
+Return exactly this high-level structure:
 
 {
   "face_count": 1,
-  "score": 0,
-  "metrics": {
-    "face_geometry": {
-      "face_aspect_ratio": 0,
-      "facial_width_height": 0,
-      "midface_proportion": 0
-    },
-    "symmetry": {
-      "overall_symmetry": 0,
-      "left_right_balance": 0
-    },
-    "eyes": {
-      "eye_spacing": 0,
-      "eye_aspect_ratio": 0,
-      "eye_alignment": 0
-    },
-    "eyebrows": {
-      "brow_position": 0,
-      "brow_shape": 0
-    },
-    "nose": {
-      "nose_width": 0,
-      "nose_length": 0,
-      "nose_proportion": 0
-    },
-    "jaw": {
-      "jaw_width": 0,
-      "jaw_definition": 0,
-      "jaw_shape": 0
-    },
-    "chin": {
-      "chin_prominence": 0,
-      "chin_proportion": 0
-    },
-    "cheeks": {
-      "cheek_prominence": 0,
-      "cheek_definition": 0
-    },
-    "lips_mouth": {
-      "mouth_width": 0,
-      "lip_proportion": 0
-    },
-    "midface": {
-      "midface_balance": 0
+
+  "view": {
+    "type": "frontal",
+    "confidence": 0.0,
+    "frontal_suitability": 0.0,
+    "profile_suitability": 0.0,
+    "image_quality": 0.0,
+
+    "roll": {
+      "angle_degrees": 0.0,
+      "correction_degrees": 0.0,
+      "confidence": 0.0
     }
   },
+
+  "frontal": {
+    "available": true,
+    "confidence": 0.0,
+    "harmony": 0.0
+  },
+
+  "profile": {
+    "available": false,
+    "confidence": 0.0,
+    "harmony": null
+  },
+
+  "landmarks": {
+    "left_eye_inner": {
+      "x": 0.0,
+      "y": 0.0,
+      "confidence": 0.0
+    }
+  },
+
+  "score": 0.0,
+
+  "percent": 0,
+
+  "tier": {
+    "name": "HTN",
+    "level": "mid"
+  },
+
+  "sections": {
+    "harmony": 0.0,
+    "dimorphism": 0.0,
+    "features": 0.0,
+    "angularity": 0.0,
+    "symmetry": 0.0,
+    "proportions": 0.0
+  },
+
+  "metrics": {
+    "face_geometry": {},
+    "symmetry": {},
+    "eyes": {},
+    "eyebrows": {},
+    "nose": {},
+    "jaw": {},
+    "chin": {},
+    "cheeks": {},
+    "lips_mouth": {},
+    "midface": {},
+    "angularity": {},
+    "dimorphism": {}
+  },
+
   "production_features": {
-    "overall_harmony": 0,
-    "frontal_harmony": 0,
-    "facial_definition": 0,
-    "angularity": 0,
-    "proportions": 0,
-    "symmetry": 0,
-    "confidence": 0
+    "overall_harmony": 0.0,
+    "frontal_harmony": 0.0,
+    "profile_harmony": null,
+    "facial_definition": 0.0,
+    "angularity": 0.0,
+    "proportions": 0.0,
+    "symmetry": 0.0,
+    "confidence": 0.0,
+    "dimorphism": 0.0
   }
 }
 
-Use approximately 20-35 useful feature values.
+IMPORTANT:
 
-For observations that cannot reasonably be represented numerically, use:
+If profile is not present:
 
-"low",
-"medium",
-"high",
-"balanced",
-or
-"uncertain".
+"profile": {
+  "available": false,
+  "confidence": 0.0,
+  "harmony": null
+}
 
-Do not fabricate exact millimeter measurements.
+Do NOT create fake profile measurements.
+
+If the face is unusable:
+
+{
+  "face_count": 0,
+  "score": null
+}
+
+with the remaining fields populated as reasonably as possible.
+
+============================================================
 `;
 
-  // ----------------------------------------------------------
-  // Gemini endpoint
-  // ----------------------------------------------------------
+  // ========================================================
+  // GEMINI REQUEST
+  // ========================================================
 
   const model =
     env.GEMINI_MODEL ||
@@ -359,14 +817,14 @@ Do not fabricate exact millimeter measurements.
     ],
 
     generationConfig: {
-  temperature: 0.15,
-  responseMimeType: "application/json"
-}
+      temperature: 0.15,
+      responseMimeType: "application/json"
+    }
   };
 
-  // ----------------------------------------------------------
-  // Send request to Gemini
-  // ----------------------------------------------------------
+  // ========================================================
+  // GEMINI API CALL
+  // ========================================================
 
   let geminiResponse;
 
@@ -379,6 +837,7 @@ Do not fabricate exact millimeter measurements.
         headers: {
           "Content-Type":
             "application/json",
+
           "x-goog-api-key":
             apiKey
         },
@@ -408,9 +867,9 @@ Do not fabricate exact millimeter measurements.
     );
   }
 
-  // ----------------------------------------------------------
-  // Read Gemini response
-  // ----------------------------------------------------------
+  // ========================================================
+  // READ GEMINI RESPONSE
+  // ========================================================
 
   let rawResponse = "";
 
@@ -446,11 +905,6 @@ Do not fabricate exact millimeter measurements.
     rawResponse.length
   );
 
-  console.log(
-    "GEMINI RESPONSE PREVIEW:",
-    rawResponse.slice(0, 2000)
-  );
-
   if (!rawResponse.trim()) {
     return json(
       {
@@ -461,10 +915,6 @@ Do not fabricate exact millimeter measurements.
       502
     );
   }
-
-  // ----------------------------------------------------------
-  // Parse Gemini API JSON
-  // ----------------------------------------------------------
 
   let geminiData;
 
@@ -478,7 +928,7 @@ Do not fabricate exact millimeter measurements.
     );
 
     console.error(
-      "GEMINI RAW RESPONSE:",
+      "RAW RESPONSE:",
       rawResponse.slice(0, 5000)
     );
 
@@ -495,9 +945,9 @@ Do not fabricate exact millimeter measurements.
     );
   }
 
-  // ----------------------------------------------------------
-  // Gemini HTTP error
-  // ----------------------------------------------------------
+  // ========================================================
+  // GEMINI HTTP ERROR
+  // ========================================================
 
   if (!geminiResponse.ok) {
     const message =
@@ -522,9 +972,9 @@ Do not fabricate exact millimeter measurements.
     );
   }
 
-  // ----------------------------------------------------------
-  // Extract model text
-  // ----------------------------------------------------------
+  // ========================================================
+  // EXTRACT MODEL TEXT
+  // ========================================================
 
   const text =
     extractGeminiText(
@@ -533,15 +983,7 @@ Do not fabricate exact millimeter measurements.
 
   if (!text) {
     console.error(
-      "NO GEMINI TEXT:"
-    );
-
-    console.error(
-      JSON.stringify(
-        geminiData,
-        null,
-        2
-      ).slice(0, 5000)
+      "GEMINI RETURNED NO TEXT"
     );
 
     return json(
@@ -555,13 +997,13 @@ Do not fabricate exact millimeter measurements.
   }
 
   console.log(
-    "GEMINI ANALYSIS TEXT:",
+    "GEMINI ANALYSIS:",
     text.slice(0, 5000)
   );
 
-  // ----------------------------------------------------------
-  // Parse analysis JSON
-  // ----------------------------------------------------------
+  // ========================================================
+  // PARSE ANALYSIS JSON
+  // ========================================================
 
   let parsed;
 
@@ -592,9 +1034,9 @@ Do not fabricate exact millimeter measurements.
     );
   }
 
-  // ----------------------------------------------------------
-  // Normalize
-  // ----------------------------------------------------------
+  // ========================================================
+  // NORMALIZE
+  // ========================================================
 
   let normalized;
 
@@ -621,7 +1063,9 @@ Do not fabricate exact millimeter measurements.
     );
   }
 
-  return json(normalized);
+  return json(
+    normalized
+  );
 }
 
 
@@ -651,11 +1095,11 @@ function extractGeminiText(data) {
 
   return parts
     .filter(
-      (part) =>
+      part =>
         typeof part?.text === "string"
     )
     .map(
-      (part) =>
+      part =>
         part.text
     )
     .join("\n")
@@ -677,35 +1121,37 @@ function parseJsonResponse(text) {
     );
   }
 
-  // Remove markdown code fences
-  cleaned = cleaned.replace(
-    /^```json\s*/i,
-    ""
-  );
+  cleaned =
+    cleaned.replace(
+      /^```json\s*/i,
+      ""
+    );
 
-  cleaned = cleaned.replace(
-    /^```\s*/i,
-    ""
-  );
+  cleaned =
+    cleaned.replace(
+      /^```\s*/i,
+      ""
+    );
 
-  cleaned = cleaned.replace(
-    /\s*```$/i,
-    ""
-  );
+  cleaned =
+    cleaned.replace(
+      /\s*```$/i,
+      ""
+    );
 
   cleaned = cleaned.trim();
 
-  // First attempt
   try {
-    return JSON.parse(cleaned);
+    return JSON.parse(
+      cleaned
+    );
   } catch (error) {
     console.warn(
-      "Direct JSON parse failed:",
+      "DIRECT JSON PARSE FAILED:",
       error?.message
     );
   }
 
-  // Find first object
   const start =
     cleaned.indexOf("{");
 
@@ -715,8 +1161,6 @@ function parseJsonResponse(text) {
     );
   }
 
-  // Try to find a valid closing brace.
-  // This is safer than blindly using lastIndexOf.
   let depth = 0;
   let inString = false;
   let escaped = false;
@@ -771,7 +1215,7 @@ function parseJsonResponse(text) {
           );
         } catch (error) {
           console.warn(
-            "Recovered JSON parse failed:",
+            "RECOVERED JSON PARSE FAILED:",
             error?.message
           );
         }
@@ -803,85 +1247,93 @@ function normalizeAnalysis(
     );
   }
 
-  let faceCount =
-    Number(
-      data.face_count
-    );
-
-  if (
-    !Number.isFinite(
-      faceCount
-    )
-  ) {
-    faceCount = 0;
-  }
-
-  faceCount =
-    Math.max(
+  const faceCount =
+    normalizeInteger(
+      data.face_count,
       0,
-      Math.round(
-        faceCount
-      )
+      20
     );
 
-  let score =
-    data.score;
+  const score =
+    normalizeNullableScore(
+      data.score
+    );
 
-  if (
-    score === null ||
-    score === undefined ||
-    score === ""
-  ) {
-    score = null;
-  } else {
-    score =
-      Number(score);
+  const view =
+    normalizeView(
+      data.view
+    );
 
-    if (
-      !Number.isFinite(
-        score
-      )
-    ) {
-      score = null;
-    } else {
-      score =
-        clamp(
-          score,
-          0,
-          10
-        );
+  const frontal =
+    normalizeViewResult(
+      data.frontal,
+      false
+    );
 
-      score =
-        Math.round(
-          score * 100
-        ) / 100;
-    }
-  }
+  const profile =
+    normalizeViewResult(
+      data.profile,
+      true
+    );
+
+  const landmarks =
+    normalizeLandmarks(
+      data.landmarks
+    );
+
+  const sections =
+    normalizeSections(
+      data.sections
+    );
 
   const metrics =
-    isPlainObject(
+    normalizeMetrics(
       data.metrics
-    )
-      ? data.metrics
-      : {};
+    );
 
   const production =
-    isPlainObject(
-      data.production_features
-    )
-      ? data.production_features
-      : {};
+    normalizeProductionFeatures(
+      data.production_features,
+      sections
+    );
+
+  const normalizedScore =
+    score !== null
+      ? score
+      : faceCount > 0
+        ? calculateFallbackOverallScore(
+            sections,
+            production
+          )
+        : null;
+
+  const percent =
+    normalizedScore === null
+      ? null
+      : Math.round(
+          normalizedScore * 10
+        );
+
+  const tier =
+    getTier(
+      normalizedScore
+    );
 
   return {
     success: true,
 
-    score,
+    score:
+      normalizedScore,
+
+    percent,
 
     face_count:
       faceCount,
 
     landmarks_count:
-      null,
+      Object.keys(
+        landmarks
+      ).length || null,
 
     detected_features:
       countLeaves(metrics),
@@ -890,6 +1342,18 @@ function normalizeAnalysis(
       countLeaves(production),
 
     model,
+
+    view,
+
+    frontal,
+
+    profile,
+
+    landmarks,
+
+    tier,
+
+    sections,
 
     metrics,
 
@@ -903,10 +1367,737 @@ function normalizeAnalysis(
 
 
 // ============================================================
-// HELPERS
+// VIEW NORMALIZATION
 // ============================================================
 
-function isPlainObject(value) {
+function normalizeView(view) {
+  const source =
+    isPlainObject(view)
+      ? view
+      : {};
+
+  const type =
+    [
+      "frontal",
+      "near_frontal",
+      "profile",
+      "near_profile",
+      "three_quarter",
+      "unknown"
+    ].includes(
+      source.type
+    )
+      ? source.type
+      : "unknown";
+
+  const rollSource =
+    isPlainObject(
+      source.roll
+    )
+      ? source.roll
+      : {};
+
+  const angle =
+    normalizeNumber(
+      rollSource.angle_degrees,
+      0,
+      -90,
+      90
+    );
+
+  const correction =
+    normalizeNumber(
+      rollSource.correction_degrees,
+      -angle,
+      -90,
+      90
+    );
+
+  return {
+    type,
+
+    confidence:
+      normalizeUnit(
+        source.confidence
+      ),
+
+    frontal_suitability:
+      normalizeUnit(
+        source.frontal_suitability
+      ),
+
+    profile_suitability:
+      normalizeUnit(
+        source.profile_suitability
+      ),
+
+    image_quality:
+      normalizeUnit(
+        source.image_quality
+      ),
+
+    roll: {
+      angle_degrees:
+        angle,
+
+      correction_degrees:
+        correction,
+
+      confidence:
+        normalizeUnit(
+          rollSource.confidence
+        )
+    }
+  };
+}
+
+
+function normalizeViewResult(
+  value,
+  allowProfile
+) {
+  const source =
+    isPlainObject(value)
+      ? value
+      : {};
+
+  const available =
+    Boolean(
+      source.available
+    );
+
+  let harmony =
+    normalizeNullableScore(
+      source.harmony
+    );
+
+  if (
+    !allowProfile &&
+    harmony === null &&
+    available
+  ) {
+    harmony =
+      null;
+  }
+
+  return {
+    available,
+    confidence:
+      normalizeUnit(
+        source.confidence
+      ),
+    harmony
+  };
+}
+
+
+// ============================================================
+// LANDMARKS
+// ============================================================
+
+function normalizeLandmarks(
+  landmarks
+) {
+  if (
+    !isPlainObject(
+      landmarks
+    )
+  ) {
+    return {};
+  }
+
+  const result = {};
+
+  Object.entries(
+    landmarks
+  ).forEach(
+    ([name, value]) => {
+      if (
+        !isPlainObject(
+          value
+        )
+      ) {
+        return;
+      }
+
+      const x =
+        normalizeNumber(
+          value.x,
+          null,
+          0,
+          1
+        );
+
+      const y =
+        normalizeNumber(
+          value.y,
+          null,
+          0,
+          1
+        );
+
+      if (
+        x === null ||
+        y === null
+      ) {
+        return;
+      }
+
+      result[name] = {
+        x,
+        y,
+        confidence:
+          normalizeUnit(
+            value.confidence
+          )
+      };
+    }
+  );
+
+  return result;
+}
+
+
+// ============================================================
+// METRICS
+// ============================================================
+
+function normalizeMetrics(
+  metrics
+) {
+  if (
+    !isPlainObject(
+      metrics
+    )
+  ) {
+    return {};
+  }
+
+  return normalizeMetricObject(
+    metrics
+  );
+}
+
+
+function normalizeMetricObject(
+  object
+) {
+  const result = {};
+
+  Object.entries(
+    object
+  ).forEach(
+    ([key, value]) => {
+      if (
+        isPlainObject(
+          value
+        )
+      ) {
+        if (
+          hasMetricFields(
+            value
+          )
+        ) {
+          result[key] =
+            normalizeMetric(
+              value
+            );
+        } else {
+          result[key] =
+            normalizeMetricObject(
+              value
+            );
+        }
+
+        return;
+      }
+
+      if (
+        typeof value === "number" ||
+        typeof value === "string" ||
+        typeof value === "boolean" ||
+        value === null
+      ) {
+        result[key] =
+          normalizeScalarMetric(
+            value
+          );
+      }
+    }
+  );
+
+  return result;
+}
+
+
+function hasMetricFields(
+  value
+) {
+  return [
+    "value",
+    "score",
+    "status",
+    "ideal_min",
+    "ideal_max",
+    "unit",
+    "landmarks"
+  ].some(
+    key =>
+      Object.prototype.hasOwnProperty.call(
+        value,
+        key
+      )
+  );
+}
+
+
+function normalizeMetric(
+  metric
+) {
+  const value =
+    normalizeNullableRawValue(
+      metric.value
+    );
+
+  const score =
+    normalizeNullableScore(
+      metric.score
+    );
+
+  let status =
+    [
+      "good",
+      "average",
+      "poor",
+      "uncertain"
+    ].includes(
+      metric.status
+    )
+      ? metric.status
+      : "uncertain";
+
+  const idealMin =
+    normalizeNullableNumber(
+      metric.ideal_min
+    );
+
+  const idealMax =
+    normalizeNullableNumber(
+      metric.ideal_max
+    );
+
+  const unit =
+    metric.unit === null ||
+    metric.unit === undefined
+      ? null
+      : String(
+          metric.unit
+        );
+
+  const landmarks =
+    Array.isArray(
+      metric.landmarks
+    )
+      ? metric.landmarks
+          .filter(
+            value =>
+              typeof value ===
+              "string"
+          )
+          .slice(
+            0,
+            12
+          )
+      : [];
+
+  return {
+    value,
+    score,
+    status,
+    ideal_min:
+      idealMin,
+    ideal_max:
+      idealMax,
+    unit,
+    landmarks
+  };
+}
+
+
+function normalizeScalarMetric(
+  value
+) {
+  const numeric =
+    normalizeNullableNumber(
+      value
+    );
+
+  if (
+    numeric !== null
+  ) {
+    return {
+      value: numeric,
+      score:
+        numeric >= 0 &&
+        numeric <= 10
+          ? numeric
+          : null,
+      status:
+        "uncertain",
+      ideal_min: null,
+      ideal_max: null,
+      unit: null,
+      landmarks: []
+    };
+  }
+
+  return {
+    value:
+      value === undefined
+        ? null
+        : value,
+    score: null,
+    status:
+      "uncertain",
+    ideal_min: null,
+    ideal_max: null,
+    unit: null,
+    landmarks: []
+  };
+}
+
+
+// ============================================================
+// SECTIONS
+// ============================================================
+
+function normalizeSections(
+  sections
+) {
+  const source =
+    isPlainObject(
+      sections
+    )
+      ? sections
+      : {};
+
+  return {
+    harmony:
+      normalizeNullableScore(
+        source.harmony
+      ),
+
+    dimorphism:
+      normalizeNullableScore(
+        source.dimorphism
+      ),
+
+    features:
+      normalizeNullableScore(
+        source.features
+      ),
+
+    angularity:
+      normalizeNullableScore(
+        source.angularity
+      ),
+
+    symmetry:
+      normalizeNullableScore(
+        source.symmetry
+      ),
+
+    proportions:
+      normalizeNullableScore(
+        source.proportions
+      )
+  };
+}
+
+
+// ============================================================
+// PRODUCTION FEATURES
+// ============================================================
+
+function normalizeProductionFeatures(
+  production,
+  sections
+) {
+  const source =
+    isPlainObject(
+      production
+    )
+      ? production
+      : {};
+
+  return {
+    overall_harmony:
+      normalizeNullableScore(
+        source.overall_harmony
+      ) ??
+      sections.harmony,
+
+    frontal_harmony:
+      normalizeNullableScore(
+        source.frontal_harmony
+      ),
+
+    profile_harmony:
+      normalizeNullableScore(
+        source.profile_harmony
+      ),
+
+    facial_definition:
+      normalizeNullableScore(
+        source.facial_definition
+      ) ??
+      sections.features,
+
+    angularity:
+      normalizeNullableScore(
+        source.angularity
+      ) ??
+      sections.angularity,
+
+    proportions:
+      normalizeNullableScore(
+        source.proportions
+      ) ??
+      sections.proportions,
+
+    symmetry:
+      normalizeNullableScore(
+        source.symmetry
+      ) ??
+      sections.symmetry,
+
+    confidence:
+      normalizeNullableScore(
+        source.confidence
+      ),
+
+    dimorphism:
+      normalizeNullableScore(
+        source.dimorphism
+      ) ??
+      sections.dimorphism
+  };
+}
+
+
+// ============================================================
+// FALLBACK SCORE
+// ============================================================
+
+function calculateFallbackOverallScore(
+  sections,
+  production
+) {
+  const values = [
+    production.overall_harmony,
+    production.frontal_harmony,
+    production.facial_definition,
+    production.angularity,
+    production.proportions,
+    production.symmetry
+  ].filter(
+    value =>
+      Number.isFinite(
+        Number(value)
+      )
+  );
+
+  if (!values.length) {
+    const sectionValues =
+      Object.values(
+        sections
+      ).filter(
+        value =>
+          Number.isFinite(
+            Number(value)
+          )
+      );
+
+    if (!sectionValues.length) {
+      return null;
+    }
+
+    return roundScore(
+      average(
+        sectionValues
+      )
+    );
+  }
+
+  return roundScore(
+    average(values)
+  );
+}
+
+
+// ============================================================
+// TIER
+// ============================================================
+
+function getTier(
+  score
+) {
+  if (
+    score === null ||
+    !Number.isFinite(
+      Number(score)
+    )
+  ) {
+    return {
+      name: null,
+      level: null
+    };
+  }
+
+  const value =
+    Number(score);
+
+  if (value < 2) {
+    return {
+      name: "Sub 3",
+      level: getTierLevel(
+        value,
+        1,
+        2
+      )
+    };
+  }
+
+  if (value < 4) {
+    return {
+      name: "Sub 5",
+      level: getTierLevel(
+        value,
+        2,
+        4
+      )
+    };
+  }
+
+  if (value < 5) {
+    return {
+      name: "LTN",
+      level: getTierLevel(
+        value,
+        4,
+        5
+      )
+    };
+  }
+
+  if (value < 5.5) {
+    return {
+      name: "MTN",
+      level: getTierLevel(
+        value,
+        5,
+        5.5
+      )
+    };
+  }
+
+  if (value < 6.5) {
+    return {
+      name: "HTN",
+      level: getTierLevel(
+        value,
+        5.5,
+        6.5
+      )
+    };
+  }
+
+  if (value < 7.5) {
+    return {
+      name: "Chadlite",
+      level: getTierLevel(
+        value,
+        6.5,
+        7.5
+      )
+    };
+  }
+
+  if (value < 9) {
+    return {
+      name: "Chad",
+      level: getTierLevel(
+        value,
+        7.5,
+        9
+      )
+    };
+  }
+
+  if (value < 9.5) {
+    return {
+      name: "Adamlite",
+      level: getTierLevel(
+        value,
+        9,
+        9.5
+      )
+    };
+  }
+
+  if (value < 10) {
+    return {
+      name: "Near True Adam",
+      level: getTierLevel(
+        value,
+        9.5,
+        10
+      )
+    };
+  }
+
+  return {
+    name: "True Adam",
+    level: "base"
+  };
+}
+
+
+function getTierLevel(
+  score,
+  min,
+  max
+) {
+  const range =
+    max - min;
+
+  if (range <= 0) {
+    return "base";
+  }
+
+  const position =
+    (score - min) /
+    range;
+
+  if (position < 0.333) {
+    return "low";
+  }
+
+  if (position < 0.666) {
+    return "mid";
+  }
+
+  return "high";
+}
+
+
+// ============================================================
+// GENERIC HELPERS
+// ============================================================
+
+function isPlainObject(
+  value
+) {
   return (
     value !== null &&
     typeof value === "object" &&
@@ -915,9 +2106,13 @@ function isPlainObject(value) {
 }
 
 
-function countLeaves(object) {
+function countLeaves(
+  object
+) {
   if (
-    !isPlainObject(object)
+    !isPlainObject(
+      object
+    )
   ) {
     return 0;
   }
@@ -929,7 +2124,9 @@ function countLeaves(object) {
     Object.values(object)
   ) {
     if (
-      isPlainObject(value)
+      isPlainObject(
+        value
+      )
     ) {
       count +=
         countLeaves(value);
@@ -939,6 +2136,250 @@ function countLeaves(object) {
   }
 
   return count;
+}
+
+
+function average(
+  values
+) {
+  if (
+    !Array.isArray(
+      values
+    ) ||
+    !values.length
+  ) {
+    return null;
+  }
+
+  const numbers =
+    values
+      .map(
+        Number
+      )
+      .filter(
+        Number.isFinite
+      );
+
+  if (!numbers.length) {
+    return null;
+  }
+
+  return (
+    numbers.reduce(
+      (
+        total,
+        value
+      ) =>
+        total + value,
+      0
+    ) /
+    numbers.length
+  );
+}
+
+
+function roundScore(
+  value
+) {
+  if (
+    value === null ||
+    !Number.isFinite(
+      Number(value)
+    )
+  ) {
+    return null;
+  }
+
+  return (
+    Math.round(
+      clamp(
+        Number(value),
+        SCORE_MIN,
+        SCORE_MAX
+      ) * 100
+    ) / 100
+  );
+}
+
+
+function normalizeScore(
+  value
+) {
+  if (
+    value === null ||
+    value === undefined ||
+    value === ""
+  ) {
+    return null;
+  }
+
+  const number =
+    Number(value);
+
+  if (
+    !Number.isFinite(
+      number
+    )
+  ) {
+    return null;
+  }
+
+  return roundScore(
+    number
+  );
+}
+
+
+function normalizeNullableScore(
+  value
+) {
+  return normalizeScore(
+    value
+  );
+}
+
+
+function normalizeNullableNumber(
+  value
+) {
+  if (
+    value === null ||
+    value === undefined ||
+    value === ""
+  ) {
+    return null;
+  }
+
+  const number =
+    Number(value);
+
+  return Number.isFinite(
+    number
+  )
+    ? number
+    : null;
+}
+
+
+function normalizeNullableRawValue(
+  value
+) {
+  if (
+    value === undefined
+  ) {
+    return null;
+  }
+
+  if (
+    typeof value === "number"
+  ) {
+    return Number.isFinite(
+      value
+    )
+      ? value
+      : null;
+  }
+
+  if (
+    typeof value === "boolean"
+  ) {
+    return value;
+  }
+
+  if (
+    value === null
+  ) {
+    return null;
+  }
+
+  if (
+    typeof value === "string"
+  ) {
+    return value;
+  }
+
+  return null;
+}
+
+
+function normalizeNumber(
+  value,
+  fallback,
+  min,
+  max
+) {
+  const number =
+    Number(value);
+
+  if (
+    !Number.isFinite(
+      number
+    )
+  ) {
+    return fallback;
+  }
+
+  return clamp(
+    number,
+    min,
+    max
+  );
+}
+
+
+function normalizeInteger(
+  value,
+  fallback,
+  max
+) {
+  const number =
+    Number(value);
+
+  if (
+    !Number.isFinite(
+      number
+    )
+  ) {
+    return fallback;
+  }
+
+  return Math.round(
+    clamp(
+      number,
+      0,
+      max
+    )
+  );
+}
+
+
+function normalizeUnit(
+  value
+) {
+  if (
+    value === null ||
+    value === undefined ||
+    value === ""
+  ) {
+    return null;
+  }
+
+  const number =
+    Number(value);
+
+  if (
+    !Number.isFinite(
+      number
+    )
+  ) {
+    return null;
+  }
+
+  return clamp(
+    number,
+    0,
+    1
+  );
 }
 
 
@@ -983,13 +2424,14 @@ function uint8ToBase64(
         )
       );
 
-    binary +=
-      String.fromCharCode(
-        ...chunk
-      );
+    binary += String.fromCharCode(
+      ...chunk
+    );
   }
 
-  return btoa(binary);
+  return btoa(
+    binary
+  );
 }
 
 
@@ -1003,13 +2445,10 @@ function corsHeaders() {
       "*",
 
     "Access-Control-Allow-Methods":
-      "GET, POST, OPTIONS",
+      "GET,POST,OPTIONS",
 
     "Access-Control-Allow-Headers":
-      "Content-Type, Accept",
-
-    "Cache-Control":
-      "no-store"
+      "Content-Type,Accept"
   };
 }
 
@@ -1026,9 +2465,7 @@ function json(
     data === null
       ? null
       : JSON.stringify(
-          data,
-          null,
-          2
+          data
         ),
     {
       status,
