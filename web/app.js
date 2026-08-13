@@ -35,7 +35,11 @@ function getGeminiApiKey() {
 
 function setGeminiApiKey(key) {
   const value = String(key || "").trim();
-  if (!value) return false;
+
+  if (!value) {
+    return false;
+  }
+
   return writeStorage(GEMINI_STORAGE_KEY, value);
 }
 
@@ -48,39 +52,10 @@ function clearGeminiApiKey() {
   }
 }
 
-function setGeminiKeyBusy(busy) {
-  const button = document.getElementById("saveGeminiKeyBtn");
-  const input = document.getElementById("geminiApiKeyInput");
-  const toggle = document.getElementById("toggleGeminiKeyBtn");
-  if (button) {
-    button.disabled = busy;
-    button.textContent = busy ? "Проверяем ключ…" : "Проверить и сохранить";
-  }
-  if (input) input.disabled = busy;
-  if (toggle) toggle.disabled = busy;
-}
-
-function showGeminiKeyError(message) {
-  const error = document.getElementById("geminiApiKeyError");
-  if (!error) {
-    showToast(message);
-    return;
-  }
-  error.textContent = message;
-  error.hidden = false;
-}
-
-function clearGeminiKeyError() {
-  const error = document.getElementById("geminiApiKeyError");
-  if (error) {
-    error.textContent = "";
-    error.hidden = true;
-  }
-}
-
 function openGeminiKeyModal(options = {}) {
   const modal = document.getElementById("apiKeyModal");
   const input = document.getElementById("geminiApiKeyInput");
+  const error = document.getElementById("geminiApiKeyError");
 
   if (!modal || !input) {
     console.error("FaceMetric: Gemini API key modal is missing from index.html.");
@@ -88,79 +63,40 @@ function openGeminiKeyModal(options = {}) {
     return false;
   }
 
-  input.value = getGeminiApiKey();
-  clearGeminiKeyError();
-  setGeminiKeyBusy(false);
+  const currentKey = getGeminiApiKey();
+
+  input.value = currentKey;
+
+  if (error) {
+    error.textContent = "";
+    error.hidden = true;
+  }
 
   modal.hidden = false;
   modal.classList.add("show");
   modal.setAttribute("aria-hidden", "false");
 
+  // Prevent accidental analysis while the key is missing.
   if (options.focus !== false) {
     window.setTimeout(() => {
       input.focus();
       input.select();
     }, 0);
   }
+
   return true;
 }
 
 function closeGeminiKeyModal() {
   const modal = document.getElementById("apiKeyModal");
-  if (!modal) return;
+
+  if (!modal) {
+    return;
+  }
+
   modal.classList.remove("show");
   modal.hidden = true;
   modal.setAttribute("aria-hidden", "true");
-}
-
-async function validateGeminiApiKey(key) {
-  const value = String(key || "").trim();
-  if (!value) {
-    throw new Error("Введите Gemini API ключ.");
-  }
-
-  let response;
-  try {
-    response = await fetchWithTimeout(
-      `${HEALTH_ENDPOINT.replace(/\/api\/health$/, "")}/api/validate-key`,
-      {
-        method: "POST",
-        headers: {
-          Accept: "application/json",
-          "X-Gemini-Key": value
-        },
-        cache: "no-store"
-      },
-      15000
-    );
-  } catch (error) {
-    if (isAbortError(error)) {
-      throw new Error("Проверка ключа заняла слишком много времени. Попробуйте ещё раз.");
-    }
-    throw new Error("Не удалось связаться с сервером проверки ключа.");
-  }
-
-  let data = null;
-  const text = await response.text();
-  if (text.trim()) {
-    try { data = JSON.parse(text); } catch { /* handled below */ }
-  }
-
-  if (!response.ok || !data?.success) {
-    const code = data?.code || "";
-    if (code === "GEMINI_INVALID_KEY") {
-      throw new Error("Ключ недействителен. Создайте новый ключ в Google AI Studio и вставьте его сюда.");
-    }
-    if (code === "GEMINI_KEY_REQUIRED") {
-      throw new Error("Введите Gemini API ключ.");
-    }
-    if (response.status === 403) {
-      throw new Error("Ключ не имеет доступа к Gemini API. Проверьте настройки ключа в Google AI Studio.");
-    }
-    throw new Error(data?.detail || `Не удалось проверить ключ (${response.status}).`);
-  }
-
-  return data;
 }
 
 function initGeminiKeyModal() {
@@ -168,62 +104,135 @@ function initGeminiKeyModal() {
   const input = document.getElementById("geminiApiKeyInput");
   const saveButton = document.getElementById("saveGeminiKeyBtn");
   const form = document.getElementById("geminiApiKeyForm");
-  const toggleButton = document.getElementById("toggleGeminiKeyBtn");
+  const error = document.getElementById("geminiApiKeyError");
 
   if (!modal || !input || !saveButton) {
-    console.error("FaceMetric: Gemini API key modal elements were not found.");
+    console.error(
+      "FaceMetric: Gemini API key modal elements were not found."
+    );
     return;
   }
 
   const savedKey = getGeminiApiKey();
+
   modal.hidden = Boolean(savedKey);
   modal.classList.toggle("show", !savedKey);
   modal.setAttribute("aria-hidden", savedKey ? "true" : "false");
 
+  const showKeyError = message => {
+    if (!error) {
+      showToast(message);
+      return;
+    }
+
+    error.textContent = message;
+    error.hidden = false;
+  };
+
   const saveKey = async event => {
     event?.preventDefault();
-    clearGeminiKeyError();
+
     const key = input.value.trim();
+
     if (!key) {
-      showGeminiKeyError("Введите Gemini API ключ.");
+      showKeyError("Введите Gemini API ключ.");
       input.focus();
       return;
     }
 
-    setGeminiKeyBusy(true);
+    saveButton.disabled = true;
+    saveButton.textContent = "Проверяем ключ…";
+
     try {
-      await validateGeminiApiKey(key);
-      if (!setGeminiApiKey(key)) {
-        throw new Error("Не удалось сохранить ключ в браузере. Проверьте разрешение localStorage.");
+      const response = await fetchWithTimeout(
+        VALIDATE_KEY_ENDPOINT,
+        {
+          method: "GET",
+          headers: {
+            Accept: "application/json",
+            "X-Gemini-Key": key
+          },
+          cache: "no-store"
+        },
+        HEALTH_TIMEOUT
+      );
+
+      const text = await response.text();
+      let data = null;
+
+      if (text.trim()) {
+        try {
+          data = JSON.parse(text);
+        } catch {
+          data = null;
+        }
       }
+
+      if (!response.ok || data?.success !== true) {
+        const validationError = new Error(
+          data?.detail ||
+          getHttpErrorMessage(response.status)
+        );
+        validationError.code = data?.code || "GEMINI_API_ERROR";
+        validationError.status = response.status;
+        throw validationError;
+      }
+
+      if (!setGeminiApiKey(key)) {
+        showKeyError(
+          "Не удалось сохранить ключ в браузере. Проверь разрешение localStorage."
+        );
+        return;
+      }
+
+      if (error) {
+        error.textContent = "";
+        error.hidden = true;
+      }
+
       closeGeminiKeyModal();
-      showToast("✓ Gemini подключён. Ключ сохранён в этом браузере.");
-    } catch (error) {
-      showGeminiKeyError(error?.message || "Не удалось проверить Gemini API ключ.");
+      showToast("Gemini API ключ проверен и сохранён.");
+    } catch (validationError) {
+      console.error("FaceMetric Gemini key validation:", validationError);
+
+      if (validationError?.code === "GEMINI_QUOTA_EXCEEDED") {
+        showKeyError(
+          "Лимит этого Gemini API ключа исчерпан. Введи другой ключ."
+        );
+      } else if (validationError?.code === "GEMINI_INVALID_KEY") {
+        showKeyError(
+          "Gemini API ключ недействителен или не имеет доступа к Gemini API."
+        );
+      } else if (isAbortError(validationError)) {
+        showKeyError("Проверка ключа заняла слишком много времени. Попробуй ещё раз.");
+      } else {
+        showKeyError(
+          validationError?.message ||
+          "Не удалось проверить Gemini API ключ."
+        );
+      }
     } finally {
-      setGeminiKeyBusy(false);
+      saveButton.disabled = false;
+      saveButton.textContent = "Подключить и сохранить";
     }
   };
 
   saveButton.addEventListener("click", saveKey);
   form?.addEventListener("submit", saveKey);
 
-  toggleButton?.addEventListener("click", () => {
-    const showing = input.type === "text";
-    input.type = showing ? "password" : "text";
-    toggleButton.textContent = showing ? "Показать" : "Скрыть";
-    toggleButton.setAttribute("aria-label", showing ? "Показать API ключ" : "Скрыть API ключ");
-    input.focus();
+  input.addEventListener("input", () => {
+    if (error) {
+      error.textContent = "";
+      error.hidden = true;
+    }
   });
 
-  input.addEventListener("input", clearGeminiKeyError);
-
-  modal.addEventListener("click", event => {
-    if (event.target === modal && getGeminiApiKey()) closeGeminiKeyModal();
-  });
-
+  // Do not allow the mandatory BYOK modal to be dismissed without
+  // entering a key. Escape is intentionally ignored while it is required.
   modal.addEventListener("keydown", event => {
-    if (event.key === "Escape" && getGeminiApiKey()) closeGeminiKeyModal();
+    if (event.key === "Escape" && getGeminiApiKey()) {
+      closeGeminiKeyModal();
+    }
   });
 
   if (!savedKey) {
@@ -249,6 +258,7 @@ const ALLOWED_TYPES = new Set([
 
 const API_ENDPOINT = "https://facebot-gemini.snow4lyt.workers.dev/api/analyze";
 const HEALTH_ENDPOINT = "https://facebot-gemini.snow4lyt.workers.dev/api/health";
+const VALIDATE_KEY_ENDPOINT = "https://facebot-gemini.snow4lyt.workers.dev/api/validate-key";
 const HISTORY_KEY = "facemetric_history_v2";
 
 const tg = window.Telegram?.WebApp || null;
@@ -921,9 +931,23 @@ async function startAnalysis(file) {
 
     setAnalysisState("ОШИБКА");
 
-    showToast(
-      getFriendlyErrorMessage(error)
-    );
+    if (
+      error?.code === "GEMINI_QUOTA_EXCEEDED" ||
+      error?.code === "GEMINI_INVALID_KEY"
+    ) {
+      clearGeminiApiKey();
+      openGeminiKeyModal({ focus: true });
+
+      showToast(
+        error?.code === "GEMINI_QUOTA_EXCEEDED"
+          ? "Лимит Gemini API исчерпан. Введи другой ключ."
+          : "Gemini API ключ недействителен. Введи другой ключ."
+      );
+    } else {
+      showToast(
+        getFriendlyErrorMessage(error)
+      );
+    }
 
     showScreen("home");
   } finally {
@@ -1019,12 +1043,24 @@ async function analyzePhoto(file, signal) {
   }
 
   if (!response.ok) {
-    throw new Error(
-      getGeminiUserError(
-        response.status,
-        data
-      )
+    const apiError = new Error(
+      data?.detail ||
+      data?.error ||
+      getHttpErrorMessage(response.status)
     );
+
+    apiError.code =
+      data?.code ||
+      (response.status === 429
+        ? "GEMINI_QUOTA_EXCEEDED"
+        : response.status === 401 || response.status === 403
+          ? "GEMINI_INVALID_KEY"
+          : "GEMINI_API_ERROR");
+
+    apiError.status = response.status;
+    apiError.geminiStatus = data?.gemini_status;
+
+    throw apiError;
   }
 
   if (!data) {
@@ -4243,16 +4279,19 @@ function getFriendlyErrorMessage(
   }
 
   if (
-    message.includes("429")
+    error?.code === "GEMINI_QUOTA_EXCEEDED" ||
+    message.includes("429") ||
+    message.toLowerCase().includes("лимит gemini")
   ) {
-    return "Слишком много запросов. Попробуй позже.";
+    return "Лимит Gemini API исчерпан. Введи другой ключ.";
   }
 
   if (
+    error?.code === "GEMINI_INVALID_KEY" ||
     message.includes("401") ||
     message.includes("403")
   ) {
-    return "Сервер не смог выполнить авторизацию.";
+    return "Gemini API ключ недействителен. Введи другой ключ.";
   }
 
   if (
@@ -4267,51 +4306,40 @@ function getFriendlyErrorMessage(
 }
 
 
-function getGeminiUserError(status, data = null) {
-  const code = data?.code || "";
-
-  if (code === "GEMINI_KEY_REQUIRED") {
-    return "Для анализа нужен Gemini API ключ. Откройте окно подключения и добавьте свой ключ.";
+function getHttpErrorMessage(
+  status
+) {
+  if (status === 400) {
+    return "Некорректный запрос к серверу анализа.";
   }
 
-  if (code === "GEMINI_INVALID_KEY" || status === 401) {
-    return "Gemini API ключ недействителен. Нажмите «Изменить ключ» и укажите действующий ключ.";
+  if (status === 401) {
+    return "Ошибка авторизации сервера.";
   }
 
   if (status === 403) {
-    return "Gemini API отклонил ключ. Проверьте доступ ключа к Gemini API в Google AI Studio.";
-  }
-
-  if (status === 429 || code === "GEMINI_QUOTA_EXCEEDED") {
-    return "Лимит этого Gemini API ключа исчерпан. Используйте другой ключ или попробуйте позже.";
-  }
-
-  if (code === "GEMINI_UNAVAILABLE" || status === 502 || status === 503) {
-    return "Gemini временно недоступен. Попробуйте ещё раз через несколько секунд.";
-  }
-
-  if (status === 400) {
-    return data?.detail || "Gemini отклонил запрос. Проверьте ключ и фотографию.";
+    return "Доступ к серверу анализа запрещён.";
   }
 
   if (status === 404) {
-    return "Сервис анализа не найден. Проверьте адрес Gemini Worker.";
+    return "Endpoint анализа не найден. Используется /api/analyze.";
   }
 
   if (status === 413) {
     return "Фотография слишком большая.";
   }
 
-  if (status >= 500) {
-    return "Сервис анализа временно недоступен. Попробуйте ещё раз.";
+  if (status === 429) {
+    return "Лимит Gemini API исчерпан. Введи другой ключ.";
   }
 
-  return data?.detail || data?.error || `Ошибка сервера (${status}).`;
+  if (status >= 500) {
+    return "Ошибка сервера анализа.";
+  }
+
+  return `Ошибка сервера (${status}).`;
 }
 
-function getHttpErrorMessage(status) {
-  return getGeminiUserError(status);
-}
 
 function isAbortError(error) {
   return (
