@@ -1122,8 +1122,9 @@ function renderProductionFeatures(
       count.className =
         "feature-group__count";
 
-      count.textContent =
-        `${countLeaves(groupValue)} VALUES`;
+      const valueCount = isObject(groupValue) ? countLeaves(groupValue) : 1; 
+      count.textContent = 
+        `${valueCount} ${valueCount === 1 ? "VALUE" : "VALUES"}`;
 
       const arrow =
         document.createElement(
