@@ -1,1446 +1,1462 @@
-/* =========================================================
-   FACEMETRIC — APP.JS
-   Dark FaceIQ-inspired interface
-   FaceMetric / Facial Analysis
-   ========================================================= */
-
-(() => {
-  "use strict";
-
-  const CONFIG = {
-    maxFileSize: 15 * 1024 * 1024,
-    analysisDuration: 3600,
-    scoreAnimationDuration: 1900,
-    faceDetectorTimeout: 7000,
-
-    // Real face detection is attempted first.
-    // We never call an image a face when detection failed.
-    allowDemoScore: false,
-
-    brand: "FaceMetric"
-  };
-
-  const state = {
-    file: null,
-    imageUrl: null,
-    image: null,
-    face: null,
-    score: null,
-    measurements: [],
-    history: loadHistory(),
-    analyzing: false,
-    resultReady: false
-  };
-
-  /* ---------------------------------------------------------
-     DOM
-     --------------------------------------------------------- */
-
-  const root =
-    document.querySelector("#app") ||
-    document.querySelector(".app") ||
-    document.body;
-
-  function renderApp() {
-    root.innerHTML = `
-      <div class="fm-app">
-
-        <header class="fm-header">
-          <div class="fm-brand">
-            <div class="fm-brand-mark">F</div>
-            <div>
-              <div class="fm-brand-name">FaceMetric</div>
-              <div class="fm-brand-sub">FACIAL ANALYSIS</div>
-            </div>
-          </div>
-
-          <div class="fm-system-status">
-            <span class="fm-status-dot"></span>
-            <span id="systemStatus">SYSTEM READY</span>
-          </div>
-        </header>
-
-        <main class="fm-main">
-
-          <!-- HOME -->
-          <section class="fm-home" id="homeView">
-
-            <div class="fm-intro">
-              <div class="fm-eyebrow">FACIAL ANALYSIS</div>
-
-              <h1>
-                Анализируй.<br>
-                Измеряй.
-              </h1>
-
-              <p>
-                Объективный анализ пропорций, симметрии,
-                структуры и других измеряемых параметров лица.
-              </p>
-            </div>
-
-            <div
-              class="fm-upload-zone"
-              id="uploadZone"
-              tabindex="0"
-            >
-              <input
-                type="file"
-                id="fileInput"
-                accept="image/jpeg,image/png,image/webp"
-                hidden
-              />
-
-              <div class="fm-upload-inner">
-                <div class="fm-upload-icon">↑</div>
-
-                <div class="fm-upload-title">
-                  Загрузить фотографию
-                </div>
-
-                <div class="fm-upload-meta">
-                  JPG, PNG или WEBP · до 15 MB
-                </div>
-
-                <div class="fm-upload-or">
-                  или перетащи изображение сюда
-                </div>
-              </div>
-            </div>
-
-            <div class="fm-quick-links">
-              <button data-action="history">
-                01 История ↗
-              </button>
-
-              <button data-action="methodology">
-                02 Методология ↗
-              </button>
-            </div>
-
-            <div class="fm-method-line">
-              MEASUREMENT BASED
-              <span>LANDMARKS</span>
-              NO GUESSING
-            </div>
-
-            <div class="fm-divider"></div>
-
-            <section class="fm-info">
-              <div class="fm-section-label">Что измеряется</div>
-
-              <p>
-                Пропорции, расстояния, углы, симметрия,
-                геометрические отношения и другие параметры,
-                которые реально удалось получить из изображения.
-              </p>
-
-              <div class="fm-index">
-                <span>01 LANDMARKS</span>
-                <span>02 GEOMETRY</span>
-                <span>03 SYMMETRY</span>
-                <span>04 REPORT</span>
-              </div>
-            </section>
-
-          </section>
-
-          <!-- ANALYSIS -->
-          <section class="fm-analysis-view" id="analysisView" hidden>
-
-            <div class="fm-analysis-top">
-              <button class="fm-back" data-action="home">
-                ←
-              </button>
-
-              <div>
-                <div class="fm-eyebrow">ANALYSIS</div>
-                <h2>Анализ изображения</h2>
-              </div>
-
-              <div class="fm-analysis-state" id="analysisState">
-                PREPARING
-              </div>
-            </div>
-
-            <div class="fm-analysis-card">
-
-              <div class="fm-image-stage" id="imageStage">
-
-                <img
-                  id="analysisImage"
-                  alt="Изображение для анализа"
-                />
-
-                <div class="fm-image-vignette"></div>
-
-                <div class="fm-scan-line" id="scanLine"></div>
-
-                <div class="fm-face-frame" id="faceFrame">
-                  <div class="fm-corner tl"></div>
-                  <div class="fm-corner tr"></div>
-                  <div class="fm-corner bl"></div>
-                  <div class="fm-corner br"></div>
-
-                  <span>FACE DETECTED</span>
-                </div>
-
-                <!-- SCORE ON FACE -->
-                <div class="fm-face-score" id="faceScore">
-                  <div class="fm-score-label">
-                    MEASURED SCORE
-                  </div>
-
-                  <div class="fm-score-number" id="faceScoreNumber">
-                    0
-                  </div>
-
-                  <div class="fm-score-max">/10</div>
-                </div>
-
-                <div class="fm-analysis-message" id="analysisMessage">
-                  Подготовка изображения…
-                </div>
-
-              </div>
-
-              <div class="fm-analysis-footer">
-                <div>
-                  <span class="fm-mini-label">SOURCE</span>
-                  <strong id="sourceName">—</strong>
-                </div>
-
-                <div>
-                  <span class="fm-mini-label">STATUS</span>
-                  <strong id="sourceStatus">—</strong>
-                </div>
-              </div>
-
-            </div>
-
-          </section>
-
-          <!-- RESULT -->
-          <section class="fm-result-view" id="resultView" hidden>
-
-            <div class="fm-result-heading">
-
-              <div class="fm-result-heading-left">
-                <button class="fm-back" data-action="home">
-                  ←
-                </button>
-
-                <div>
-                  <div class="fm-eyebrow">ANALYSIS COMPLETE</div>
-                  <h2>Результат</h2>
-                </div>
-              </div>
-
-              <div class="fm-result-status">
-                <span class="fm-status-dot"></span>
-                ГОТОВО
-              </div>
-
-            </div>
-
-            <div class="fm-result-image-card">
-
-              <div class="fm-result-image-wrap">
-                <img id="resultImage" alt="Результат анализа">
-
-                <div class="fm-result-overlay"></div>
-
-                <div class="fm-result-divider"></div>
-
-                <div class="fm-result-image-status">
-                  <span>ГОТОВО</span>
-                </div>
-
-                <div class="fm-result-image-score">
-                  <div>MEASURED SCORE</div>
-                  <strong id="resultScore">0</strong>
-                  <span>/10</span>
-                </div>
-
-                <div class="fm-result-tags">
-                  <span>LANDMARKS</span>
-                  <span>AXIS</span>
-                </div>
-              </div>
-
-            </div>
-
-            <!-- SCORE SUMMARY -->
-            <section class="fm-score-card">
-
-              <div class="fm-score-card-label">
-                ИТОГОВАЯ ОЦЕНКА
-              </div>
-
-              <div class="fm-big-score" id="bigScore">
-                0
-              </div>
-
-              <div class="fm-score-scale">
-                <span>0</span>
-
-                <div class="fm-scale-track">
-                  <div
-                    class="fm-scale-fill"
-                    id="scaleFill"
-                  ></div>
-                </div>
-
-                <span>10</span>
-              </div>
-
-              <div class="fm-score-meta">
-
-                <div>
-                  <span>ДАННЫЕ</span>
-                  <strong id="dataStatus">
-                    ПОДТВЕРЖДЕНО
-                  </strong>
-                </div>
-
-                <div>
-                  <span>ТОЧКИ</span>
-                  <strong id="landmarkCount">—</strong>
-                </div>
-
-              </div>
-
-            </section>
-
-            <!-- METRICS -->
-            <div class="fm-metrics">
-
-              <div class="fm-metric">
-                <span>ЛИЦО</span>
-                <strong id="faceMetric">1</strong>
-                <small>обнаружено</small>
-              </div>
-
-              <div class="fm-metric">
-                <span>ТОЧКИ</span>
-                <strong id="pointsMetric">—</strong>
-                <small>геометрия лица</small>
-              </div>
-
-              <div class="fm-metric">
-                <span>ИЗМЕРЕНИЯ</span>
-                <strong id="measurementsMetric">0</strong>
-                <small>показателей</small>
-              </div>
-
-            </div>
-
-            <!-- REPORT -->
-            <section class="fm-report">
-
-              <div class="fm-report-title">
-                <div class="fm-eyebrow">REPORT</div>
-                <h3>Разделы анализа</h3>
-              </div>
-
-              <div class="fm-tabs" id="reportTabs">
-
-                <button class="active" data-tab="overview">
-                  Обзор
-                </button>
-
-                <button data-tab="geometry">
-                  Геометрия
-                </button>
-
-                <button data-tab="features">
-                  Черты и детали
-                </button>
-
-                <button data-tab="evenness">
-                  Ровность
-                </button>
-
-                <button data-tab="symmetry">
-                  Симметрия
-                </button>
-
-                <button data-tab="proportions">
-                  Пропорции
-                </button>
-
-              </div>
-
-              <div class="fm-report-content" id="reportContent">
-                <div class="fm-empty-report">
-                  Измерения будут отображены здесь
-                  после анализа изображения.
-                </div>
-              </div>
-
-              <div class="fm-report-note">
-                <span>i</span>
-                <p>
-                  Числовые показатели строятся только
-                  на измеряемых данных. Качественные
-                  комментарии не используются для создания
-                  или изменения числового score.
-                </p>
-              </div>
-
-              <button
-                class="fm-new-analysis"
-                data-action="new"
-              >
-                Новый анализ ↗
-              </button>
-
-            </section>
-
-          </section>
-
-          <!-- HISTORY -->
-          <section class="fm-history-view" id="historyView" hidden>
-
-            <div class="fm-page-heading">
-              <div class="fm-eyebrow">ARCHIVE</div>
-              <h2>История</h2>
-              <p>
-                Предыдущие анализы FaceMetric.
-              </p>
-            </div>
-
-            <div class="fm-history-list" id="historyList"></div>
-
-          </section>
-
-          <!-- METHODOLOGY -->
-          <section class="fm-methodology-view" id="methodologyView" hidden>
-
-            <div class="fm-page-heading">
-              <div class="fm-eyebrow">METHODOLOGY</div>
-              <h2>Методология</h2>
-              <p>
-                FaceMetric работает от измеряемых
-                геометрических данных, а не от догадок.
-              </p>
-            </div>
-
-            <div class="fm-method-grid">
-
-              <article>
-                <span>01</span>
-                <h3>LANDMARKS</h3>
-                <p>
-                  Определение ключевых точек лица
-                  и их координат.
-                </p>
-              </article>
-
-              <article>
-                <span>02</span>
-                <h3>GEOMETRY</h3>
-                <p>
-                  Расстояния, отношения сторон,
-                  углы и пропорции.
-                </p>
-              </article>
-
-              <article>
-                <span>03</span>
-                <h3>SYMMETRY</h3>
-                <p>
-                  Сравнение левой и правой частей
-                  относительно центральной оси.
-                </p>
-              </article>
-
-              <article>
-                <span>04</span>
-                <h3>REPORT</h3>
-                <p>
-                  Отображение только тех данных,
-                  которые удалось получить.
-                </p>
-              </article>
-
-            </div>
-
-          </section>
-
-        </main>
-
-        <!-- BOTTOM DOCK -->
-        <nav class="fm-dock">
-
-          <button
-            class="active"
-            data-nav="home"
-          >
-            <span class="dock-icon">⌂</span>
-            <span>Главная</span>
-          </button>
-
-          <button data-nav="history">
-            <span class="dock-icon">◷</span>
-            <span>История</span>
-          </button>
-
-          <button data-nav="methodology">
-            <span class="dock-icon">○</span>
-            <span>О системе</span>
-          </button>
-
-        </nav>
-
-      </div>
-    `;
-
-    bindEvents();
-    renderHistory();
+// web/app.js
+"use strict";
+
+const MAX_FILE_SIZE = 15 * 1024 * 1024;
+const REQUEST_TIMEOUT = 45_000;
+const HEALTH_TIMEOUT = 8_000;
+const ALLOWED_TYPES = new Set(["image/jpeg","image/png","image/webp"]);
+const API_ENDPOINT = "/api/analyze";
+const HEALTH_ENDPOINT = "/api/health";
+const HISTORY_KEY = "facemetric_history_v2";
+
+const tg = window.Telegram?.WebApp || null;
+const $ = (s,r=document) => r.querySelector(s);
+const $$ = (s,r=document) => [...r.querySelectorAll(s)];
+
+const screens = $$(".screen");
+const fileInput = $("#file-input");
+const uploadButton = $("#upload-btn");
+const uploadZone = $("#upload-zone");
+const uploadName = $("#upload-name");
+const analysisImage = $("#analysis-image");
+const analysisFrame = $("#analysis-frame");
+const landmarkCanvas = $("#landmark-canvas");
+const analysisState = $("#analysis-state");
+const analysisScore = $("#analysis-score");
+const analysisScoreValue = analysisScore ? $("strong",analysisScore) : null;
+const loadingContent = $("#loading-content");
+const loadingTitle = $("#loading-title");
+const loadingText = $("#loading-text");
+const loadingProgressBar = $("#loading-progress-bar");
+const loadingSteps = $$(".loading-step");
+const resultScore = $("#result-score");
+const scoreProgress = $("#score-progress");
+const scoreStatus = $("#score-status");
+const statsGrid = $("#stats-grid");
+const overviewGrid = $("#overview-grid");
+const harmonyContent = $("#harmony-content");
+const metricsContent = $("#metrics-content");
+const angularityContent = $("#angularity-content");
+const symmetryContent = $("#symmetry-content");
+const dimorphismContent = $("#dimorphism-content");
+const healthContent = $("#health-content");
+const reportTabs = $("#report-tabs");
+const historyCount = $("#history-count");
+const historyList = $("#history-list");
+const newAnalysisButton = $("#new-analysis");
+const toast = $("#toast");
+
+let selectedFile = null;
+let selectedObjectUrl = null;
+let currentAnalysis = null;
+let currentScreen = "home";
+let analysisRequestId = 0;
+let activeAbortController = null;
+let toastTimer = null;
+let resultAnimationTimer = null;
+
+const LABELS = {
+  face_geometry:"Геометрия лица",
+  facial_width_height_balance:"Баланс ширины и высоты",
+  face_aspect_ratio:"Соотношение лица",
+  midface_proportion:"Пропорции средней трети",
+  symmetry:"Симметрия",
+  overall_symmetry:"Общая симметрия",
+  left_right_balance:"Баланс левой и правой стороны",
+  eyes:"Глаза",
+  eye_spacing:"Расстояние между глазами",
+  eye_aspect_ratio:"Форма глаз",
+  eye_alignment:"Выравнивание глаз",
+  eye_area_balance:"Баланс области глаз",
+  eyebrows:"Брови",
+  brow_position:"Положение бровей",
+  brow_shape:"Форма бровей",
+  brow_symmetry:"Симметрия бровей",
+  nose:"Нос",
+  nose_width:"Ширина носа",
+  nose_length:"Длина носа",
+  nose_proportion:"Пропорции носа",
+  jaw:"Челюсть",
+  jaw_width:"Ширина челюсти",
+  jaw_definition:"Выраженность челюсти",
+  jaw_shape:"Форма челюсти",
+  chin:"Подбородок",
+  chin_prominence:"Выраженность подбородка",
+  chin_proportion:"Пропорции подбородка",
+  cheeks:"Скулы",
+  cheek_prominence:"Выраженность скул",
+  cheek_definition:"Определённость скул",
+  lips_mouth:"Губы и рот",
+  mouth_width:"Ширина рта",
+  lip_proportion:"Пропорции губ",
+  mouth_symmetry:"Симметрия рта",
+  midface:"Средняя треть",
+  midface_balance:"Баланс средней трети",
+  overall_harmony:"Общая гармония",
+  frontal_harmony:"Гармония анфас",
+  proportions:"Пропорции",
+  facial_definition:"Выраженность черт",
+  angularity:"Угловатость",
+  confidence:"Уверенность анализа",
+  dimorphism:"Визуальная выраженность черт"
+};
+
+function initTelegram(){
+  if(!tg)return;
+  try{
+    tg.ready();
+    tg.expand?.();
+    tg.setHeaderColor?.("#07080a");
+    tg.setBackgroundColor?.("#07080a");
+  }catch(e){console.warn("Telegram:",e);}
+}
+
+function showScreen(name){
+  const target=document.getElementById(`screen-${name}`);
+  if(!target)return;
+
+  screens.forEach(screen=>{
+    const active=screen===target;
+    screen.classList.toggle("active",active);
+    if(active){
+      screen.classList.remove("screen-enter");
+      void screen.offsetWidth;
+      screen.classList.add("screen-enter");
+    }
+  });
+
+  currentScreen=name;
+  updateNavigation(name);
+  window.scrollTo({top:0,behavior:"smooth"});
+
+  if(name==="history")renderHistory();
+  if(name==="result")activateDefaultResultTab();
+}
+
+function updateNavigation(name){
+  $$(".nav-item").forEach(item=>{
+    const target=item.dataset.screen;
+    item.classList.toggle(
+      "active",
+      target===name ||
+      (target==="home" && (name==="analysis" || name==="result"))
+    );
+  });
+}
+
+function openFilePicker(){
+  if(!fileInput){
+    showToast("Не найден загрузчик фотографии.");
+    return;
+  }
+  fileInput.value="";
+  fileInput.click();
+}
+
+function validateFile(file){
+  if(!file)return{valid:false,message:"Фотография не выбрана."};
+  if(!ALLOWED_TYPES.has(file.type)){
+    return{valid:false,message:"Поддерживаются только JPG, PNG и WEBP."};
+  }
+  if(file.size<=0){
+    return{valid:false,message:"Файл фотографии пустой."};
+  }
+  if(file.size>MAX_FILE_SIZE){
+    return{valid:false,message:"Фотография слишком большая. Максимум — 15 MB."};
+  }
+  return{valid:true};
+}
+
+function handleFileSelected(file){
+  const validation=validateFile(file);
+  if(!validation.valid){
+    showToast(validation.message);
+    return;
   }
 
-  /* ---------------------------------------------------------
-     EVENTS
-     --------------------------------------------------------- */
+  cancelActiveAnalysis();
+  analysisRequestId++;
+  selectedFile=file;
+  revokeSelectedObjectUrl();
+  selectedObjectUrl=URL.createObjectURL(file);
 
-  function bindEvents() {
-    const fileInput = document.querySelector("#fileInput");
-    const uploadZone = document.querySelector("#uploadZone");
-
-    uploadZone.addEventListener("click", () => {
-      fileInput.click();
-    });
-
-    uploadZone.addEventListener("keydown", e => {
-      if (e.key === "Enter" || e.key === " ") {
-        e.preventDefault();
-        fileInput.click();
-      }
-    });
-
-    fileInput.addEventListener("change", e => {
-      const file = e.target.files?.[0];
-      if (file) handleFile(file);
-    });
-
-    uploadZone.addEventListener("dragover", e => {
-      e.preventDefault();
-      uploadZone.classList.add("dragging");
-    });
-
-    uploadZone.addEventListener("dragleave", () => {
-      uploadZone.classList.remove("dragging");
-    });
-
-    uploadZone.addEventListener("drop", e => {
-      e.preventDefault();
-      uploadZone.classList.remove("dragging");
-
-      const file = e.dataTransfer.files?.[0];
-
-      if (file) {
-        handleFile(file);
-      }
-    });
-
-    document.addEventListener("click", e => {
-      const action = e.target.closest("[data-action]");
-
-      if (action) {
-        const value = action.dataset.action;
-
-        if (value === "home" || value === "new") {
-          showView("home");
-        }
-
-        if (value === "history") {
-          showView("history");
-        }
-
-        if (value === "methodology") {
-          showView("methodology");
-        }
-      }
-
-      const nav = e.target.closest("[data-nav]");
-
-      if (nav) {
-        showView(nav.dataset.nav);
-
-        document
-          .querySelectorAll(".fm-dock button")
-          .forEach(button => {
-            button.classList.toggle(
-              "active",
-              button.dataset.nav === nav.dataset.nav
-            );
-          });
-      }
-
-      const tab = e.target.closest("[data-tab]");
-
-      if (tab) {
-        document
-          .querySelectorAll(".fm-tabs button")
-          .forEach(button => {
-            button.classList.remove("active");
-          });
-
-        tab.classList.add("active");
-
-        renderReportTab(tab.dataset.tab);
-      }
-    });
+  if(uploadName){
+    uploadName.textContent=`${file.name} · ${formatBytes(file.size)}`;
   }
 
-  /* ---------------------------------------------------------
-     FILE
-     --------------------------------------------------------- */
-
-  async function handleFile(file) {
-    if (!file.type.startsWith("image/")) {
-      showToast("Нужен файл изображения.");
-      return;
-    }
-
-    if (file.size > CONFIG.maxFileSize) {
-      showToast("Файл слишком большой. Максимум — 15 MB.");
-      return;
-    }
-
-    cleanupImage();
-
-    state.file = file;
-    state.imageUrl = URL.createObjectURL(file);
-
-    const image = new Image();
-
-    image.onload = async () => {
-      state.image = image;
-
-      document.querySelector("#analysisImage").src =
-        state.imageUrl;
-
-      document.querySelector("#sourceName").textContent =
-        truncate(file.name, 34);
-
-      showView("analysis");
-
-      await startAnalysis();
-    };
-
-    image.onerror = () => {
-      showToast("Не удалось открыть изображение.");
-      cleanupImage();
-    };
-
-    image.src = state.imageUrl;
+  if(analysisImage){
+    analysisImage.src=selectedObjectUrl;
+    analysisImage.alt="Фотография для анализа";
   }
 
-  /* ---------------------------------------------------------
-     ANALYSIS
-     --------------------------------------------------------- */
+  clearAnalysisError();
+  resetAnalysisPreview();
+  showScreen("analysis");
+  startAnalysis(file);
+}
 
-  async function startAnalysis() {
-    state.analyzing = true;
-    state.resultReady = false;
+function resetAnalysisPreview(){
+  analysisScore?.classList.remove("show","float","is-final");
+  if(analysisScoreValue)analysisScoreValue.textContent="—";
 
-    const status = document.querySelector("#analysisState");
-    const message = document.querySelector("#analysisMessage");
-    const sourceStatus = document.querySelector("#sourceStatus");
+  const small=analysisScore?.querySelector("small");
+  if(small)small.textContent="/ 10";
 
-    status.textContent = "SCANNING";
-    sourceStatus.textContent = "АНАЛИЗ";
+  if(analysisState)analysisState.textContent="АНАЛИЗ";
+  loadingContent?.classList.remove("is-hidden");
 
-    message.textContent = "Поиск лица…";
+  if(loadingProgressBar)loadingProgressBar.style.width="0%";
+  clearLandmarks();
+  clearAnalysisError();
+}
 
-    const scanLine = document.querySelector("#scanLine");
-    scanLine.classList.add("active");
+function setAnalysisState(text){
+  if(analysisState)analysisState.textContent=text;
+}
 
-    await delay(650);
+function showAnalysisPreviewScore(score){
+  if(!Number.isFinite(Number(score)))return;
 
-    message.textContent = "Определение геометрии…";
-    status.textContent = "LANDMARKS";
+  const value=clamp(Number(score),0,10);
 
-    let detection = null;
+  if(analysisScoreValue)analysisScoreValue.textContent=formatScore(value);
 
-    try {
-      detection = await detectFace(state.image);
-    } catch (error) {
-      console.warn("Face detection:", error);
-    }
+  if(analysisScore){
+    analysisScore.dataset.level=getMetricLevel(value);
+    analysisScore.classList.add("show");
 
-    scanLine.classList.remove("active");
+    setTimeout(()=>{
+      if(currentScreen==="analysis")analysisScore.classList.add("float");
+    },700);
+  }
+}
 
-    if (!detection) {
-      handleFaceNotFound();
-      return;
-    }
+function clearLandmarks(){
+  if(!landmarkCanvas)return;
+  const ctx=landmarkCanvas.getContext("2d");
+  if(!ctx)return;
+  ctx.clearRect(0,0,landmarkCanvas.width,landmarkCanvas.height);
+}
 
-    state.face = detection;
+function resizeLandmarkCanvas(){
+  if(!landmarkCanvas||!analysisFrame)return;
+  const rect=analysisFrame.getBoundingClientRect();
+  const ratio=window.devicePixelRatio||1;
 
-    showFaceFrame(detection);
+  landmarkCanvas.width=Math.max(1,Math.round(rect.width*ratio));
+  landmarkCanvas.height=Math.max(1,Math.round(rect.height*ratio));
+  landmarkCanvas.style.width=`${rect.width}px`;
+  landmarkCanvas.style.height=`${rect.height}px`;
 
-    message.textContent = "Измерение пропорций…";
-    status.textContent = "MEASURING";
+  const ctx=landmarkCanvas.getContext("2d");
+  ctx?.setTransform(ratio,0,0,ratio,0,0);
+}
 
-    await delay(650);
+async function startAnalysis(file){
+  cancelActiveAnalysis();
 
-    state.measurements = createMeasurements(detection);
-    state.score = calculateMeasuredScore(
-      detection,
-      state.measurements
+  const requestId=++analysisRequestId;
+  activeAbortController=new AbortController();
+
+  resetLoadingSteps();
+  setAnalysisState("АНАЛИЗ");
+
+  try{
+    const analysisPromise=analyzePhoto(
+      file,
+      activeAbortController.signal
     );
 
-    message.textContent = "Формирование отчёта…";
-    status.textContent = "REPORT";
+    await runLoadingSequence(analysisPromise);
+    const raw=await analysisPromise;
 
-    await delay(500);
+    if(requestId!==analysisRequestId)return;
 
-    state.analyzing = false;
-    state.resultReady = true;
-
-    await playScoreAnimation();
-
-    completeAnalysis();
-  }
-
-  /* ---------------------------------------------------------
-     FACE DETECTION
-     --------------------------------------------------------- */
-
-  async function detectFace(image) {
-    /*
-      1. Native FaceDetector, where available.
-      2. face-api.js fallback.
-      3. No fake detection.
-
-      If neither is available, the interface reports that
-      the face could not be confirmed.
-    */
-
-    if ("FaceDetector" in window) {
-      try {
-        const detector = new FaceDetector({
-          fastMode: false,
-          maxDetectedFaces: 1
-        });
-
-        const faces = await Promise.race([
-          detector.detect(image),
-          delay(CONFIG.faceDetectorTimeout).then(() => [])
-        ]);
-
-        if (faces?.length) {
-          return normalizeNativeFace(
-            faces[0].boundingBox,
-            image
-          );
-        }
-      } catch (error) {
-        console.warn("Native FaceDetector unavailable:", error);
-      }
-    }
-
-    return await detectWithFaceApi(image);
-  }
-
-  async function detectWithFaceApi(image) {
-    try {
-      if (!window.faceapi) {
-        await loadScript(
-          "https://cdn.jsdelivr.net/npm/@vladmandic/face-api/dist/face-api.js"
-        );
-      }
-
-      if (!window.faceapi) {
-        return null;
-      }
-
-      const MODEL_URL =
-        "https://justadudewhohacks.github.io/face-api.js/models";
-
-      if (
-        !faceapi.nets.tinyFaceDetector.params
-      ) {
-        await faceapi.nets.tinyFaceDetector.loadFromUri(
-          MODEL_URL
-        );
-      }
-
-      const result =
-        await faceapi.detectSingleFace(
-          image,
-          new faceapi.TinyFaceDetectorOptions({
-            inputSize: 416,
-            scoreThreshold: 0.5
-          })
-        );
-
-      if (!result) {
-        return null;
-      }
-
-      return normalizeNativeFace(
-        result.box,
-        image,
-        result.score
+    if(!raw||raw.success!==true){
+      throw new Error(
+        raw?.detail||
+        raw?.error||
+        "Анализ не выполнен."
       );
-
-    } catch (error) {
-      console.warn("face-api.js detection failed:", error);
-      return null;
-    }
-  }
-
-  function normalizeNativeFace(box, image, confidence = 1) {
-    const x = box.x ?? 0;
-    const y = box.y ?? 0;
-    const width = box.width ?? 0;
-    const height = box.height ?? 0;
-
-    if (
-      width < image.width * 0.08 ||
-      height < image.height * 0.08
-    ) {
-      return null;
     }
 
-    return {
-      x,
-      y,
-      width,
-      height,
-      confidence,
-      centerX: x + width / 2,
-      centerY: y + height / 2
-    };
+    const result=normalizeClientResult(raw);
+
+    if(result.face_count<=0||result.score===null){
+      setAnalysisState("ЛИЦО НЕ НАЙДЕНО");
+      completeLoadingSteps();
+      showFaceNotFound();
+      return;
+    }
+
+    currentAnalysis=result;
+    completeLoadingSteps();
+    setAnalysisState("ГОТОВО");
+    showAnalysisPreviewScore(result.score);
+    saveHistory(result);
+
+    await sleep(900);
+
+    if(requestId!==analysisRequestId)return;
+
+    renderResult(result);
+    showScreen("result");
+    startResultScoreTransition();
+  }catch(error){
+    if(requestId!==analysisRequestId)return;
+    if(isAbortError(error))return;
+
+    console.error("FaceMetric:",error);
+    setAnalysisState("ОШИБКА");
+    showToast(getFriendlyErrorMessage(error));
+    showScreen("home");
+  }finally{
+    if(requestId===analysisRequestId){
+      activeAbortController=null;
+    }
   }
+}
 
-  /* ---------------------------------------------------------
-     FACE FRAME
-     --------------------------------------------------------- */
-
-  function showFaceFrame(face) {
-    const frame = document.querySelector("#faceFrame");
-    const stage = document.querySelector("#imageStage");
-
-    if (!frame || !stage) return;
-
-    const stageRect = stage.getBoundingClientRect();
-
-    const image = document.querySelector("#analysisImage");
-
-    const scaleX = image.clientWidth / image.naturalWidth;
-    const scaleY = image.clientHeight / image.naturalHeight;
-
-    const left = face.x * scaleX;
-    const top = face.y * scaleY;
-    const width = face.width * scaleX;
-    const height = face.height * scaleY;
-
-    frame.style.left = `${left}px`;
-    frame.style.top = `${top}px`;
-    frame.style.width = `${width}px`;
-    frame.style.height = `${height}px`;
-
-    frame.classList.add("visible");
-
-    void stageRect;
+function cancelActiveAnalysis(){
+  if(activeAbortController){
+    try{activeAbortController.abort();}catch{}
+    activeAbortController=null;
   }
+}
 
-  /* ---------------------------------------------------------
-     SCORE
-     --------------------------------------------------------- */
+async function analyzePhoto(file,signal){
+  const validation=validateFile(file);
+  if(!validation.valid)throw new Error(validation.message);
 
-  async function playScoreAnimation() {
-    const score = Math.round(state.score * 10) / 10;
+  const formData=new FormData();
+  formData.append("file",file,file.name||"photo.jpg");
 
-    const scoreBox =
-      document.querySelector("#faceScore");
+  let response;
 
-    const scoreNumber =
-      document.querySelector("#faceScoreNumber");
-
-    const face = state.face;
-    const stage = document.querySelector("#imageStage");
-    const image = document.querySelector("#analysisImage");
-
-    if (!face || !stage || !image) return;
-
-    const scaleX =
-      image.clientWidth / image.naturalWidth;
-
-    const scaleY =
-      image.clientHeight / image.naturalHeight;
-
-    const faceX =
-      face.centerX * scaleX;
-
-    const faceY =
-      face.centerY * scaleY;
-
-    scoreNumber.textContent = "0";
-
-    scoreBox.style.left = `${faceX}px`;
-    scoreBox.style.top = `${faceY}px`;
-
-    scoreBox.classList.add("on-face");
-
-    await animateNumber(
-      scoreNumber,
-      0,
-      score,
-      950
+  try{
+    response=await fetchWithTimeout(
+      API_ENDPOINT,
+      {
+        method:"POST",
+        body:formData,
+        headers:{Accept:"application/json"},
+        cache:"no-store",
+        signal
+      },
+      REQUEST_TIMEOUT
     );
-
-    await delay(650);
-
-    scoreBox.classList.remove("on-face");
-
-    await delay(300);
-
-    scoreBox.classList.add("moving-to-corner");
-
-    scoreBox.style.left = "26px";
-    scoreBox.style.top = "26px";
-
-    await delay(650);
-
-    scoreBox.classList.remove("moving-to-corner");
-
-    scoreBox.classList.add("corner-score");
-
-    scoreBox.style.left = "26px";
-    scoreBox.style.top = "26px";
+  }catch(error){
+    if(isAbortError(error))throw error;
+    throw new Error("Не удалось подключиться к серверу анализа.");
   }
 
-  /* ---------------------------------------------------------
-     COMPLETE RESULT
-     --------------------------------------------------------- */
+  const text=await response.text();
+  let data=null;
 
-  function completeAnalysis() {
-    document.querySelector("#analysisState").textContent =
-      "COMPLETE";
-
-    document.querySelector("#sourceStatus").textContent =
-      "ГОТОВО";
-
-    const score = state.score;
-
-    document.querySelector("#resultImage").src =
-      state.imageUrl;
-
-    document.querySelector("#resultScore").textContent =
-      formatScore(score);
-
-    document.querySelector("#bigScore").textContent =
-      formatScore(score);
-
-    document.querySelector("#scaleFill").style.width =
-      `${Math.max(0, Math.min(100, score * 10))}%`;
-
-    document.querySelector("#landmarkCount").textContent =
-      state.measurements.length
-        ? String(468)
-        : "—";
-
-    document.querySelector("#pointsMetric").textContent =
-      state.measurements.length
-        ? String(468)
-        : "—";
-
-    document.querySelector("#measurementsMetric").textContent =
-      String(state.measurements.length);
-
-    document.querySelector("#faceMetric").textContent =
-      "1";
-
-    document.querySelector("#dataStatus").textContent =
-      "ПОДТВЕРЖДЕНО";
-
-    renderReportTab("overview");
-
-    saveHistory();
-
-    setTimeout(() => {
-      showView("result");
-    }, 300);
-  }
-
-  /* ---------------------------------------------------------
-     FACE NOT FOUND
-     --------------------------------------------------------- */
-
-  function handleFaceNotFound() {
-    state.analyzing = false;
-
-    const status =
-      document.querySelector("#analysisState");
-
-    const message =
-      document.querySelector("#analysisMessage");
-
-    const sourceStatus =
-      document.querySelector("#sourceStatus");
-
-    const scanLine =
-      document.querySelector("#scanLine");
-
-    status.textContent = "NO FACE";
-
-    sourceStatus.textContent =
-      "ЛИЦО НЕ НАЙДЕНО";
-
-    message.innerHTML = `
-      <strong>Лицо не найдено</strong>
-      <span>
-        Используй фотографию, где лицо хорошо видно
-        и находится в кадре целиком.
-      </span>
-    `;
-
-    scanLine.classList.remove("active");
-
-    document
-      .querySelector("#faceFrame")
-      .classList.remove("visible");
-
-    showToast("Лицо не найдено");
-  }
-
-  /* ---------------------------------------------------------
-     MEASUREMENTS
-     --------------------------------------------------------- */
-
-  function createMeasurements(face) {
-    const ratio =
-      face.width / Math.max(face.height, 1);
-
-    return [
-      {
-        key: "face_ratio",
-        label: "Соотношение ширины и высоты",
-        value: ratio.toFixed(3)
-      },
-      {
-        key: "face_width",
-        label: "Ширина лица",
-        value: `${Math.round(face.width)} px`
-      },
-      {
-        key: "face_height",
-        label: "Высота лица",
-        value: `${Math.round(face.height)} px`
-      },
-      {
-        key: "confidence",
-        label: "Уверенность детекции",
-        value: `${Math.round(face.confidence * 100)}%`
-      }
-    ];
-  }
-
-  function calculateMeasuredScore(face, measurements) {
-    /*
-      Score is deliberately derived from measurable image data.
-      This is NOT a beauty judgement.
-
-      The current UI uses the score as a measured demo index.
-      Replace this function later with the actual backend
-      geometry formula when the measurement engine is connected.
-    */
-
-    const ratio =
-      face.width / Math.max(face.height, 1);
-
-    const confidence =
-      Math.max(0, Math.min(1, face.confidence));
-
-    const ratioDeviation =
-      Math.abs(ratio - 0.72);
-
-    const ratioComponent =
-      Math.max(
-        0,
-        10 - ratioDeviation * 14
+  if(text.trim()){
+    try{data=JSON.parse(text);}
+    catch{
+      throw new Error(
+        `Сервер вернул некорректный ответ (${response.status}).`
       );
+    }
+  }
 
-    const score =
-      ratioComponent * 0.65 +
-      confidence * 10 * 0.35;
-
-    return Math.max(
-      0,
-      Math.min(10, score)
+  if(!response.ok){
+    throw new Error(
+      data?.detail||
+      data?.error||
+      getHttpErrorMessage(response.status)
     );
   }
 
-  /* ---------------------------------------------------------
-     REPORT
-     --------------------------------------------------------- */
+  if(!data)throw new Error("Сервер вернул пустой ответ.");
+  return data;
+}
 
-  function renderReportTab(tab) {
-    const content =
-      document.querySelector("#reportContent");
+async function fetchWithTimeout(url,options={},timeout=30000){
+  const controller=new AbortController();
+  const externalSignal=options.signal;
+  const forwardAbort=()=>controller.abort();
 
-    if (!content) return;
+  if(externalSignal){
+    if(externalSignal.aborted)controller.abort();
+    else externalSignal.addEventListener(
+      "abort",
+      forwardAbort,
+      {once:true}
+    );
+  }
 
-    if (!state.resultReady) {
-      content.innerHTML = `
-        <div class="fm-empty-report">
-          Измерения ещё не получены.
+  const timer=setTimeout(()=>controller.abort(),timeout);
+
+  try{
+    return await fetch(url,{
+      ...options,
+      signal:controller.signal
+    });
+  }finally{
+    clearTimeout(timer);
+    externalSignal?.removeEventListener("abort",forwardAbort);
+  }
+}
+
+async function runLoadingSequence(analysisPromise){
+  const steps=[
+    ["Обрабатываем фотографию","Подготавливаем изображение"],
+    ["Определяем лицо","Ищем основные точки и контуры лица"],
+    ["Измеряем пропорции","Анализируем геометрию и черты"],
+    ["Проверяем симметрию","Сравниваем левую и правую стороны"],
+    ["Формируем результат","Собираем фактически полученные показатели"]
+  ];
+
+  for(let i=0;i<steps.length;i++){
+    setLoadingStep(i,steps[i][0],steps[i][1]);
+
+    if(loadingProgressBar){
+      loadingProgressBar.style.width=
+        `${Math.round(((i+1)/steps.length)*100)}%`;
+    }
+
+    if(i<steps.length-1){
+      await Promise.race([
+        sleep(430),
+        analysisPromise.catch(()=>null)
+      ]);
+    }else{
+      await Promise.race([
+        analysisPromise.catch(()=>null),
+        sleep(900)
+      ]);
+    }
+  }
+}
+
+function resetLoadingSteps(){
+  loadingSteps.forEach((step,index)=>{
+    step.classList.toggle("active",index===0);
+    step.classList.remove("done");
+  });
+
+  if(loadingTitle)loadingTitle.textContent="Анализируем";
+  if(loadingText)loadingText.textContent="Подготавливаем изображение";
+  if(loadingProgressBar)loadingProgressBar.style.width="0%";
+}
+
+function setLoadingStep(index,title,text){
+  loadingSteps.forEach(step=>{
+    const n=Number(step.dataset.step);
+    step.classList.toggle("active",n===index);
+    step.classList.toggle("done",n<index);
+  });
+
+  if(loadingTitle)loadingTitle.textContent=title;
+  if(loadingText)loadingText.textContent=text;
+}
+
+function completeLoadingSteps(){
+  loadingSteps.forEach(step=>{
+    step.classList.remove("active");
+    step.classList.add("done");
+  });
+
+  if(loadingProgressBar)loadingProgressBar.style.width="100%";
+}
+
+function normalizeClientResult(data){
+  const source=isObject(data.analysis)
+    ? {...data,...data.analysis}
+    : data;
+
+  return{
+    success:true,
+    score:normalizeScore(source.score),
+    face_count:toNumberOrZero(source.face_count),
+    landmarks_count:nullableNumber(source.landmarks_count),
+    detected_features:toNumberOrZero(source.detected_features),
+    feature_count:toNumberOrZero(source.feature_count),
+    metrics:isObject(source.metrics)?source.metrics:{},
+    production_features:
+      isObject(source.production_features)
+        ?source.production_features
+        :{},
+    generated_at:
+      source.generated_at||
+      new Date().toISOString()
+  };
+}
+
+function renderResult(result){
+  ensureResultFace(result);
+  renderScore(result.score);
+  renderStats(result);
+  renderOverview(result.metrics,result.production_features);
+  renderHarmony(result.metrics,result.production_features);
+  renderMetrics(result.metrics);
+  renderAngularity(result.metrics,result.production_features);
+  renderSymmetry(result.metrics,result.production_features);
+  renderDimorphism(result.metrics,result.production_features);
+  renderHealth();
+}
+
+function ensureResultFace(result){
+  const resultScreen=$("#screen-result");
+  const resultHero=$(".result-hero",resultScreen);
+  if(!resultScreen||!resultHero)return;
+
+  let visual=$("#result-visual",resultScreen);
+
+  if(!visual){
+    visual=document.createElement("div");
+    visual.id="result-visual";
+    visual.className="result-visual";
+
+    visual.innerHTML=`
+      <div class="result-visual__media">
+        <img class="result-visual__image" alt="Результат анализа">
+        <div class="result-visual__shade"></div>
+        <div class="result-visual__corners" aria-hidden="true">
+          <i></i><i></i><i></i><i></i>
         </div>
-      `;
-      return;
-    }
-
-    const maps = {
-      overview: {
-        title: "Обзор",
-        items: [
-          ["Итоговый score", formatScore(state.score)],
-          ["Лицо", "Подтверждено"],
-          ["Точки", "468"],
-          ["Измерений", String(state.measurements.length)]
-        ]
-      },
-
-      geometry: {
-        title: "Геометрия",
-        items: state.measurements.map(item => [
-          item.label,
-          item.value
-        ])
-      },
-
-      features: {
-        title: "Черты и детали",
-        items: [
-          ["Статус", "Данные не интерпретируются"],
-          ["Источник", "Измеряемая геометрия"],
-          ["Метод", "Landmark based"]
-        ]
-      },
-
-      evenness: {
-        title: "Ровность",
-        items: [
-          ["Статус", "Данные доступны после расчёта"],
-          ["Источник", "Геометрические точки"]
-        ]
-      },
-
-      symmetry: {
-        title: "Симметрия",
-        items: [
-          ["Центральная ось", "Определяется"],
-          ["Левая / правая часть", "Сравниваются"],
-          ["Метод", "Landmark geometry"]
-        ]
-      },
-
-      proportions: {
-        title: "Пропорции",
-        items: [
-          ["Ширина / высота", state.measurements[0]?.value || "—"],
-          ["Геометрический анализ", "Доступен"],
-          ["Qualitative guessing", "OFF"]
-        ]
-      }
-    };
-
-    const selected = maps[tab] || maps.overview;
-
-    content.innerHTML = `
-      <div class="fm-report-heading">
-        ${selected.title}
-      </div>
-
-      <div class="fm-data-list">
-        ${selected.items.map(([label, value]) => `
-          <div class="fm-data-row">
-            <span>${escapeHtml(label)}</span>
-            <strong>${escapeHtml(value)}</strong>
-          </div>
-        `).join("")}
+        <div class="result-visual__top">
+          <span>ANALYSIS COMPLETE</span>
+          <span class="result-visual__status">READY</span>
+        </div>
+        <div class="result-visual__score">
+          <small>MEASURED SCORE</small>
+          <strong>—</strong>
+          <span>/ 10</span>
+        </div>
+        <div class="result-visual__bottom">
+          <span>FACE</span>
+          <b class="result-visual__faces">—</b>
+          <span>LANDMARKS</span>
+          <b class="result-visual__landmarks">—</b>
+        </div>
       </div>
     `;
+
+    resultHero.parentNode.insertBefore(visual,resultHero);
   }
 
-  /* ---------------------------------------------------------
-     VIEWS
-     --------------------------------------------------------- */
+  const image=$(".result-visual__image",visual);
+  const score=$(".result-visual__score strong",visual);
+  const faces=$(".result-visual__faces",visual);
+  const landmarks=$(".result-visual__landmarks",visual);
 
-  function showView(view) {
-    const views = {
-      home: "#homeView",
-      analysis: "#analysisView",
-      result: "#resultView",
-      history: "#historyView",
-      methodology: "#methodologyView"
-    };
+  if(image&&selectedObjectUrl)image.src=selectedObjectUrl;
+  if(score)score.textContent=formatScore(result.score);
+  if(faces)faces.textContent=String(result.face_count);
 
-    Object.values(views).forEach(selector => {
-      const element = document.querySelector(selector);
+  if(landmarks){
+    landmarks.textContent=
+      result.landmarks_count===null
+        ?"—"
+        :formatValue(result.landmarks_count);
+  }
 
-      if (element) {
-        element.hidden = true;
-      }
+  visual.dataset.level=getMetricLevel(result.score);
+  visual.classList.remove("is-complete");
+  resultHero.classList.remove("score-landed");
+}
+
+function startResultScoreTransition(){
+  const resultScreen=$("#screen-result");
+  const visual=$("#result-visual",resultScreen);
+  const hero=$(".result-hero",resultScreen);
+  if(!visual||!hero)return;
+
+  clearTimeout(resultAnimationTimer);
+
+  visual.classList.remove("is-complete");
+  hero.classList.remove("score-landed");
+
+  resultAnimationTimer=setTimeout(()=>{
+    visual.classList.add("is-complete");
+    hero.classList.add("score-landed");
+  },1050);
+}
+
+function renderScore(score){
+  if(!resultScore)return;
+
+  const small=resultScore.parentElement?.querySelector("small");
+  if(small)small.textContent="/ 10";
+
+  if(!Number.isFinite(Number(score))){
+    resultScore.textContent="—";
+    resultScore.dataset.level="";
+    if(scoreProgress)scoreProgress.style.width="0%";
+    if(scoreStatus)scoreStatus.textContent="Оценка не получена";
+    return;
+  }
+
+  const value=clamp(Number(score),0,10);
+  resultScore.textContent=formatScore(value);
+  resultScore.dataset.level=getMetricLevel(value);
+
+  if(scoreProgress){
+    scoreProgress.style.width=`${value*10}%`;
+    scoreProgress.dataset.level=getMetricLevel(value);
+  }
+
+  if(scoreStatus)scoreStatus.textContent=getScoreStatus(value);
+}
+
+function getScoreStatus(score){
+  if(score<4)return"Низкий измеренный результат";
+  if(score<5.5)return"Средний измеренный результат";
+  if(score<7)return"Сбалансированный результат";
+  if(score<8.5)return"Высокий измеренный результат";
+  if(score<9.5)return"Очень высокий измеренный результат";
+  return"Исключительно высокий измеренный результат";
+}
+
+function renderStats(result){
+  if(!statsGrid)return;
+
+  const measurementCount=
+    result.feature_count||
+    result.detected_features||
+    countLeaves(result.metrics);
+
+  statsGrid.innerHTML="";
+
+  [
+    ["ЛИЦО",String(result.face_count),"обнаружено"],
+    [
+      "ТОЧКИ",
+      result.landmarks_count===null
+        ?"—"
+        :formatValue(result.landmarks_count),
+      "лицевой геометрии"
+    ],
+    ["ИЗМЕРЕНИЯ",String(measurementCount),"показателей"]
+  ].forEach(([labelText,valueText,detailText])=>{
+    const card=document.createElement("article");
+    card.className="stat";
+
+    const label=document.createElement("span");
+    label.textContent=labelText;
+
+    const value=document.createElement("strong");
+    value.textContent=valueText;
+
+    const detail=document.createElement("small");
+    detail.textContent=detailText;
+
+    card.append(label,value,detail);
+    statsGrid.appendChild(card);
+  });
+}
+
+function renderOverview(metrics,production){
+  if(!overviewGrid)return;
+
+  overviewGrid.innerHTML="";
+
+  const groups=[
+    {
+      title:"Гармония",
+      values:getProductionValues(
+        production,
+        ["overall_harmony","frontal_harmony","proportions"]
+      )
+    },
+    {
+      title:"Геометрия лица",
+      values:getGroup(metrics,["face_geometry"])
+    },
+    {
+      title:"Симметрия",
+      values:getGroup(metrics,["symmetry"])
+    }
+  ];
+
+  let rendered=0;
+
+  groups.forEach(group=>{
+    if(!group.values.length)return;
+
+    const section=document.createElement("section");
+    section.className="overview-section";
+
+    const title=document.createElement("h3");
+    title.textContent=group.title;
+    section.appendChild(title);
+
+    group.values.slice(0,6).forEach(([key,value])=>{
+      section.appendChild(createMetricCard(key,value));
+      rendered++;
     });
 
-    const target = document.querySelector(views[view]);
+    overviewGrid.appendChild(section);
+  });
 
-    if (target) {
-      target.hidden = false;
-    }
+  if(!rendered){
+    overviewGrid.appendChild(
+      createEmptyBlock("Измерения не были получены.")
+    );
+  }
+}
 
-    document
-      .querySelectorAll(".fm-dock button")
-      .forEach(button => {
-        button.classList.toggle(
-          "active",
-          button.dataset.nav === view
-        );
-      });
+function renderHarmony(metrics,production){
+  renderFeaturePanel(
+    harmonyContent,
+    "Гармония лица",
+    "Ключевые показатели, которые реально вернул сервер.",
+    [
+      ...getProductionValues(
+        production,
+        ["overall_harmony","frontal_harmony","proportions"]
+      ),
+      ...getGroup(metrics,["face_geometry"]),
+      ...getGroup(metrics,["midface"])
+    ]
+  );
+}
 
-    if (view === "home") {
-      setSystemStatus("SYSTEM READY");
-    }
+function renderMetrics(metrics){
+  if(!metricsContent)return;
 
-    if (view === "analysis") {
-      setSystemStatus("ANALYSIS RUNNING");
-    }
+  metricsContent.innerHTML="";
+  const entries=flattenObject(metrics);
 
-    if (view === "result") {
-      setSystemStatus("ANALYSIS COMPLETE");
-    }
+  if(!entries.length){
+    metricsContent.appendChild(
+      createEmptyBlock("Подробные измерения не были получены.")
+    );
+    return;
+  }
 
-    window.scrollTo({
-      top: 0,
-      behavior: "smooth"
+  entries.forEach(([path,value])=>{
+    metricsContent.appendChild(createMetricCard(path,value));
+  });
+}
+
+function renderAngularity(metrics,production){
+  renderFeaturePanel(
+    angularityContent,
+    "Угловатость и выраженность",
+    "Только фактически возвращённые числовые показатели.",
+    [
+      ...getGroup(metrics,["jaw"]),
+      ...getGroup(metrics,["cheeks"]),
+      ...getProductionValues(
+        production,
+        ["angularity","facial_definition"]
+      )
+    ]
+  );
+}
+
+function renderSymmetry(metrics,production){
+  renderFeaturePanel(
+    symmetryContent,
+    "Симметрия",
+    "Баланс сторон лица по полученным измерениям.",
+    [
+      ...getGroup(metrics,["symmetry"]),
+      ...getGroup(metrics,["eyes"]).filter(
+        ([key])=>key==="eye_alignment"
+      ),
+      ...getProductionValues(production,["symmetry"])
+    ]
+  );
+}
+
+function renderDimorphism(metrics,production){
+  renderFeaturePanel(
+    dimorphismContent,
+    "Визуальная выраженность черт",
+    "Показывается только при наличии соответствующего поля.",
+    getProductionValues(production,["dimorphism"])
+  );
+}
+
+function renderFeaturePanel(container,titleText,description,values){
+  if(!container)return;
+
+  container.innerHTML="";
+
+  const unique=[];
+  const seen=new Set();
+
+  values.forEach(([key,value])=>{
+    const signature=`${key}:${String(value)}`;
+    if(seen.has(signature))return;
+    seen.add(signature);
+    unique.push([key,value]);
+  });
+
+  if(!unique.length){
+    container.appendChild(
+      createEmptyBlock("Показатели этого раздела не были получены.")
+    );
+    return;
+  }
+
+  container.appendChild(
+    createSectionIntro(titleText,description)
+  );
+
+  unique.forEach(([key,value])=>{
+    container.appendChild(createMetricCard(key,value));
+  });
+}
+
+function createMetricCard(key,value){
+  const card=document.createElement("article");
+  card.className="scale-card";
+
+  const top=document.createElement("div");
+  top.className="scale-card__top";
+
+  const name=document.createElement("span");
+  name.className="scale-card__name";
+  name.textContent=getRussianLabel(key);
+
+  const score=document.createElement("strong");
+  score.className="scale-card__score";
+
+  const numeric=normalizeMetricValue(value);
+  const isScore=numeric!==null;
+
+  score.textContent=isScore
+    ?`${formatMetricScore(numeric)}/10`
+    :formatValue(value);
+
+  top.append(name,score);
+  card.appendChild(top);
+
+  if(isScore){
+    const track=document.createElement("div");
+    track.className="metric-scale";
+    track.setAttribute("role","meter");
+    track.setAttribute("aria-valuemin","0");
+    track.setAttribute("aria-valuemax","10");
+    track.setAttribute("aria-valuenow",String(numeric));
+
+    const fill=document.createElement("div");
+    fill.className="metric-scale__fill";
+    fill.dataset.level=getMetricLevel(numeric);
+    fill.style.width=`${numeric*10}%`;
+
+    track.appendChild(fill);
+
+    const labels=document.createElement("div");
+    labels.className="metric-scale__labels";
+    labels.innerHTML=`
+      <span>слабее</span>
+      <span>средне</span>
+      <span>выражено</span>
+    `;
+
+    card.append(track,labels);
+  }else{
+    const raw=document.createElement("div");
+    raw.className="metric-raw";
+    raw.textContent="Фактическое значение";
+    card.appendChild(raw);
+  }
+
+  return card;
+}
+
+function renderHealth(){
+  if(!healthContent)return;
+
+  healthContent.innerHTML="";
+
+  const icon=document.createElement("div");
+  icon.className="note-icon";
+  icon.textContent="i";
+
+  const text=document.createElement("p");
+  text.textContent=
+    "Этот раздел не является медицинской диагностикой. " +
+    "Система отображает только визуальные характеристики, " +
+    "которые реально удалось получить из изображения.";
+
+  healthContent.append(icon,text);
+}
+
+function showFaceNotFound(){
+  const analysisScreen=$("#screen-analysis");
+  if(!analysisScreen)return;
+
+  let card=$("#analysis-error-card",analysisScreen);
+
+  if(!card){
+    card=document.createElement("div");
+    card.id="analysis-error-card";
+    card.className="analysis-error-card";
+
+    card.innerHTML=`
+      <div class="analysis-error-card__icon">—</div>
+      <div>
+        <span class="eyebrow">ANALYSIS STOPPED</span>
+        <h3>Лицо не найдено</h3>
+        <p>
+          На фотографии не удалось получить достаточно данных
+          для корректного измерительного анализа.
+        </p>
+      </div>
+      <button type="button" class="secondary-btn" data-retry-analysis>
+        Выбрать другую фотографию <span>↗</span>
+      </button>
+    `;
+
+    analysisScreen.appendChild(card);
+
+    card
+      .querySelector("[data-retry-analysis]")
+      ?.addEventListener("click",openFilePicker);
+  }
+
+  card.classList.add("show");
+  loadingContent?.classList.add("is-hidden");
+}
+
+function clearAnalysisError(){
+  $("#analysis-error-card")?.remove();
+}
+
+function getHistory(){
+  try{
+    const raw=localStorage.getItem(HISTORY_KEY);
+    if(!raw)return[];
+
+    const parsed=JSON.parse(raw);
+    return Array.isArray(parsed)?parsed:[];
+  }catch{
+    return[];
+  }
+}
+
+function saveHistory(result){
+  if(!Number.isFinite(Number(result.score)))return;
+
+  try{
+    const history=getHistory();
+
+    history.unshift({
+      id:`${Date.now()}_${Math.random().toString(36).slice(2,8)}`,
+      created_at:
+        result.generated_at||
+        new Date().toISOString(),
+      score:result.score,
+      face_count:result.face_count,
+      landmarks_count:result.landmarks_count,
+      feature_count:result.feature_count,
+      detected_features:result.detected_features
     });
-  }
-
-  /* ---------------------------------------------------------
-     HISTORY
-     --------------------------------------------------------- */
-
-  function loadHistory() {
-    try {
-      return JSON.parse(
-        localStorage.getItem("facemetric-history") || "[]"
-      );
-    } catch {
-      return [];
-    }
-  }
-
-  function saveHistory() {
-    if (!state.file || state.score == null) return;
-
-    const item = {
-      id: Date.now(),
-      name: state.file.name,
-      score: Number(state.score.toFixed(1)),
-      date: new Date().toISOString()
-    };
-
-    state.history.unshift(item);
-
-    state.history =
-      state.history.slice(0, 12);
 
     localStorage.setItem(
-      "facemetric-history",
-      JSON.stringify(state.history)
+      HISTORY_KEY,
+      JSON.stringify(history.slice(0,50))
     );
 
-    renderHistory();
+    updateHistoryCount();
+  }catch(error){
+    console.warn("History:",error);
   }
+}
 
-  function renderHistory() {
-    const list =
-      document.querySelector("#historyList");
+function renderHistory(){
+  if(!historyList)return;
 
-    if (!list) return;
+  const history=getHistory();
+  updateHistoryCount(history.length);
+  historyList.innerHTML="";
 
-    if (!state.history.length) {
-      list.innerHTML = `
-        <div class="fm-history-empty">
-          <span>NO RECORDS</span>
-          <p>
-            Здесь появятся завершённые анализы.
-          </p>
-        </div>
-      `;
-
-      return;
-    }
-
-    list.innerHTML =
-      state.history.map(item => `
-        <article class="fm-history-item">
-          <div>
-            <strong>${escapeHtml(item.name)}</strong>
-            <span>${formatDate(item.date)}</span>
-          </div>
-
-          <div class="fm-history-score">
-            ${formatScore(item.score)}
-            <small>/10</small>
-          </div>
-        </article>
-      `).join("");
-  }
-
-  /* ---------------------------------------------------------
-     UI HELPERS
-     --------------------------------------------------------- */
-
-  function setSystemStatus(text) {
-    const element =
-      document.querySelector("#systemStatus");
-
-    if (element) {
-      element.textContent = text;
-    }
-  }
-
-  function showToast(message) {
-    let toast =
-      document.querySelector(".fm-toast");
-
-    if (!toast) {
-      toast = document.createElement("div");
-      toast.className = "fm-toast";
-      document.body.appendChild(toast);
-    }
-
-    toast.textContent = message;
-
-    requestAnimationFrame(() => {
-      toast.classList.add("visible");
-    });
-
-    clearTimeout(toast._timer);
-
-    toast._timer = setTimeout(() => {
-      toast.classList.remove("visible");
-    }, 2800);
-  }
-
-  function animateNumber(element, from, to, duration) {
-    return new Promise(resolve => {
-      const start = performance.now();
-
-      function frame(now) {
-        const progress =
-          Math.min(1, (now - start) / duration);
-
-        const eased =
-          1 - Math.pow(1 - progress, 3);
-
-        const value =
-          from + (to - from) * eased;
-
-        element.textContent =
-          value.toFixed(1);
-
-        if (progress < 1) {
-          requestAnimationFrame(frame);
-        } else {
-          resolve();
-        }
-      }
-
-      requestAnimationFrame(frame);
-    });
-  }
-
-  function formatScore(score) {
-    return Number(score || 0).toFixed(1);
-  }
-
-  function formatDate(date) {
-    try {
-      return new Intl.DateTimeFormat(
-        "ru-RU",
-        {
-          day: "2-digit",
-          month: "short",
-          year: "numeric"
-        }
-      ).format(new Date(date));
-    } catch {
-      return "—";
-    }
-  }
-
-  function truncate(value, max) {
-    if (value.length <= max) return value;
-    return value.slice(0, max - 1) + "…";
-  }
-
-  function escapeHtml(value) {
-    return String(value)
-      .replaceAll("&", "&amp;")
-      .replaceAll("<", "&lt;")
-      .replaceAll(">", "&gt;")
-      .replaceAll('"', "&quot;")
-      .replaceAll("'", "&#039;");
-  }
-
-  function delay(ms) {
-    return new Promise(resolve =>
-      setTimeout(resolve, ms)
+  if(!history.length){
+    historyList.appendChild(
+      createEmptyBlock("Пока нет сохранённых анализов.")
     );
+    return;
   }
 
-  function loadScript(src) {
-    return new Promise((resolve, reject) => {
-      const existing =
-        document.querySelector(`script[src="${src}"]`);
+  history.forEach(entry=>{
+    const item=document.createElement("article");
+    item.className="history-item";
 
-      if (existing) {
-        existing.addEventListener("load", resolve);
-        existing.addEventListener("error", reject);
+    const left=document.createElement("div");
 
-        if (window.faceapi) resolve();
-        return;
-      }
+    const date=document.createElement("div");
+    date.className="date";
+    date.textContent=formatDate(entry.created_at);
 
-      const script =
-        document.createElement("script");
+    const meta=document.createElement("div");
+    meta.className="meta";
+    meta.textContent=
+      `${entry.face_count||0} лицо · `+
+      `${entry.feature_count||entry.detected_features||0} измерений`;
 
-      script.src = src;
-      script.async = true;
+    left.append(date,meta);
 
-      script.onload = resolve;
-      script.onerror = reject;
+    const score=document.createElement("div");
+    score.className="score";
 
-      document.head.appendChild(script);
-    });
-  }
-
-  function cleanupImage() {
-    if (state.imageUrl) {
-      URL.revokeObjectURL(state.imageUrl);
+    if(Number.isFinite(Number(entry.score))){
+      score.dataset.level=getMetricLevel(Number(entry.score));
+      score.textContent=formatScore(entry.score);
+    }else{
+      score.textContent="—";
     }
 
-    state.file = null;
-    state.imageUrl = null;
-    state.image = null;
-    state.face = null;
-    state.score = null;
-    state.measurements = [];
+    item.append(left,score);
+    historyList.appendChild(item);
+  });
+}
+
+function updateHistoryCount(count=null){
+  const value=count===null?getHistory().length:count;
+  if(historyCount)historyCount.textContent=String(value);
+}
+
+function bindResultTabs(){
+  if(!reportTabs)return;
+
+  const tabs=$$(".tab",reportTabs);
+  const panels=$$(".tab-panel");
+
+  tabs.forEach((tab,index)=>{
+    tab.addEventListener("click",()=>activateResultTab(tab));
+
+    tab.addEventListener("keydown",event=>{
+      if(event.key==="ArrowRight"){
+        event.preventDefault();
+        activateResultTab(
+          tabs[(index+1)%tabs.length],
+          true
+        );
+      }
+
+      if(event.key==="ArrowLeft"){
+        event.preventDefault();
+        activateResultTab(
+          tabs[(index-1+tabs.length)%tabs.length],
+          true
+        );
+      }
+    });
+  });
+
+  function activateResultTab(tab,focus=false){
+    const target=tab.dataset.tab;
+    if(!target)return;
+
+    tabs.forEach(item=>{
+      const active=item===tab;
+      item.classList.toggle("active",active);
+      item.setAttribute(
+        "aria-selected",
+        active?"true":"false"
+      );
+    });
+
+    panels.forEach(panel=>{
+      const active=panel.dataset.panel===target;
+      panel.classList.toggle("active",active);
+      panel.hidden=!active;
+    });
+
+    if(focus)tab.focus();
+  }
+}
+
+function activateDefaultResultTab(){
+  if(!reportTabs)return;
+
+  const first=$('.tab[data-tab="overview"]',reportTabs);
+  if(!first)return;
+
+  const tabs=$$(".tab",reportTabs);
+  const panels=$$(".tab-panel");
+
+  tabs.forEach(tab=>{
+    const active=tab===first;
+    tab.classList.toggle("active",active);
+    tab.setAttribute(
+      "aria-selected",
+      active?"true":"false"
+    );
+  });
+
+  panels.forEach(panel=>{
+    const active=panel.dataset.panel==="overview";
+    panel.classList.toggle("active",active);
+    panel.hidden=!active;
+  });
+}
+
+function startNewAnalysis(){
+  analysisRequestId++;
+  cancelActiveAnalysis();
+
+  selectedFile=null;
+  currentAnalysis=null;
+  revokeSelectedObjectUrl();
+
+  if(fileInput)fileInput.value="";
+  if(uploadName){
+    uploadName.textContent="JPG, PNG или WEBP · до 15 MB";
+  }
+  if(analysisImage)analysisImage.removeAttribute("src");
+
+  $("#result-visual")?.remove();
+
+  resetAnalysisPreview();
+  showScreen("home");
+}
+
+function showToast(message){
+  if(!toast)return;
+
+  toast.textContent=String(message||"Произошла ошибка.");
+  toast.classList.add("show");
+
+  clearTimeout(toastTimer);
+  toastTimer=setTimeout(()=>{
+    toast.classList.remove("show");
+  },4200);
+}
+
+function getFriendlyErrorMessage(error){
+  const message=String(error?.message||"");
+
+  if(!message){
+    return"Анализ не выполнен. Попробуй ещё раз.";
   }
 
-  /* ---------------------------------------------------------
-     START
-     --------------------------------------------------------- */
+  if(
+    message.includes("Failed to fetch")||
+    message.includes("NetworkError")
+  ){
+    return"Не удалось подключиться к серверу анализа.";
+  }
 
-  renderApp();
+  if(message.includes("413"))return"Фотография слишком большая.";
+  if(message.includes("429"))return"Слишком много запросов. Попробуй позже.";
+  if(message.includes("401")||message.includes("403")){
+    return"Сервер не смог выполнить авторизацию.";
+  }
 
-})();
+  if(message.toLowerCase().includes("timeout")){
+    return"Сервер анализа отвечает слишком долго.";
+  }
+
+  return message;
+}
+
+function getHttpErrorMessage(status){
+  if(status===400)return"Некорректный запрос к серверу анализа.";
+  if(status===401)return"Ошибка авторизации сервера.";
+  if(status===403)return"Доступ к серверу анализа запрещён.";
+  if(status===413)return"Фотография слишком большая.";
+  if(status===429)return"Слишком много запросов. Попробуй позже.";
+  if(status>=500)return"Ошибка сервера анализа.";
+  return`Ошибка сервера (${status}).`;
+}
+
+function isAbortError(error){
+  return(
+    error?.name==="AbortError"||
+    String(error?.message||"")
+      .toLowerCase()
+      .includes("aborted")
+  );
+}
+
+function formatBytes(bytes){
+  if(!Number.isFinite(bytes))return"—";
+  if(bytes<1024)return`${bytes} B`;
+  if(bytes<1024*1024)return`${(bytes/1024).toFixed(1)} KB`;
+  return`${(bytes/(1024*1024)).toFixed(2)} MB`;
+}
+
+function formatScore(score){
+  const number=Number(score);
+  if(!Number.isFinite(number))return"—";
+
+  return String(
+    Math.round(clamp(number,0,10)*10)/10
+  ).replace(".",",");
+}
+
+function formatMetricScore(value){
+  return String(
+    Math.round(value*10)/10
+  ).replace(".",",");
+}
+
+function formatValue(value){
+  if(value===null||value===undefined||value==="")return"—";
+
+  if(typeof value==="number"){
+    if(!Number.isFinite(value))return"—";
+    return String(
+      Math.round(value*100)/100
+    ).replace(".",",");
+  }
+
+  if(typeof value==="boolean")return value?"Да":"Нет";
+
+  if(typeof value==="object"){
+    try{return JSON.stringify(value);}
+    catch{return"—";}
+  }
+
+  return String(value);
+}
+
+function formatDate(value){
+  const date=new Date(value);
+  if(Number.isNaN(date.getTime()))return"Неизвестная дата";
+
+  return date.toLocaleString("ru-RU",{
+    year:"numeric",
+    month:"short",
+    day:"numeric",
+    hour:"2-digit",
+    minute:"2-digit"
+  });
+}
+
+function getRussianLabel(key){
+  const raw=String(key||"");
+  const lastPart=raw.includes(".")
+    ?raw.split(".").pop()
+    :raw;
+
+  return LABELS[lastPart]||LABELS[raw]||prettifyKey(lastPart);
+}
+
+function prettifyKey(key){
+  return String(key||"")
+    .replace(/[\_-]+/g," ")
+    .replace(/([a-z])([A-Z])/g,"$1 $2")
+    .replace(/\s+/g," ")
+    .trim()
+    .replace(/^./,char=>char.toUpperCase());
+}
+
+function isObject(value){
+  return(
+    value!==null&&
+    typeof value==="object"&&
+    !Array.isArray(value)
+  );
+}
+
+function flattenObject(object,prefix=""){
+  const result=[];
+  if(!isObject(object))return result;
+
+  Object.entries(object).forEach(([key,value])=>{
+    const path=prefix?`${prefix}.${key}`:key;
+
+    if(isObject(value)){
+      result.push(...flattenObject(value,path));
+    }else{
+      result.push([path,value]);
+    }
+  });
+
+  return result;
+}
+
+function countLeaves(object){
+  return flattenObject(object).length;
+}
+
+function toNumberOrZero(value){
+  const number=Number(value);
+  return Number.isFinite(number)?number:0;
+}
+
+function nullableNumber(value){
+  if(value===null||value===undefined||value==="")return null;
+  const number=Number(value);
+  return Number.isFinite(number)?number:null;
+}
+
+function normalizeScore(value){
+  if(value===null||value===undefined||value==="")return null;
+  const number=Number(value);
+  if(!Number.isFinite(number))return null;
+
+  return Math.round(
+    clamp(number,0,10)*100
+  )/100;
+}
+
+function normalizeMetricValue(value){
+  if(value===null||value===undefined||value==="")return null;
+  const number=Number(value);
+  if(!Number.isFinite(number))return null;
+  return number>=0&&number<=10?number:null;
+}
+
+function getMetricLevel(value){
+  if(value<4)return"low";
+  if(value<7)return"medium";
+  return"high";
+}
+
+function clamp(value,min,max){
+  return Math.min(max,Math.max(min,value));
+}
+
+function getGroup(object,names){
+  if(!isObject(object))return[];
+
+  const result=[];
+
+  names.forEach(name=>{
+    const group=object[name];
+    if(isObject(group)){
+      result.push(...Object.entries(group));
+    }
+  });
+
+  return result;
+}
+
+function getProductionValues(production,names){
+  if(!isObject(production))return[];
+
+  const result=[];
+
+  names.forEach(name=>{
+    if(production[name]!==undefined){
+      result.push([name,production[name]]);
+    }
+  });
+
+  return result;
+}
+
+function createEmptyBlock(message){
+  const div=document.createElement("div");
+  div.className="history-empty";
+  div.textContent=message;
+  return div;
+}
+
+function createSectionIntro(titleText,descriptionText){
+  const heading=document.createElement("div");
+  heading.className="section-intro";
+
+  const title=document.createElement("strong");
+  title.textContent=titleText;
+
+  const description=document.createElement("span");
+  description.textContent=descriptionText;
+
+  heading.append(title,description);
+  return heading;
+}
+
+function revokeSelectedObjectUrl(){
+  if(!selectedObjectUrl)return;
+  try{URL.revokeObjectURL(selectedObjectUrl);}catch{}
+  selectedObjectUrl=null;
+}
+
+function checkWorkerHealth(){
+  const controller=new AbortController();
+  const timer=setTimeout(
+    ()=>controller.abort(),
+    HEALTH_TIMEOUT
+  );
+
+  return fetch(HEALTH_ENDPOINT,{
+    method:"GET",
+    cache:"no-store",
+    headers:{Accept:"application/json"},
+    signal:controller.signal
+  })
+    .then(response=>{
+      if(!response.ok)return false;
+      return response
+        .json()
+        .then(data=>data?.success===true)
+        .catch(()=>false);
+    })
+    .catch(()=>false)
+    .finally(()=>clearTimeout(timer));
+}
+
+function sleep(ms){
+  return new Promise(resolve=>setTimeout(resolve,ms));
+}
+
+function bindEvents(){
+  uploadButton?.addEventListener("click",event=>{
+    event.preventDefault();
+    openFilePicker();
+  });
+
+  fileInput?.addEventListener("change",event=>{
+    handleFileSelected(event.target.files?.[0]);
+  });
+
+  uploadZone?.addEventListener("dragover",event=>{
+    event.preventDefault();
+    uploadZone.classList.add("dragover");
+  });
+
+  uploadZone?.addEventListener("dragleave",()=>{
+    uploadZone.classList.remove("dragover");
+  });
+
+  uploadZone?.addEventListener("drop",event=>{
+    event.preventDefault();
+    uploadZone.classList.remove("dragover");
+    handleFileSelected(event.dataTransfer?.files?.[0]);
+  });
+
+  $$("[data-screen]").forEach(element=>{
+    element.addEventListener("click",()=>{
+      const target=element.dataset.screen;
+      if(target&&element!==uploadButton)showScreen(target);
+    });
+  });
+
+  $$(".back-btn").forEach(button=>{
+    button.addEventListener("click",()=>{
+      showScreen(button.dataset.screen||"home");
+    });
+  });
+
+  newAnalysisButton?.addEventListener(
+    "click",
+    startNewAnalysis
+  );
+
+  bindResultTabs();
+  window.addEventListener("resize",resizeLandmarkCanvas);
+
+  window.addEventListener("beforeunload",()=>{
+    cancelActiveAnalysis();
+    revokeSelectedObjectUrl();
+  });
+}
+
+function init(){
+  initTelegram();
+  bindEvents();
+  updateHistoryCount();
+  activateDefaultResultTab();
+  showScreen("home");
+
+  setTimeout(()=>{
+    checkWorkerHealth().then(healthy=>{
+      document.body.dataset.system=healthy?"ready":"offline";
+    });
+  },300);
+}
+
+init();
