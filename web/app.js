@@ -1,10 +1,33 @@
 "use strict";
 
+/*
+ * ============================================================
+ * FaceMetric / FaceBot — APP.JS
+ * ============================================================
+ *
+ * Что здесь сохранено:
+ * - тёмный минималистичный интерфейс;
+ * - русский UI;
+ * - итоговая оценка 1–10;
+ * - фото остаётся на экране результата;
+ * - оценка сначала появляется прямо поверх лица;
+ * - затем плавно уходит в левый нижний угол изображения;
+ * - Gemini/model никогда не показывается пользователю;
+ * - показатели выводятся сразу, без бесполезных раскрывающихся
+ *   карточек;
+ * - шкалы 0–10 с уровнями low / medium / high;
+ * - история анализов;
+ * - Telegram WebApp;
+ * - тот же API;
+ * - обработка "лицо не найдено";
+ * - защита от старого ответа API после нового анализа;
+ * - health check;
+ * - загрузка JPG / PNG / WEBP до 15 MB.
+ *
+ * ============================================================
+ */
+
 const MAX_FILE_SIZE = 15 * 1024 * 1024;
-const API_TIMEOUT_MS = 45_000;
-const HEALTH_TIMEOUT_MS = 8_000;
-const HISTORY_LIMIT = 50;
-const HISTORY_KEY = "facemetric_history_v1";
 
 const ALLOWED_TYPES = new Set([
   "image/jpeg",
@@ -18,91 +41,110 @@ const API_ENDPOINT =
 const HEALTH_ENDPOINT =
   "https://facebot-gemini.snow4lyt.workers.dev/api/health";
 
+const HISTORY_KEY = "facemetric_history_v1";
+
 const tg =
-  window.Telegram && window.Telegram.WebApp
+  window.Telegram &&
+  window.Telegram.WebApp
     ? window.Telegram.WebApp
     : null;
 
-const screens = document.querySelectorAll(".screen");
-const fileInput = document.getElementById("file-input");
-const uploadButton = document.getElementById("upload-btn");
-const uploadName = document.getElementById("upload-name");
+// ============================================================
+// DOM
+// ============================================================
 
-const analysisScreen = document.getElementById("screen-analysis");
-const resultScreen = document.getElementById("screen-result");
-const analysisPreview = document.querySelector(".analysis-preview");
-const analysisPreviewParent = analysisPreview?.parentElement || null;
-const resultTitle = resultScreen?.querySelector(".result-title") || null;
+const screens =
+  document.querySelectorAll(".screen");
 
-const analysisImage = document.getElementById("analysis-image");
-const analysisFrame = document.getElementById("analysis-frame");
-const landmarkCanvas = document.getElementById("landmark-canvas");
-const analysisState = document.getElementById("analysis-state");
-const analysisScore = document.getElementById("analysis-score");
+const fileInput =
+  document.getElementById("file-input");
+
+const uploadButton =
+  document.getElementById("upload-btn");
+
+const uploadName =
+  document.getElementById("upload-name");
+
+const analysisImage =
+  document.getElementById("analysis-image");
+
+const analysisFrame =
+  document.getElementById("analysis-frame");
+
+const landmarkCanvas =
+  document.getElementById("landmark-canvas");
+
+const analysisState =
+  document.getElementById("analysis-state");
+
+const analysisScore =
+  document.getElementById("analysis-score");
+
 const analysisScoreValue =
-  analysisScore?.querySelector("strong") || null;
-const analysisScoreUnit =
-  analysisScore?.querySelector("small") || null;
-const landmarkCount =
-  document.getElementById("landmark-count");
-const axisStatus =
-  document.getElementById("axis-status");
-const scanLine =
-  document.getElementById("scan-line");
-const previewProcessing =
-  document.getElementById("preview-processing");
+  analysisScore
+    ? analysisScore.querySelector("strong")
+    : null;
 
-const loadingContent =
-  document.getElementById("loading-content");
 const loadingTitle =
   document.getElementById("loading-title");
+
 const loadingText =
   document.getElementById("loading-text");
+
 const loadingSteps =
   document.querySelectorAll(".loading-step");
-const loadingProgress =
-  document.getElementById("loading-progress-bar");
 
 const resultScore =
   document.getElementById("result-score");
-const resultScoreUnit =
-  resultScore?.parentElement?.querySelector("small") || null;
+
 const scoreProgress =
   document.getElementById("score-progress");
+
 const scoreStatus =
   document.getElementById("score-status");
-const scoreDataStatus =
-  document.getElementById("score-data-status");
-const resultLandmarkCount =
-  document.getElementById("result-landmark-count");
 
 const statsGrid =
   document.getElementById("stats-grid");
+
 const overviewGrid =
   document.getElementById("overview-grid");
+
 const harmonyContent =
   document.getElementById("harmony-content");
+
 const metricsContent =
   document.getElementById("metrics-content");
+
 const angularityContent =
   document.getElementById("angularity-content");
+
 const symmetryContent =
   document.getElementById("symmetry-content");
+
 const dimorphismContent =
   document.getElementById("dimorphism-content");
+
 const healthContent =
   document.getElementById("health-content");
+
 const reportTabs =
   document.getElementById("report-tabs");
 
 const historyCount =
   document.getElementById("history-count");
+
 const historyList =
   document.getElementById("history-list");
+
 const newAnalysisButton =
   document.getElementById("new-analysis");
+
 const toast =
   document.getElementById("toast");
+
+// ============================================================
+// STATE
+// ============================================================
 
 let selectedFile = null;
 let selectedObjectUrl = null;
@@ -111,9 +153,11 @@ let currentScreen = "home";
 let analysisInProgress = false;
 let toastTimer = null;
 let analysisRequestId = 0;
-let analysisController = null;
-let scoreAnimationTimers = [];
-let resultFaceHost = null;
+let analysisAbortController = null;
+
+// ============================================================
+// LABELS
+// ============================================================
 
 const LABELS = {
   face_geometry: "Геометрия лица",
@@ -168,6 +212,7 @@ const LABELS = {
 
   facial_definition: "Выраженность черт",
   angularity: "Угловатость",
+
   confidence: "Уверенность анализа",
   dimorphism: "Визуальная выраженность черт",
 
@@ -177,15 +222,46 @@ const LABELS = {
   landmarks_count: "Точки лица"
 };
 
+const GROUP_LABELS = {
+  face_geometry: "Геометрия лица",
+  symmetry: "Симметрия",
+  eyes: "Глаза",
+  eyebrows: "Брови",
+  nose: "Нос",
+  jaw: "Челюсть",
+  chin: "Подбородок",
+  cheeks: "Скулы",
+  lips_mouth: "Губы и рот",
+  midface: "Средняя треть"
+};
+
+// ============================================================
+// TELEGRAM
+// ============================================================
+
 function initTelegram() {
   if (!tg) return;
 
   try {
     tg.ready();
-    tg.expand?.();
-    tg.setHeaderColor?.("#08090b");
-    tg.setBackgroundColor?.("#08090b");
-    tg.enableClosingConfirmation?.();
+
+    if (typeof tg.expand === "function") {
+      tg.expand();
+    }
+
+    if (typeof tg.setHeaderColor === "function") {
+      tg.setHeaderColor("#07080a");
+    }
+
+    if (typeof tg.setBackgroundColor === "function") {
+      tg.setBackgroundColor("#07080a");
+    }
+
+    if (
+      typeof tg.enableClosingConfirmation === "function"
+    ) {
+      tg.enableClosingConfirmation();
+    }
   } catch (error) {
     console.warn(
       "Telegram initialization warning:",
@@ -194,21 +270,31 @@ function initTelegram() {
   }
 }
 
+// ============================================================
+// NAVIGATION
+// ============================================================
+
 function showScreen(name) {
   const target =
     document.getElementById(`screen-${name}`);
 
-  if (!target) return;
+  if (!target) {
+    console.warn(
+      `Screen not found: screen-${name}`
+    );
+    return;
+  }
 
   screens.forEach((screen) => {
-    const active = screen === target;
+    const isTarget =
+      screen === target;
 
     screen.classList.toggle(
       "active",
-      active
+      isTarget
     );
 
-    if (active) {
+    if (isTarget) {
       screen.classList.remove(
         "screen-enter"
       );
@@ -222,6 +308,7 @@ function showScreen(name) {
   });
 
   currentScreen = name;
+
   updateNavigation(name);
 
   window.scrollTo({
@@ -235,6 +322,7 @@ function showScreen(name) {
 
   if (name === "result") {
     activateDefaultResultTab();
+    preserveResultFace();
   }
 }
 
@@ -248,8 +336,11 @@ function updateNavigation(name) {
       const active =
         target === name ||
         (
-          (name === "result" ||
-            name === "analysis") &&
+          name === "result" &&
+          target === "home"
+        ) ||
+        (
+          name === "analysis" &&
           target === "home"
         );
 
@@ -263,6 +354,10 @@ function updateNavigation(name) {
 function goBack() {
   showScreen("home");
 }
+
+// ============================================================
+// FILE PICKER
+// ============================================================
 
 function openFilePicker() {
   if (!fileInput) {
@@ -301,15 +396,26 @@ function handleFileSelected(file) {
     return;
   }
 
-  cancelCurrentAnalysis();
+  /*
+   * Если предыдущий анализ ещё идёт —
+   * отменяем его.
+   */
+  if (analysisAbortController) {
+    analysisAbortController.abort();
+    analysisAbortController = null;
+  }
+
   analysisRequestId++;
-  clearScoreAnimationTimers();
 
   selectedFile = file;
-  currentAnalysis = null;
 
-  restoreAnalysisPreviewToAnalysisScreen();
-  revokeSelectedObjectUrl();
+  if (selectedObjectUrl) {
+    URL.revokeObjectURL(
+      selectedObjectUrl
+    );
+
+    selectedObjectUrl = null;
+  }
 
   selectedObjectUrl =
     URL.createObjectURL(file);
@@ -336,7 +442,9 @@ function handleFileSelected(file) {
   }
 
   resetAnalysisPreview();
+
   showScreen("analysis");
+
   startAnalysis(file);
 }
 
@@ -344,7 +452,8 @@ function validateFile(file) {
   if (!file) {
     return {
       valid: false,
-      message: "Фотография не выбрана."
+      message:
+        "Фотография не выбрана."
     };
   }
 
@@ -377,63 +486,32 @@ function validateFile(file) {
   };
 }
 
-function revokeSelectedObjectUrl() {
-  if (!selectedObjectUrl) return;
-
-  URL.revokeObjectURL(
-    selectedObjectUrl
-  );
-
-  selectedObjectUrl = null;
-}
+// ============================================================
+// ANALYSIS PREVIEW
+// ============================================================
 
 function resetAnalysisPreview() {
-  clearScoreAnimationTimers();
+  if (analysisScore) {
+    analysisScore.classList.remove(
+      "show",
+      "float"
+    );
 
-  analysisScore?.classList.remove(
-    "show",
-    "hide",
-    "dock",
-    "float"
-  );
-
-  analysisScore?.removeAttribute(
-    "aria-label"
-  );
+    analysisScore.setAttribute(
+      "aria-hidden",
+      "true"
+    );
+  }
 
   if (analysisScoreValue) {
     analysisScoreValue.textContent =
       "—";
   }
 
-  if (analysisScoreUnit) {
-    analysisScoreUnit.textContent =
-      "/10";
-  }
-
   if (analysisState) {
     analysisState.textContent =
       "АНАЛИЗ";
   }
-
-  if (landmarkCount) {
-    landmarkCount.textContent =
-      "0";
-  }
-
-  if (axisStatus) {
-    axisStatus.textContent =
-      "—";
-  }
-
-  previewProcessing?.classList.remove(
-    "is-done",
-    "is-error"
-  );
-
-  scanLine?.classList.remove(
-    "is-paused"
-  );
 
   clearLandmarks();
 }
@@ -446,128 +524,93 @@ function setAnalysisState(text) {
 }
 
 function showAnalysisPreviewScore(score) {
-  const numeric =
-    Number(score);
-
   if (
-    !Number.isFinite(numeric) ||
-    !analysisScore
+    score === null ||
+    score === undefined ||
+    !Number.isFinite(Number(score))
   ) {
     return;
   }
 
   const normalized =
     clamp(
-      numeric,
+      Number(score),
       0,
       10
     );
 
-  const formatted =
+  const displayScore =
     formatScore(normalized);
 
   if (analysisScoreValue) {
     analysisScoreValue.textContent =
-      formatted;
+      displayScore;
   }
 
-  if (analysisScoreUnit) {
-    analysisScoreUnit.textContent =
-      "/10";
+  if (!analysisScore) {
+    return;
   }
 
-  analysisScore.setAttribute(
-    "aria-label",
-    `Итоговая оценка ${formatted} из 10`
-  );
-
+  /*
+   * Этап 1:
+   * оценка появляется непосредственно
+   * поверх лица.
+   */
   analysisScore.classList.remove(
-    "hide",
-    "dock",
     "float"
   );
-
-  void analysisScore.offsetWidth;
 
   analysisScore.classList.add(
     "show"
   );
 
-  clearScoreAnimationTimers();
-
-  scoreAnimationTimers.push(
-    window.setTimeout(() => {
-      if (!analysisScore) return;
-
-      analysisScore.classList.add(
-        "float"
-      );
-    }, 520)
+  analysisScore.setAttribute(
+    "aria-hidden",
+    "false"
   );
 
-  scoreAnimationTimers.push(
-    window.setTimeout(() => {
-      if (!analysisScore) return;
-
-      analysisScore.classList.remove(
-        "show",
-        "float"
-      );
-
-      analysisScore.classList.add(
-        "hide"
-      );
-    }, 1250)
-  );
-
-  scoreAnimationTimers.push(
-    window.setTimeout(() => {
-      if (
-        !analysisScore ||
-        currentAnalysis?.score == null
-      ) {
-        return;
-      }
-
-      analysisScore.classList.remove(
-        "hide"
-      );
-
-      analysisScore.classList.add(
-        "dock"
-      );
-
-      void analysisScore.offsetWidth;
-
-      analysisScore.classList.add(
+  /*
+   * Этап 2:
+   * после короткой паузы уходит
+   * в левый нижний угол изображения.
+   */
+  window.setTimeout(() => {
+    if (
+      currentScreen === "analysis" &&
+      analysisScore.classList.contains(
         "show"
+      )
+    ) {
+      analysisScore.classList.add(
+        "float"
       );
-    }, 1720)
-  );
-}
-
-function clearScoreAnimationTimers() {
-  scoreAnimationTimers.forEach(
-    (timer) =>
-      window.clearTimeout(timer)
-  );
-
-  scoreAnimationTimers = [];
+    }
+  }, 1200);
 }
 
 function clearLandmarks() {
-  if (!landmarkCanvas) return;
+  if (!landmarkCanvas) {
+    return;
+  }
 
   const context =
     landmarkCanvas.getContext("2d");
 
-  context?.clearRect(
+  if (!context) {
+    return;
+  }
+
+  context.clearRect(
     0,
     0,
     landmarkCanvas.width,
     landmarkCanvas.height
   );
 }
+
+// ============================================================
+// ANALYSIS
+// ============================================================
 
 async function startAnalysis(file) {
   if (!file) {
@@ -577,32 +620,33 @@ async function startAnalysis(file) {
     return;
   }
 
+  const validation =
+    validateFile(file);
+
+  if (!validation.valid) {
+    showToast(
+      validation.message
+    );
+    return;
+  }
+
+  analysisInProgress = true;
+
   const requestId =
     ++analysisRequestId;
 
-  analysisInProgress = true;
-  analysisController =
+  analysisAbortController =
     new AbortController();
 
   resetLoadingSteps();
-  setAnalysisState(
-    "АНАЛИЗ"
-  );
 
-  previewProcessing?.classList.remove(
-    "is-done",
-    "is-error"
-  );
-
-  scanLine?.classList.remove(
-    "is-paused"
-  );
+  setAnalysisState("АНАЛИЗ");
 
   try {
     const analysisPromise =
       analyzePhoto(
         file,
-        analysisController.signal
+        analysisAbortController.signal
       );
 
     await runLoadingSequence(
@@ -625,45 +669,36 @@ async function startAnalysis(file) {
     ) {
       throw new Error(
         result?.detail ||
-          result?.error ||
-          "Анализ не выполнен."
+        result?.error ||
+        result?.message ||
+        "Анализ не выполнен."
+      );
+    }
+
+    /*
+     * Специальная обработка:
+     * backend может вернуть success=true,
+     * но сообщить, что лицо не найдено.
+     */
+    if (
+      isFaceNotFoundResult(result)
+    ) {
+      throw new FaceNotFoundError(
+        getFaceNotFoundMessage(result)
       );
     }
 
     currentAnalysis =
-      normalizeClientResult(
-        result
-      );
+      normalizeClientResult(result);
 
     completeLoadingSteps();
 
-    setAnalysisState(
-      "ГОТОВО"
-    );
+    setAnalysisState("ГОТОВО");
 
-    previewProcessing?.classList.add(
-      "is-done"
-    );
-
-    scanLine?.classList.add(
-      "is-paused"
-    );
-
-    if (landmarkCount) {
-      landmarkCount.textContent =
-        currentAnalysis.landmarks_count ==
-        null
-          ? "—"
-          : String(
-              currentAnalysis.landmarks_count
-            );
-    }
-
-    if (axisStatus) {
-      axisStatus.textContent =
-        "OK";
-    }
-
+    /*
+     * Сначала показываем оценку
+     * на экране анализа.
+     */
     showAnalysisPreviewScore(
       currentAnalysis.score
     );
@@ -672,7 +707,11 @@ async function startAnalysis(file) {
       currentAnalysis
     );
 
-    await sleep(2050);
+    /*
+     * Даём пользователю увидеть
+     * короткую финальную фазу.
+     */
+    await sleep(1500);
 
     if (
       requestId !==
@@ -685,8 +724,6 @@ async function startAnalysis(file) {
       currentAnalysis
     );
 
-    moveAnalysisPreviewToResult();
-
     showScreen("result");
   } catch (error) {
     if (
@@ -696,7 +733,10 @@ async function startAnalysis(file) {
       return;
     }
 
-    if (isAbortError(error)) {
+    if (
+      error?.name ===
+      "AbortError"
+    ) {
       return;
     }
 
@@ -705,19 +745,29 @@ async function startAnalysis(file) {
       error
     );
 
-    setAnalysisState(
-      "ОШИБКА"
-    );
+    setAnalysisState("ОШИБКА");
 
-    previewProcessing?.classList.add(
-      "is-error"
-    );
-
-    showToast(
-      getFriendlyErrorMessage(
-        error
-      )
-    );
+    /*
+     * Если лицо не найдено —
+     * возвращаем пользователя
+     * на главный экран с нормальным
+     * сообщением, а не с технической
+     * ошибкой Gemini.
+     */
+    if (
+      error instanceof
+      FaceNotFoundError
+    ) {
+      showToast(
+        error.message
+      );
+    } else {
+      showToast(
+        getFriendlyErrorMessage(
+          error
+        )
+      );
+    }
 
     showScreen("home");
   } finally {
@@ -728,17 +778,15 @@ async function startAnalysis(file) {
       analysisInProgress =
         false;
 
-      analysisController =
+      analysisAbortController =
         null;
     }
   }
 }
 
-function cancelCurrentAnalysis() {
-  analysisController?.abort();
-  analysisController = null;
-  analysisInProgress = false;
-}
+// ============================================================
+// API
+// ============================================================
 
 async function analyzePhoto(
   file,
@@ -762,22 +810,40 @@ async function analyzePhoto(
     file.name || "photo.jpg"
   );
 
-  const response =
-    await fetchWithTimeout(
-      API_ENDPOINT,
-      {
-        method: "POST",
-        body: formData,
-        headers: {
-          Accept:
-            "application/json"
-        },
-        cache: "no-store",
-        signal
-      },
-      API_TIMEOUT_MS,
-      signal
+  let response;
+
+  try {
+    response =
+      await fetch(
+        API_ENDPOINT,
+        {
+          method: "POST",
+          body: formData,
+          headers: {
+            Accept:
+              "application/json"
+          },
+          cache: "no-store",
+          signal
+        }
+      );
+  } catch (error) {
+    if (
+      error?.name ===
+      "AbortError"
+    ) {
+      throw error;
+    }
+
+    console.error(
+      "FaceMetric fetch error:",
+      error
     );
+
+    throw new Error(
+      "Не удалось подключиться к серверу анализа."
+    );
+  }
 
   const responseText =
     await response.text();
@@ -789,10 +855,7 @@ async function analyzePhoto(
 
   console.log(
     "FaceMetric API response:",
-    responseText.slice(
-      0,
-      3000
-    )
+    responseText.slice(0, 3000)
   );
 
   let data = null;
@@ -816,12 +879,26 @@ async function analyzePhoto(
   }
 
   if (!response.ok) {
+    /*
+     * Отдельно обрабатываем ситуации,
+     * которые backend может вернуть как
+     * HTTP 400/422.
+     */
+    if (
+      isFaceNotFoundResult(data)
+    ) {
+      throw new FaceNotFoundError(
+        getFaceNotFoundMessage(data)
+      );
+    }
+
     throw new Error(
       data?.detail ||
-        data?.error ||
-        getHttpErrorMessage(
-          response.status
-        )
+      data?.error ||
+      data?.message ||
+      getHttpErrorMessage(
+        response.status
+      )
     );
   }
 
@@ -834,76 +911,104 @@ async function analyzePhoto(
   return data;
 }
 
-async function fetchWithTimeout(
-  url,
-  options,
-  timeoutMs,
-  externalSignal
-) {
-  const controller =
-    new AbortController();
+// ============================================================
+// FACE NOT FOUND
+// ============================================================
 
-  let timedOut = false;
-
-  const onExternalAbort =
-    () => controller.abort();
-
-  externalSignal?.addEventListener(
-    "abort",
-    onExternalAbort,
-    {
-      once: true
-    }
-  );
-
-  const timer =
-    window.setTimeout(
-      () => {
-        timedOut = true;
-        controller.abort();
-      },
-      timeoutMs
+class FaceNotFoundError extends Error {
+  constructor(message) {
+    super(
+      message ||
+      "Лицо на фотографии не найдено."
     );
 
-  try {
-    return await fetch(
-      url,
-      {
-        ...options,
-        signal:
-          controller.signal
-      }
-    );
-  } catch (error) {
-    if (timedOut) {
-      throw new Error(
-        "Сервер анализа не ответил вовремя. Попробуй ещё раз."
-      );
-    }
-
-    throw error;
-  } finally {
-    window.clearTimeout(
-      timer
-    );
-
-    externalSignal?.removeEventListener(
-      "abort",
-      onExternalAbort
-    );
+    this.name =
+      "FaceNotFoundError";
   }
 }
 
-async function checkWorkerHealth() {
-  const controller =
-    new AbortController();
+function isFaceNotFoundResult(data) {
+  if (!data) {
+    return false;
+  }
 
-  const timer =
-    window.setTimeout(
-      () => controller.abort(),
-      HEALTH_TIMEOUT_MS
+  const raw =
+    [
+      data.error,
+      data.detail,
+      data.message,
+      data.reason,
+      data.status
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+
+  if (
+    data.face_found === false ||
+    data.face_detected === false ||
+    data.face_count === 0
+  ) {
+    return true;
+  }
+
+  return (
+    raw.includes(
+      "face not found"
+    ) ||
+    raw.includes(
+      "no face"
+    ) ||
+    raw.includes(
+      "face_not_found"
+    ) ||
+    raw.includes(
+      "лицо не найдено"
+    ) ||
+    raw.includes(
+      "лицо не обнаружено"
+    ) ||
+    raw.includes(
+      "не найдено лицо"
+    )
+  );
+}
+
+function getFaceNotFoundMessage(data) {
+  const raw =
+    String(
+      data?.detail ||
+      data?.error ||
+      data?.message ||
+      ""
+    ).toLowerCase();
+
+  if (
+    raw.includes(
+      "multiple"
+    ) ||
+    raw.includes(
+      "несколько"
+    )
+  ) {
+    return (
+      "На фотографии найдено несколько лиц. " +
+      "Загрузи фотографию только с одним лицом."
     );
+  }
 
+  return (
+    "Лицо не найдено. " +
+    "Загрузи фотографию, где лицо хорошо видно анфас, " +
+    "без сильного поворота и перекрытий."
+  );
+}
+
+// ============================================================
+// HEALTH CHECK
+// ============================================================
+
+async function checkWorkerHealth() {
   try {
     const response =
       await fetch(
@@ -914,9 +1019,7 @@ async function checkWorkerHealth() {
           headers: {
             Accept:
               "application/json"
-          },
-          signal:
-            controller.signal
+          }
         }
       );
 
@@ -928,11 +1031,13 @@ async function checkWorkerHealth() {
       await response.json();
 
     console.log(
-      "FaceMetric Worker health:",
+      "Gemini Worker health:",
       data
     );
 
-    return data?.success === true;
+    return (
+      data?.success === true
+    );
   } catch (error) {
     console.warn(
       "Health check failed:",
@@ -940,86 +1045,87 @@ async function checkWorkerHealth() {
     );
 
     return false;
-  } finally {
-    window.clearTimeout(
-      timer
-    );
   }
 }
+
+// ============================================================
+// LOADING
+// ============================================================
 
 async function runLoadingSequence(
   analysisPromise
 ) {
   const steps = [
-    [
-      0,
-      "Обрабатываем фотографию",
-      "Подготавливаем изображение"
-    ],
-    [
-      1,
-      "Определяем лицо",
-      "Ищем основные точки и контуры лица"
-    ],
-    [
-      2,
-      "Измеряем пропорции",
-      "Анализируем геометрию и черты"
-    ],
-    [
-      3,
-      "Анализируем симметрию",
-      "Сравниваем левую и правую стороны"
-    ],
-    [
-      4,
-      "Формируем результат",
-      "Собираем итоговые показатели"
-    ]
+    {
+      index: 0,
+      title:
+        "Обрабатываем фотографию",
+      text:
+        "Подготавливаем изображение"
+    },
+    {
+      index: 1,
+      title:
+        "Определяем лицо",
+      text:
+        "Ищем основные точки и контуры лица"
+    },
+    {
+      index: 2,
+      title:
+        "Измеряем пропорции",
+      text:
+        "Анализируем геометрию и черты"
+    },
+    {
+      index: 3,
+      title:
+        "Анализируем симметрию",
+      text:
+        "Сравниваем левую и правую стороны"
+    },
+    {
+      index: 4,
+      title:
+        "Формируем результат",
+      text:
+        "Собираем итоговые показатели"
+    }
   ];
 
   for (
     let i = 0;
     i < steps.length;
-    i += 1
+    i++
   ) {
-    const [
-      index,
-      title,
-      text
-    ] = steps[i];
+    const step =
+      steps[i];
 
-    setLoadingStep(index);
+    setLoadingStep(
+      step.index
+    );
 
     if (loadingTitle) {
       loadingTitle.textContent =
-        title;
+        step.title;
     }
 
     if (loadingText) {
       loadingText.textContent =
-        text;
-    }
-
-    if (loadingProgress) {
-      loadingProgress.style.width =
-        `${Math.min(
-          96,
-          (i + 1) * 19
-        )}%`;
+        step.text;
     }
 
     if (
       i <
       steps.length - 1
     ) {
-      await sleep(420);
+      await sleep(450);
     } else {
       await Promise.race([
         analysisPromise.catch(
           () => null
         ),
-        sleep(1100)
+        sleep(1200)
       ]);
     }
   }
@@ -1035,13 +1141,16 @@ function resetLoadingSteps() {
     }
   );
 
-  document
-    .querySelector(
+  const first =
+    document.querySelector(
       '.loading-step[data-step="0"]'
-    )
-    ?.classList.add(
+    );
+
+  if (first) {
+    first.classList.add(
       "active"
     );
+  }
 
   if (loadingTitle) {
     loadingTitle.textContent =
@@ -1051,11 +1160,6 @@ function resetLoadingSteps() {
   if (loadingText) {
     loadingText.textContent =
       "Подготавливаем изображение";
-  }
-
-  if (loadingProgress) {
-    loadingProgress.style.width =
-      "4%";
   }
 }
 
@@ -1092,157 +1196,72 @@ function completeLoadingSteps() {
       );
     }
   );
-
-  if (loadingProgress) {
-    loadingProgress.style.width =
-      "100%";
-  }
 }
 
 function sleep(ms) {
   return new Promise(
     (resolve) =>
-      window.setTimeout(
+      setTimeout(
         resolve,
         ms
       )
   );
 }
 
-function ensureResultFaceHost() {
-  if (
-    resultFaceHost &&
-    document.body.contains(
-      resultFaceHost
-    )
-  ) {
-    return resultFaceHost;
-  }
+// ============================================================
+// NORMALIZATION
+// ============================================================
 
-  if (
-    !resultScreen ||
-    !analysisPreview
-  ) {
-    return null;
-  }
+function normalizeClientResult(data) {
+  return {
+    success: true,
 
-  resultFaceHost =
-    document.createElement(
-      "div"
-    );
+    score:
+      normalizeScore(
+        data.score
+      ),
 
-  resultFaceHost.className =
-    "result-face";
+    face_count:
+      toNumberOrZero(
+        data.face_count
+      ),
 
-  resultFaceHost.id =
-    "result-face-host";
+    landmarks_count:
+      nullableNumber(
+        data.landmarks_count
+      ),
 
-  resultFaceHost.setAttribute(
-    "aria-label",
-    "Исходная фотография"
-  );
+    detected_features:
+      toNumberOrZero(
+        data.detected_features
+      ),
 
-  const anchor =
-    resultScreen.querySelector(
-      ".result-hero"
-    );
+    feature_count:
+      toNumberOrZero(
+        data.feature_count
+      ),
 
-  if (anchor) {
-    resultScreen.insertBefore(
-      resultFaceHost,
-      anchor
-    );
-  } else if (resultTitle) {
-    resultTitle.insertAdjacentElement(
-      "afterend",
-      resultFaceHost
-    );
-  } else {
-    resultScreen.appendChild(
-      resultFaceHost
-    );
-  }
+    metrics:
+      isObject(data.metrics)
+        ? data.metrics
+        : {},
 
-  return resultFaceHost;
+    production_features:
+      isObject(
+        data.production_features
+      )
+        ? data.production_features
+        : {},
+
+    generated_at:
+      data.generated_at ||
+      new Date().toISOString()
+  };
 }
 
-function moveAnalysisPreviewToResult() {
-  if (!analysisPreview) {
-    return;
-  }
-
-  const host =
-    ensureResultFaceHost();
-
-  if (!host) {
-    return;
-  }
-
-  analysisPreview.classList.add(
-    "result-preview"
-  );
-
-  host.appendChild(
-    analysisPreview
-  );
-
-  document
-    .querySelector(
-      "#analysis-frame"
-    )
-    ?.classList.add(
-      "result-frame"
-    );
-
-  document
-    .querySelector(
-      "#analysis-frame"
-    )
-    ?.classList.add(
-      "result-face-visible"
-    );
-
-  scanLine?.classList.add(
-    "is-paused"
-  );
-
-  previewProcessing?.classList.add(
-    "is-done"
-  );
-}
-
-function restoreAnalysisPreviewToAnalysisScreen() {
-  if (
-    !analysisPreview ||
-    !analysisPreviewParent
-  ) {
-    return;
-  }
-
-  analysisPreview.classList.remove(
-    "result-preview"
-  );
-
-  analysisPreviewParent.appendChild(
-    analysisPreview
-  );
-
-  analysisFrame?.classList.remove(
-    "result-frame",
-    "result-face-visible"
-  );
-}
-
-function preserveResultFace() {
-  if (
-    !currentAnalysis ||
-    !selectedFile
-  ) {
-    return;
-  }
-
-  moveAnalysisPreviewToResult();
-}
+// ============================================================
+// RESULT
+// ============================================================
 
 function renderResult(result) {
   renderScore(
@@ -1283,12 +1302,16 @@ function renderResult(result) {
   );
 
   renderHealth();
-
-  preserveResultFace();
 }
+
+// ============================================================
+// SCORE
+// ============================================================
 
 function renderScore(score) {
   if (
+    score === null ||
+    score === undefined ||
     !Number.isFinite(
       Number(score)
     )
@@ -1305,12 +1328,7 @@ function renderScore(score) {
 
     if (scoreStatus) {
       scoreStatus.textContent =
-        "Не удалось получить итоговую оценку";
-    }
-
-    if (scoreDataStatus) {
-      scoreDataStatus.textContent =
-        "НЕТ ДАННЫХ";
+        "Итоговая оценка не получена";
     }
 
     return;
@@ -1325,19 +1343,20 @@ function renderScore(score) {
 
   if (resultScore) {
     resultScore.textContent =
-      formatScore(
-        normalized
+      normalized.toFixed(
+        normalized % 1 === 0
+          ? 0
+          : 1
       );
-  }
-
-  if (resultScoreUnit) {
-    resultScoreUnit.textContent =
-      "/10";
   }
 
   if (scoreProgress) {
     scoreProgress.style.width =
-      `${normalized * 10}%`;
+      `${clamp(
+        normalized * 10,
+        0,
+        100
+      )}%`;
   }
 
   if (scoreStatus) {
@@ -1346,49 +1365,13 @@ function renderScore(score) {
         normalized
       );
   }
-
-  if (scoreDataStatus) {
-    scoreDataStatus.textContent =
-      "ПОДТВЕРЖДЕНО";
-  }
-
-  if (
-    resultLandmarkCount &&
-    currentAnalysis
-  ) {
-    resultLandmarkCount.textContent =
-      currentAnalysis.landmarks_count ==
-      null
-        ? "—"
-        : String(
-            currentAnalysis.landmarks_count
-          );
-  }
-
-  const modelSummary =
-    resultScreen?.querySelector(
-      ".score-summary-item:nth-child(3) span"
-    );
-
-  const modelValue =
-    resultScreen?.querySelector(
-      ".score-summary-item:nth-child(3) strong"
-    );
-
-  if (modelSummary) {
-    modelSummary.textContent =
-      "ИСТОЧНИК";
-  }
-
-  if (modelValue) {
-    modelValue.textContent =
-      "ИЗМЕРЕНИЯ";
-  }
 }
 
 function getScoreStatus(score) {
   if (score < 4) {
-    return "Низкая выраженность положительных показателей";
+    return (
+      "Низкая выраженность положительных показателей"
+    );
   }
 
   if (score < 5.5) {
@@ -1410,45 +1393,83 @@ function getScoreStatus(score) {
   return "Исключительно высокий результат";
 }
 
-function renderStats(result) {
-  if (!statsGrid) return;
+// ============================================================
+// FACE PRESERVATION
+// ============================================================
 
-  statsGrid.replaceChildren();
+function preserveResultFace() {
+  if (!analysisFrame) {
+    return;
+  }
+
+  analysisFrame.classList.add(
+    "result-face-visible"
+  );
+
+  analysisFrame.removeAttribute(
+    "hidden"
+  );
+
+  analysisFrame.style.display =
+    "";
+
+  analysisFrame.style.visibility =
+    "visible";
+
+  analysisFrame.style.opacity =
+    "1";
+}
+
+// ============================================================
+// STATS
+// ============================================================
+
+function renderStats(result) {
+  if (!statsGrid) {
+    return;
+  }
+
+  statsGrid.innerHTML = "";
 
   const stats = [
-    [
-      "ЛИЦО",
-      String(result.face_count),
-      "обнаружено"
-    ],
-    [
-      "ТОЧКИ",
-      result.landmarks_count === null
-        ? "—"
-        : formatValue(
-            result.landmarks_count
-          ),
-      "лицевой геометрии"
-    ],
-    [
-      "ИЗМЕРЕНИЯ",
-      String(
-        result.feature_count ||
+    {
+      label: "ЛИЦО",
+      value:
+        String(
+          result.face_count
+        ),
+      detail:
+        "обнаружено"
+    },
+    {
+      label: "ТОЧКИ",
+      value:
+        result.landmarks_count ===
+        null
+          ? "—"
+          : formatValue(
+              result.landmarks_count
+            ),
+      detail:
+        "лицевой геометрии"
+    },
+    {
+      label: "ИЗМЕРЕНИЯ",
+      value:
+        String(
+          result.feature_count ||
           result.detected_features ||
           countLeaves(
             result.metrics
           )
-      ),
-      "показателей"
-    ]
+        ),
+      detail:
+        "показателей"
+    }
   ];
 
   stats.forEach(
-    ([
-      labelText,
-      valueText,
-      detailText
-    ]) => {
+    (stat) => {
       const card =
         document.createElement(
           "article"
@@ -1463,7 +1484,7 @@ function renderStats(result) {
         );
 
       label.textContent =
-        labelText;
+        stat.label;
 
       const value =
         document.createElement(
@@ -1471,7 +1492,7 @@ function renderStats(result) {
         );
 
       value.textContent =
-        valueText;
+        stat.value;
 
       const detail =
         document.createElement(
@@ -1479,7 +1500,7 @@ function renderStats(result) {
         );
 
       detail.textContent =
-        detailText;
+        stat.detail;
 
       card.append(
         label,
@@ -1494,6 +1515,10 @@ function renderStats(result) {
   );
 }
 
+// ============================================================
+// OVERVIEW
+// ============================================================
+
 function renderOverview(
   metrics,
   production
@@ -1502,7 +1527,7 @@ function renderOverview(
     return;
   }
 
-  overviewGrid.replaceChildren();
+  overviewGrid.innerHTML = "";
 
   const sections = [
     {
@@ -1522,7 +1547,9 @@ function renderOverview(
       values:
         getGroup(
           metrics,
-          ["face_geometry"]
+          [
+            "face_geometry"
+          ]
         )
     },
     {
@@ -1530,7 +1557,9 @@ function renderOverview(
       values:
         getGroup(
           metrics,
-          ["symmetry"]
+          [
+            "symmetry"
+          ]
         )
     }
   ];
@@ -1539,7 +1568,9 @@ function renderOverview(
 
   sections.forEach(
     (section) => {
-      if (!section.values.length) {
+      if (
+        !section.values.length
+      ) {
         return;
       }
 
@@ -1572,7 +1603,7 @@ function renderOverview(
             )
           );
 
-          rendered += 1;
+          rendered++;
         }
       );
 
@@ -1591,6 +1622,10 @@ function renderOverview(
   }
 }
 
+// ============================================================
+// HARMONY
+// ============================================================
+
 function renderHarmony(
   metrics,
   production
@@ -1599,26 +1634,52 @@ function renderHarmony(
     return;
   }
 
-  harmonyContent.replaceChildren();
+  harmonyContent.innerHTML =
+    "";
 
-  const values = [
-    ...getProductionValues(
+  const values = [];
+
+  const productionValues =
+    getProductionValues(
       production,
       [
         "overall_harmony",
         "frontal_harmony",
         "proportions"
       ]
-    ),
-    ...getGroup(
+    );
+
+  values.push(
+    ...productionValues
+  );
+
+  const geometry =
+    getGroup(
       metrics,
-      ["face_geometry"]
-    ),
-    ...getGroup(
+      [
+        "face_geometry"
+      ]
+    );
+
+  if (geometry.length) {
+    values.push(
+      ...geometry
+    );
+  }
+
+  const midface =
+    getGroup(
       metrics,
-      ["midface"]
-    )
-  ];
+      [
+        "midface"
+      ]
+    );
+
+  if (midface.length) {
+    values.push(
+      ...midface
+    );
+  }
 
   if (!values.length) {
     harmonyContent.appendChild(
@@ -1630,10 +1691,37 @@ function renderHarmony(
     return;
   }
 
-  appendSectionIntro(
-    harmonyContent,
-    "Гармония лица",
-    "Чем ближе показатель к 10, тем выше выраженность соответствующей характеристики."
+  const heading =
+    document.createElement(
+      "div"
+    );
+
+  heading.className =
+    "section-intro";
+
+  const strong =
+    document.createElement(
+      "strong"
+    );
+
+  strong.textContent =
+    "Гармония лица";
+
+  const span =
+    document.createElement(
+      "span"
+    );
+
+  span.textContent =
+    "Чем выше показатель, тем сильнее выражена соответствующая характеристика.";
+
+  heading.append(
+    strong,
+    span
+  );
+
+  harmonyContent.appendChild(
+    heading
   );
 
   values.forEach(
@@ -1648,12 +1736,17 @@ function renderHarmony(
   );
 }
 
+// ============================================================
+// METRICS
+// ============================================================
+
 function renderMetrics(metrics) {
   if (!metricsContent) {
     return;
   }
 
-  metricsContent.replaceChildren();
+  metricsContent.innerHTML =
+    "";
 
   const entries =
     flattenObject(metrics);
@@ -1680,6 +1773,10 @@ function renderMetrics(metrics) {
   );
 }
 
+// ============================================================
+// ANGULARITY
+// ============================================================
+
 function renderAngularity(
   metrics,
   production
@@ -1688,17 +1785,26 @@ function renderAngularity(
     return;
   }
 
-  angularityContent.replaceChildren();
+  angularityContent.innerHTML =
+    "";
 
-  const values = [
+  const values = [];
+
+  values.push(
     ...getGroup(
       metrics,
       ["jaw"]
-    ),
+    )
+  );
+
+  values.push(
     ...getGroup(
       metrics,
       ["cheeks"]
-    ),
+    )
+  );
+
+  values.push(
     ...getProductionValues(
       production,
       [
@@ -1706,7 +1812,7 @@ function renderAngularity(
         "facial_definition"
       ]
     )
-  ];
+  );
 
   if (!values.length) {
     angularityContent.appendChild(
@@ -1718,10 +1824,37 @@ function renderAngularity(
     return;
   }
 
-  appendSectionIntro(
-    angularityContent,
-    "Угловатость и выраженность",
-    "Визуальная шкала выраженности черт лица."
+  const heading =
+    document.createElement(
+      "div"
+    );
+
+  heading.className =
+    "section-intro";
+
+  const strong =
+    document.createElement(
+      "strong"
+    );
+
+  strong.textContent =
+    "Угловатость и выраженность";
+
+  const span =
+    document.createElement(
+      "span"
+    );
+
+  span.textContent =
+    "Визуальная шкала выраженности черт лица.";
+
+  heading.append(
+    strong,
+    span
+  );
+
+  angularityContent.appendChild(
+    heading
   );
 
   values.forEach(
@@ -1736,6 +1869,10 @@ function renderAngularity(
   );
 }
 
+// ============================================================
+// SYMMETRY
+// ============================================================
+
 function renderSymmetry(
   metrics,
   production
@@ -1744,26 +1881,38 @@ function renderSymmetry(
     return;
   }
 
-  symmetryContent.replaceChildren();
+  symmetryContent.innerHTML =
+    "";
 
-  const values = [
+  const values = [];
+
+  values.push(
     ...getGroup(
       metrics,
       ["symmetry"]
-    ),
-    ...getGroup(
+    )
+  );
+
+  const eyeAlignment =
+    getGroup(
       metrics,
       ["eyes"]
     ).filter(
       ([key]) =>
         key ===
         "eye_alignment"
-    ),
+    );
+
+  values.push(
+    ...eyeAlignment
+  );
+
+  values.push(
     ...getProductionValues(
       production,
       ["symmetry"]
     )
-  ];
+  );
 
   if (!values.length) {
     symmetryContent.appendChild(
@@ -1775,10 +1924,37 @@ function renderSymmetry(
     return;
   }
 
-  appendSectionIntro(
-    symmetryContent,
-    "Симметрия",
-    "Показатели баланса между сторонами лица."
+  const heading =
+    document.createElement(
+      "div"
+    );
+
+  heading.className =
+    "section-intro";
+
+  const strong =
+    document.createElement(
+      "strong"
+    );
+
+  strong.textContent =
+    "Симметрия";
+
+  const span =
+    document.createElement(
+      "span"
+    );
+
+  span.textContent =
+    "Показатели баланса между сторонами лица.";
+
+  heading.append(
+    strong,
+    span
+  );
+
+  symmetryContent.appendChild(
+    heading
   );
 
   values.forEach(
@@ -1793,6 +1969,10 @@ function renderSymmetry(
   );
 }
 
+// ============================================================
+// DIMORPHISM
+// ============================================================
+
 function renderDimorphism(
   metrics,
   production
@@ -1801,7 +1981,8 @@ function renderDimorphism(
     return;
   }
 
-  dimorphismContent.replaceChildren();
+  dimorphismContent.innerHTML =
+    "";
 
   const values =
     getProductionValues(
@@ -1831,12 +2012,17 @@ function renderDimorphism(
   );
 }
 
+// ============================================================
+// HEALTH
+// ============================================================
+
 function renderHealth() {
   if (!healthContent) {
     return;
   }
 
-  healthContent.replaceChildren();
+  healthContent.innerHTML =
+    "";
 
   const icon =
     document.createElement(
@@ -1863,44 +2049,9 @@ function renderHealth() {
   );
 }
 
-function appendSectionIntro(
-  container,
-  titleText,
-  descriptionText
-) {
-  const heading =
-    document.createElement(
-      "div"
-    );
-
-  heading.className =
-    "section-intro";
-
-  const strong =
-    document.createElement(
-      "strong"
-    );
-
-  strong.textContent =
-    titleText;
-
-  const span =
-    document.createElement(
-      "span"
-    );
-
-  span.textContent =
-    descriptionText;
-
-  heading.append(
-    strong,
-    span
-  );
-
-  container.appendChild(
-    heading
-  );
-}
+// ============================================================
+// SCALE CARD
+// ============================================================
 
 function createScaleCard(
   key,
@@ -1919,12 +2070,12 @@ function createScaleCard(
       value
     );
 
-  const top =
+  const label =
     document.createElement(
       "div"
     );
 
-  top.className =
+  label.className =
     "scale-card__top";
 
   const name =
@@ -1936,9 +2087,7 @@ function createScaleCard(
     "scale-card__name";
 
   name.textContent =
-    getRussianLabel(
-      key
-    );
+    getRussianLabel(key);
 
   const score =
     document.createElement(
@@ -1955,7 +2104,7 @@ function createScaleCard(
           numeric
         )}/10`;
 
-  top.append(
+  label.append(
     name,
     score
   );
@@ -1967,21 +2116,6 @@ function createScaleCard(
 
   track.className =
     "metric-scale";
-
-  track.setAttribute(
-    "role",
-    "meter"
-  );
-
-  track.setAttribute(
-    "aria-valuemin",
-    "0"
-  );
-
-  track.setAttribute(
-    "aria-valuemax",
-    "10"
-  );
 
   const fill =
     document.createElement(
@@ -2002,23 +2136,18 @@ function createScaleCard(
     fill.style.width =
       `${percent}%`;
 
+    fill.style.setProperty(
+      "--metric-value",
+      `${percent}%`
+    );
+
     fill.dataset.level =
       getMetricLevel(
         numeric
       );
-
-    track.setAttribute(
-      "aria-valuenow",
-      String(numeric)
-    );
   } else {
     fill.style.width =
       "0%";
-
-    track.setAttribute(
-      "aria-valuetext",
-      "Нет данных"
-    );
   }
 
   track.appendChild(
@@ -2033,34 +2162,48 @@ function createScaleCard(
   scale.className =
     "metric-scale__labels";
 
-  [
-    "Слабее",
-    "Средне",
-    "Выражено"
-  ].forEach(
-    (text) => {
-      const label =
-        document.createElement(
-          "span"
-        );
+  const weak =
+    document.createElement(
+      "span"
+    );
 
-      label.textContent =
-        text;
+  weak.textContent =
+    "Слабее";
 
-      scale.appendChild(
-        label
-      );
-    }
+  const medium =
+    document.createElement(
+      "span"
+    );
+
+  medium.textContent =
+    "Средне";
+
+  const strong =
+    document.createElement(
+      "span"
+    );
+
+  strong.textContent =
+    "Выражено";
+
+  scale.append(
+    weak,
+    medium,
+    strong
   );
 
   card.append(
-    top,
+    label,
     track,
     scale
   );
 
   return card;
 }
+
+// ============================================================
+// METRIC LEVEL
+// ============================================================
 
 function getMetricLevel(value) {
   if (value < 4) {
@@ -2074,9 +2217,7 @@ function getMetricLevel(value) {
   return "high";
 }
 
-function normalizeMetricValue(
-  value
-) {
+function normalizeMetricValue(value) {
   if (
     value === null ||
     value === undefined ||
@@ -2088,7 +2229,9 @@ function normalizeMetricValue(
   const number =
     Number(value);
 
-  if (!Number.isFinite(number)) {
+  if (
+    !Number.isFinite(number)
+  ) {
     return null;
   }
 
@@ -2099,18 +2242,23 @@ function normalizeMetricValue(
   );
 }
 
-function formatMetricScore(
-  value
-) {
-  return String(
+function formatMetricScore(value) {
+  const rounded =
     Math.round(
       value * 10
-    ) / 10
+    ) / 10;
+
+  return String(
+    rounded
   ).replace(
     ".",
     ","
   );
 }
+
+// ============================================================
+// HISTORY
+// ============================================================
 
 function getHistory() {
   try {
@@ -2126,19 +2274,11 @@ function getHistory() {
     const parsed =
       JSON.parse(raw);
 
-    if (!Array.isArray(parsed)) {
-      return [];
-    }
-
-    return parsed
-      .filter(
-        (entry) =>
-          isObject(entry)
-      )
-      .slice(
-        0,
-        HISTORY_LIMIT
-      );
+    return Array.isArray(
+      parsed
+    )
+      ? parsed
+      : [];
   } catch (error) {
     console.warn(
       "History read error:",
@@ -2154,7 +2294,7 @@ function saveHistory(result) {
     const history =
       getHistory();
 
-    history.unshift({
+    const entry = {
       id:
         `${Date.now()}_${Math.random()
           .toString(36)
@@ -2175,24 +2315,23 @@ function saveHistory(result) {
 
       detected_features:
         result.detected_features
-    });
+    };
 
-    const limited =
-      history.slice(
-        0,
-        HISTORY_LIMIT
-      );
+    history.unshift(
+      entry
+    );
 
     localStorage.setItem(
       HISTORY_KEY,
       JSON.stringify(
-        limited
+        history.slice(
+          0,
+          50
+        )
       )
     );
 
-    updateHistoryCount(
-      limited.length
-    );
+    updateHistoryCount();
   } catch (error) {
     console.warn(
       "History save error:",
@@ -2213,7 +2352,8 @@ function renderHistory() {
     history.length
   );
 
-  historyList.replaceChildren();
+  historyList.innerHTML =
+    "";
 
   if (!history.length) {
     historyList.appendChild(
@@ -2263,9 +2403,11 @@ function renderHistory() {
 
       meta.textContent =
         `${entry.face_count || 0} лицо · ` +
-        `${entry.feature_count ||
+        `${
+          entry.feature_count ||
           entry.detected_features ||
-          0} измерений`;
+          0
+        } измерений`;
 
       left.append(
         date,
@@ -2281,7 +2423,8 @@ function renderHistory() {
         "score";
 
       score.textContent =
-        entry.score == null
+        entry.score === null ||
+        entry.score === undefined
           ? "—"
           : formatScore(
               entry.score
@@ -2313,6 +2456,10 @@ function updateHistoryCount(
   }
 }
 
+// ============================================================
+// RESULT TABS
+// ============================================================
+
 function bindResultTabs() {
   if (!reportTabs) {
     return;
@@ -2333,74 +2480,32 @@ function bindResultTabs() {
       tab.addEventListener(
         "click",
         () => {
-          selectResultTab(
-            tab,
-            tabs,
-            panels
+          const target =
+            tab.dataset.tab;
+
+          if (!target) {
+            return;
+          }
+
+          tabs.forEach(
+            (item) => {
+              item.classList.toggle(
+                "active",
+                item === tab
+              );
+            }
+          );
+
+          panels.forEach(
+            (panel) => {
+              panel.classList.toggle(
+                "active",
+                panel.dataset.panel ===
+                  target
+              );
+            }
           );
         }
-      );
-
-      tab.addEventListener(
-        "keydown",
-        (event) => {
-          if (
-            event.key ===
-              "Enter" ||
-            event.key === " "
-          ) {
-            event.preventDefault();
-
-            selectResultTab(
-              tab,
-              tabs,
-              panels
-            );
-          }
-        }
-      );
-    }
-  );
-}
-
-function selectResultTab(
-  tab,
-  tabs,
-  panels
-) {
-  const target =
-    tab.dataset.tab;
-
-  if (!target) {
-    return;
-  }
-
-  tabs.forEach(
-    (item) => {
-      const active =
-        item === tab;
-
-      item.classList.toggle(
-        "active",
-        active
-      );
-
-      item.setAttribute(
-        "aria-selected",
-        String(active)
-      );
-
-      item.tabIndex =
-        active ? 0 : -1;
-    }
-  );
-
-  panels.forEach(
-    (panel) => {
-      panel.classList.toggle(
-        "active",
-        panel.dataset.panel ===
-          target
       );
     }
   );
@@ -2422,30 +2527,68 @@ function activateDefaultResultTab() {
     return;
   }
 
-  selectResultTab(
-    firstTab,
+  const tabs =
     reportTabs.querySelectorAll(
       ".tab"
-    ),
+    );
+
+  const panels =
     document.querySelectorAll(
       ".tab-panel"
-    )
+    );
+
+  tabs.forEach(
+    (tab) => {
+      tab.classList.toggle(
+        "active",
+        tab === firstTab
+      );
+    }
+  );
+
+  panels.forEach(
+    (panel) => {
+      panel.classList.toggle(
+        "active",
+        panel.dataset.panel ===
+          "overview"
+      );
+    }
   );
 }
 
+// ============================================================
+// NEW ANALYSIS
+// ============================================================
+
 function startNewAnalysis() {
   analysisRequestId++;
-  cancelCurrentAnalysis();
-  clearScoreAnimationTimers();
+
+  if (analysisAbortController) {
+    analysisAbortController.abort();
+
+    analysisAbortController =
+      null;
+  }
+
+  analysisInProgress =
+    false;
 
   selectedFile = null;
   currentAnalysis = null;
 
-  restoreAnalysisPreviewToAnalysisScreen();
-  revokeSelectedObjectUrl();
+  if (selectedObjectUrl) {
+    URL.revokeObjectURL(
+      selectedObjectUrl
+    );
+
+    selectedObjectUrl =
+      null;
+  }
 
   if (fileInput) {
-    fileInput.value = "";
+    fileInput.value =
+      "";
   }
 
   if (uploadName) {
@@ -2461,8 +2604,13 @@ function startNewAnalysis() {
 
   resetAnalysisPreview();
   resetLoadingSteps();
+
   showScreen("home");
 }
+
+// ============================================================
+// TOAST
+// ============================================================
 
 function showToast(message) {
   if (!toast) {
@@ -2472,41 +2620,37 @@ function showToast(message) {
   toast.textContent =
     String(
       message ||
-        "Произошла ошибка."
+      "Произошла ошибка."
     );
 
   toast.classList.add(
     "show"
   );
 
-  window.clearTimeout(
+  clearTimeout(
     toastTimer
   );
 
   toastTimer =
-    window.setTimeout(
-      () =>
+    setTimeout(
+      () => {
         toast.classList.remove(
           "show"
-        ),
-      4000
+        );
+      },
+      4500
     );
 }
 
-function isAbortError(error) {
-  return (
-    error?.name ===
-    "AbortError"
-  );
-}
+// ============================================================
+// ERRORS
+// ============================================================
 
-function getFriendlyErrorMessage(
-  error
-) {
+function getFriendlyErrorMessage(error) {
   const message =
     String(
       error?.message ||
-        ""
+      ""
     );
 
   if (
@@ -2514,7 +2658,9 @@ function getFriendlyErrorMessage(
       "Failed to fetch"
     )
   ) {
-    return "Не удалось подключиться к серверу анализа. Проверь Worker и CORS.";
+    return (
+      "Не удалось подключиться к серверу анализа. Проверь Worker и CORS."
+    );
   }
 
   if (
@@ -2522,26 +2668,34 @@ function getFriendlyErrorMessage(
       "NetworkError"
     )
   ) {
-    return "Сетевая ошибка при подключении к серверу анализа.";
+    return (
+      "Сетевая ошибка при подключении к серверу анализа."
+    );
   }
 
   if (
     message.includes("413")
   ) {
-    return "Фотография слишком большая.";
+    return (
+      "Фотография слишком большая."
+    );
   }
 
   if (
     message.includes("429")
   ) {
-    return "Слишком много запросов. Попробуй немного позже.";
+    return (
+      "Слишком много запросов. Попробуй немного позже."
+    );
   }
 
   if (
     message.includes("401") ||
     message.includes("403")
   ) {
-    return "Сервер не смог выполнить авторизацию анализа.";
+    return (
+      "Сервер не смог авторизоваться в Gemini API."
+    );
   }
 
   return (
@@ -2550,38 +2704,56 @@ function getFriendlyErrorMessage(
   );
 }
 
-function getHttpErrorMessage(
-  status
-) {
+function getHttpErrorMessage(status) {
   if (status === 400) {
-    return "Некорректный запрос к серверу анализа.";
+    return (
+      "Некорректный запрос к серверу анализа."
+    );
   }
 
   if (status === 401) {
-    return "Ошибка авторизации сервера.";
+    return (
+      "Ошибка авторизации сервера."
+    );
   }
 
   if (status === 403) {
-    return "Доступ к серверу анализа запрещён.";
+    return (
+      "Доступ к серверу анализа запрещён."
+    );
   }
 
   if (status === 413) {
-    return "Фотография слишком большая.";
+    return (
+      "Фотография слишком большая."
+    );
   }
 
   if (status === 429) {
-    return "Слишком много запросов. Попробуй позже.";
+    return (
+      "Слишком много запросов. Попробуй позже."
+    );
   }
 
   if (status >= 500) {
-    return "Ошибка сервера анализа.";
+    return (
+      "Ошибка сервера анализа."
+    );
   }
 
-  return `Ошибка сервера (${status}).`;
+  return (
+    `Ошибка сервера (${status}).`
+  );
 }
 
+// ============================================================
+// FORMATTING
+// ============================================================
+
 function formatBytes(bytes) {
-  if (!Number.isFinite(bytes)) {
+  if (
+    !Number.isFinite(bytes)
+  ) {
     return "—";
   }
 
@@ -2589,7 +2761,10 @@ function formatBytes(bytes) {
     return `${bytes} B`;
   }
 
-  if (bytes < 1024 * 1024) {
+  if (
+    bytes <
+    1024 * 1024
+  ) {
     return `${(
       bytes / 1024
     ).toFixed(1)} KB`;
@@ -2605,7 +2780,9 @@ function formatScore(score) {
   const number =
     Number(score);
 
-  if (!Number.isFinite(number)) {
+  if (
+    !Number.isFinite(number)
+  ) {
     return "—";
   }
 
@@ -2704,6 +2881,10 @@ function formatDate(value) {
   );
 }
 
+// ============================================================
+// LABEL HELPERS
+// ============================================================
+
 function getRussianLabel(key) {
   const raw =
     String(key || "");
@@ -2723,7 +2904,9 @@ function getRussianLabel(key) {
 }
 
 function prettifyKey(key) {
-  return String(key || "")
+  return String(
+    key || ""
+  )
     .replace(
       /[\_-]+/g,
       " "
@@ -2744,6 +2927,25 @@ function prettifyKey(key) {
     );
 }
 
+function prettifyPath(path) {
+  const parts =
+    String(path || "")
+      .split(".");
+
+  return parts
+    .map(
+      (part) =>
+        getRussianLabel(
+          part
+        )
+    )
+    .join(" · ");
+}
+
+// ============================================================
+// OBJECT HELPERS
+// ============================================================
+
 function isObject(value) {
   return (
     value !== null &&
@@ -2759,7 +2961,9 @@ function flattenObject(
 ) {
   const result = [];
 
-  if (!isObject(object)) {
+  if (
+    !isObject(object)
+  ) {
     return result;
   }
 
@@ -2888,11 +3092,17 @@ function createEmptyBlock(
   return div;
 }
 
+// ============================================================
+// METRIC GROUP HELPERS
+// ============================================================
+
 function getGroup(
   object,
   names
 ) {
-  if (!isObject(object)) {
+  if (
+    !isObject(object)
+  ) {
     return [];
   }
 
@@ -2923,9 +3133,7 @@ function getProductionValues(
   names
 ) {
   if (
-    !isObject(
-      production
-    )
+    !isObject(production)
   ) {
     return [];
   }
@@ -2949,72 +3157,35 @@ function getProductionValues(
   return result;
 }
 
-function normalizeClientResult(
-  data
-) {
-  return {
-    success: true,
-
-    score:
-      normalizeScore(
-        data.score
-      ),
-
-    face_count:
-      toNumberOrZero(
-        data.face_count
-      ),
-
-    landmarks_count:
-      nullableNumber(
-        data.landmarks_count
-      ),
-
-    detected_features:
-      toNumberOrZero(
-        data.detected_features
-      ),
-
-    feature_count:
-      toNumberOrZero(
-        data.feature_count
-      ),
-
-    metrics:
-      isObject(data.metrics)
-        ? data.metrics
-        : {},
-
-    production_features:
-      isObject(
-        data.production_features
-      )
-        ? data.production_features
-        : {},
-
-    generated_at:
-      data.generated_at ||
-      new Date().toISOString()
-  };
-}
+// ============================================================
+// EVENTS
+// ============================================================
 
 function bindEvents() {
-  uploadButton?.addEventListener(
-    "click",
-    (event) => {
-      event.preventDefault();
-      openFilePicker();
-    }
-  );
+  if (uploadButton) {
+    uploadButton.addEventListener(
+      "click",
+      (event) => {
+        event.preventDefault();
+        openFilePicker();
+      }
+    );
+  }
 
-  fileInput?.addEventListener(
-    "change",
-    (event) => {
-      handleFileSelected(
-        event.target.files?.[0]
-      );
-    }
-  );
+  if (fileInput) {
+    fileInput.addEventListener(
+      "change",
+      (event) => {
+        const file =
+          event.target
+            .files?.[0];
+
+        handleFileSelected(
+          file
+        );
+      }
+    );
+  }
 
   document
     .querySelectorAll(
@@ -3024,7 +3195,7 @@ function bindEvents() {
       (element) => {
         element.addEventListener(
           "click",
-          () => {
+          (event) => {
             if (
               element ===
               uploadButton
@@ -3033,7 +3204,8 @@ function bindEvents() {
             }
 
             const target =
-              element.dataset.screen;
+              element.dataset
+                .screen;
 
             if (target) {
               showScreen(
@@ -3055,7 +3227,8 @@ function bindEvents() {
           "click",
           () => {
             const target =
-              button.dataset.screen;
+              button.dataset
+                .screen;
 
             if (target) {
               showScreen(
@@ -3069,40 +3242,31 @@ function bindEvents() {
       }
     );
 
-  newAnalysisButton?.addEventListener(
-    "click",
-    startNewAnalysis
-  );
+  if (
+    newAnalysisButton
+  ) {
+    newAnalysisButton.addEventListener(
+      "click",
+      startNewAnalysis
+    );
+  }
 
   bindResultTabs();
-
-  window.addEventListener(
-    "pagehide",
-    () => {
-      cancelCurrentAnalysis();
-      clearScoreAnimationTimers();
-      revokeSelectedObjectUrl();
-    }
-  );
 }
+
+// ============================================================
+// STARTUP
+// ============================================================
 
 function init() {
   initTelegram();
+
   bindEvents();
+
   updateHistoryCount();
 
-  if (analysisScoreUnit) {
-    analysisScoreUnit.textContent =
-      "/10";
-  }
-
-  if (resultScoreUnit) {
-    resultScoreUnit.textContent =
-      "/10";
-  }
-
-  resetLoadingSteps();
   activateDefaultResultTab();
+
   showScreen("home");
 
   checkWorkerHealth()
@@ -3110,9 +3274,17 @@ function init() {
       (healthy) => {
         if (!healthy) {
           console.warn(
-            "FaceMetric: Worker health check failed."
+            "FaceMetric: Gemini Worker health check failed."
           );
         }
+      }
+    )
+    .catch(
+      (error) => {
+        console.warn(
+          "Background health check failed:",
+          error
+        );
       }
     );
 }
