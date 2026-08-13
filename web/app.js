@@ -272,6 +272,10 @@ const fileInput = $("#file-input");
 const uploadButton = $("#upload-btn");
 const uploadZone = $("#upload-zone");
 const uploadName = $("#upload-name");
+const profileFileInput = $("#profile-file-input");
+const profileUploadButton = $("#profile-upload-btn");
+const profileUploadName = $("#profile-upload-name");
+const startAnalysisButton = $("#start-analysis-btn");
 
 const analysisImage = $("#analysis-image");
 const analysisFrame = $("#analysis-frame");
@@ -313,6 +317,8 @@ const toast = $("#toast");
 
 let selectedFile = null;
 let selectedObjectUrl = null;
+let selectedProfileFile = null;
+let selectedProfileObjectUrl = null;
 
 let currentAnalysis = null;
 let currentScreen = "home";
@@ -644,32 +650,75 @@ function handleFileSelected(file) {
   }
 
   cancelActiveAnalysis();
-
   analysisRequestId++;
-
   selectedFile = file;
 
   revokeSelectedObjectUrl();
-
   selectedObjectUrl = URL.createObjectURL(file);
 
   if (uploadName) {
-    uploadName.textContent =
-      `${file.name} · ${formatBytes(file.size)}`;
+    uploadName.textContent = `${file.name} · ${formatBytes(file.size)}`;
   }
 
   if (analysisImage) {
     analysisImage.src = selectedObjectUrl;
-    analysisImage.alt = "Фотография для анализа";
+    analysisImage.alt = "Фотография анфас для анализа";
   }
 
   clearAnalysisError();
-
   resetAnalysisPreview();
-
   showScreen("analysis");
 
-  startAnalysis(file);
+  setAnalysisState("ГОТОВО К АНАЛИЗУ");
+  showProfileUploadControl();
+  startAnalysisButton?.removeAttribute("disabled");
+  showToast("Анфас загружен. При желании добавь профиль, затем нажми «Начать анализ».");
+}
+
+function handleProfileFileSelected(file) {
+  if (!getGeminiApiKey()) {
+    openGeminiKeyModal();
+    showToast("Сначала введи Gemini API ключ.");
+    return;
+  }
+
+  if (!selectedFile) {
+    showToast("Сначала добавь фотографию анфас.");
+    return;
+  }
+
+  const validation = validateFile(file);
+
+  if (!validation.valid) {
+    showToast(validation.message);
+    return;
+  }
+
+  selectedProfileFile = file;
+  revokeSelectedProfileObjectUrl();
+  selectedProfileObjectUrl = URL.createObjectURL(file);
+
+  if (profileUploadName) {
+    profileUploadName.textContent = `${file.name} · ${formatBytes(file.size)}`;
+  }
+
+  showProfileUploadControl();
+  startAnalysisButton?.removeAttribute("disabled");
+  showToast("Фото профиля добавлено. Теперь профиль войдёт в общий рейтинг.");
+}
+
+function showProfileUploadControl() {
+  const card = document.getElementById("profile-upload-card");
+  if (card) {
+    card.hidden = false;
+    card.classList.add("is-ready");
+  }
+}
+
+function revokeSelectedProfileObjectUrl() {
+  if (!selectedProfileObjectUrl) return;
+  try { URL.revokeObjectURL(selectedProfileObjectUrl); } catch {}
+  selectedProfileObjectUrl = null;
 }
 
 
@@ -711,6 +760,9 @@ function resetAnalysisPreview() {
 
   clearLandmarks();
   clearAnalysisError();
+
+  if (analysisImage) analysisImage.style.transform = "rotate(0deg)";
+  if (landmarkCanvas) landmarkCanvas.style.transform = "rotate(0deg)";
 }
 
 
@@ -820,7 +872,7 @@ function resizeLandmarkCanvas() {
    START ANALYSIS
 ============================================================ */
 
-async function startAnalysis(file) {
+async function startAnalysis(file, profileFile = null) {
   cancelActiveAnalysis();
 
   const requestId =
@@ -837,7 +889,8 @@ async function startAnalysis(file) {
     const analysisPromise =
       analyzePhoto(
         file,
-        activeAbortController.signal
+        activeAbortController.signal,
+        profileFile
       );
 
     await runLoadingSequence(
@@ -873,11 +926,13 @@ async function startAnalysis(file) {
       completeLoadingSteps();
 
       showFaceNotFound();
+      startAnalysisButton?.removeAttribute("disabled");
 
       return;
     }
 
     currentAnalysis = result;
+    applyAnalysisRotation(result);
 
     const visibleFeatureCount =
       result.feature_count ||
@@ -930,6 +985,7 @@ async function startAnalysis(file) {
     );
 
     setAnalysisState("ОШИБКА");
+    startAnalysisButton?.removeAttribute("disabled");
 
     if (
       error?.code === "GEMINI_QUOTA_EXCEEDED" ||
@@ -975,7 +1031,7 @@ function cancelActiveAnalysis() {
    API
 ============================================================ */
 
-async function analyzePhoto(file, signal) {
+async function analyzePhoto(file, signal, profileFile = null) {
   const validation =
     validateFile(file);
 
@@ -991,8 +1047,16 @@ async function analyzePhoto(file, signal) {
   formData.append(
     "file",
     file,
-    file.name || "photo.jpg"
+    file.name || "front.jpg"
   );
+
+  if (profileFile) {
+    formData.append(
+      "profile",
+      profileFile,
+      profileFile.name || "profile.jpg"
+    );
+  }
 
   const userGeminiKey = getGeminiApiKey();
 
@@ -1296,22 +1360,51 @@ function normalizeClientResult(data) {
         }
       : data;
 
+  const topLandmarks =
+    isObject(source.landmarks)
+      ? source.landmarks
+      : {};
+
+  const topMetrics =
+    isObject(source.metrics)
+      ? source.metrics
+      : {};
+
+  const frontSource =
+    source.front ||
+    source.frontal ||
+    source.front_view ||
+    source.views?.front ||
+    null;
+
+  const profileSource =
+    source.profile ||
+    source.profile_view ||
+    source.views?.profile ||
+    null;
+
   const front =
     normalizeView(
-      source.front ||
-      source.frontal ||
-      source.front_view ||
-      source.views?.front ||
-      null,
+      frontSource
+        ? {
+            ...frontSource,
+            landmarks:
+              frontSource.landmarks || topLandmarks,
+            metrics:
+              frontSource.metrics || topMetrics
+          }
+        : {
+            available: source.face_count > 0,
+            score: source.front_score ?? source.score,
+            landmarks: topLandmarks,
+            metrics: topMetrics
+          },
       "front"
     );
 
   const profile =
     normalizeView(
-      source.profile ||
-      source.profile_view ||
-      source.views?.profile ||
-      null,
+      profileSource,
       "profile"
     );
 
@@ -1367,6 +1460,7 @@ function normalizeClientResult(data) {
       .filter(view => view.available);
 
   const hasProfile =
+    source.has_profile === true ||
     profile.available === true;
 
   return {
@@ -1476,6 +1570,7 @@ function normalizeView(
       image_url: null,
       image_base64: null,
       landmarks_count: null,
+      landmarks: {},
       metrics: {},
       regions: []
     };
@@ -1493,6 +1588,7 @@ function normalizeView(
       image_url: null,
       image_base64: null,
       landmarks_count: null,
+      landmarks: {},
       metrics: {},
       regions: []
     };
@@ -1562,6 +1658,11 @@ function normalizeView(
       nullableNumber(
         data.landmarks_count
       ),
+
+    landmarks:
+      isObject(data.landmarks)
+        ? data.landmarks
+        : {},
 
     metrics,
 
@@ -1872,6 +1973,27 @@ function normalizeRegion(region) {
 
 
 /* ============================================================
+   AUTO ALIGNMENT
+============================================================ */
+
+function applyAnalysisRotation(result) {
+  const correction = Number(
+    result?.view?.roll?.correction_degrees ??
+    result?.rotation ??
+    0
+  );
+
+  if (!Number.isFinite(correction)) return;
+
+  const value = clamp(correction, -15, 15);
+  const transform = `rotate(${value}deg)`;
+
+  if (analysisImage) analysisImage.style.transform = transform;
+  if (landmarkCanvas) landmarkCanvas.style.transform = transform;
+}
+
+
+/* ============================================================
    RESULT
 ============================================================ */
 
@@ -1881,6 +2003,7 @@ function renderResult(result) {
   renderScore(result.score);
 
   renderStats(result);
+  renderProfileSummary(result);
 
   renderOverview(
     result.metrics,
@@ -2127,6 +2250,10 @@ function getViewImageSource(view) {
     return `data:image/jpeg;base64,${view.image_base64}`;
   }
 
+  if (view.type === "profile" && selectedProfileObjectUrl) {
+    return selectedProfileObjectUrl;
+  }
+
   return selectedObjectUrl;
 }
 
@@ -2235,6 +2362,7 @@ function switchResultView(view) {
   }
 
   activeResultView = view;
+  activeMetric = null;
 
   if (currentAnalysis) {
     ensureResultFace(
@@ -2245,9 +2373,14 @@ function switchResultView(view) {
       currentAnalysis
     );
 
-    renderMetricInspector(
-      currentAnalysis
-    );
+    const viewMetrics =
+      view === "profile"
+        ? (currentAnalysis.views?.profile?.metrics || {})
+        : currentAnalysis.metrics;
+
+    renderMetrics(viewMetrics);
+    renderMetricInspector(currentAnalysis);
+    drawMetricOverlay(null);
   }
 }
 
@@ -2525,6 +2658,16 @@ function renderStats(result) {
       "ИЗМЕРЕНИЯ",
       String(measurementCount),
       "показателей"
+    ],
+
+    [
+      "ПРОФИЛЬ",
+      result.has_profile && result.profile_score !== null
+        ? formatScore(result.profile_score)
+        : "—",
+      result.has_profile
+        ? "участвует в рейтинге"
+        : "не добавлен"
     ]
   ].forEach(
     ([labelText, valueText, detailText]) => {
@@ -2571,6 +2714,66 @@ function renderStats(result) {
       );
     }
   );
+}
+
+
+/* ============================================================
+   FRONT + PROFILE SUMMARY
+============================================================ */
+
+function renderProfileSummary(result) {
+  const resultScreen = $("#screen-result");
+  if (!resultScreen) return;
+
+  let box = $("#profile-summary", resultScreen);
+  if (!box) {
+    box = document.createElement("section");
+    box.id = "profile-summary";
+    box.className = "profile-summary";
+    const stats = $("#stats-grid", resultScreen);
+    (stats || resultScreen.firstElementChild)?.insertAdjacentElement("afterend", box);
+  }
+
+  const front = result.views?.front;
+  const profile = result.views?.profile;
+  const frontSrc = getViewImageSource(front);
+  const profileSrc = getViewImageSource(profile);
+
+  box.innerHTML = `
+    <div class="profile-summary__header">
+      <div>
+        <span class="eyebrow">VIEWS</span>
+        <h3>Анфас и профиль</h3>
+      </div>
+      <span class="profile-summary__badge ${result.has_profile ? "is-on" : ""}">
+        ${result.has_profile ? "ПРОФИЛЬ УЧТЁН" : "ТОЛЬКО АНФАС"}
+      </span>
+    </div>
+    <div class="profile-summary__grid">
+      <article class="profile-summary__view">
+        <div class="profile-summary__media">
+          ${frontSrc ? `<img src="${escapeAttribute(frontSrc)}" alt="Анфас">` : ""}
+        </div>
+        <div class="profile-summary__meta">
+          <span>АНФАС</span>
+          <strong>${formatScore(result.front_score ?? result.score)} / 10</strong>
+        </div>
+      </article>
+      <article class="profile-summary__view ${result.has_profile ? "" : "is-empty"}">
+        <div class="profile-summary__media">
+          ${profileSrc && result.has_profile ? `<img src="${escapeAttribute(profileSrc)}" alt="Профиль">` : `<span>${result.has_profile ? "ПРОФИЛЬ" : "+ ДОБАВЬ ПРОФИЛЬ"}</span>`}
+        </div>
+        <div class="profile-summary__meta">
+          <span>ПРОФИЛЬ</span>
+          <strong>${result.has_profile && result.profile_score !== null ? `${formatScore(result.profile_score)} / 10` : "не учитывается"}</strong>
+        </div>
+      </article>
+    </div>
+  `;
+}
+
+function escapeAttribute(value) {
+  return String(value || "").replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 
@@ -3424,25 +3627,26 @@ function drawMetricOverlay(metric) {
   canvas.height = rect.height;
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+  const view = getActiveView(currentAnalysis) || {};
   const landmarks =
+    view.landmarks ||
     currentAnalysis?.landmarks ||
-    currentAnalysis?.frontal?.landmarks ||
     {};
 
-  const zone = getMetricZone(metric?.key);
   const names = metric?.value?.landmarks || [];
 
   const points = names
     .map(n => landmarks[n])
-    .filter(Boolean);
+    .filter(p => p && Number.isFinite(Number(p.x)) && Number.isFinite(Number(p.y)));
 
   if (!points.length) return;
 
   ctx.lineWidth = 3;
+  const status = String(metric?.value?.status || "").toLowerCase();
   ctx.strokeStyle =
-    getMetricLevel(normalizeMetricValue(metric.value)) === "good"
-      ? "#55d98b"
-      : "#ff5368";
+    status === "good" ? "#55d98b" :
+    status === "average" ? "#f2c75c" :
+    status === "poor" ? "#ff5368" : "#75a9ff";
 
   ctx.beginPath();
   points.forEach((p,i)=>{
@@ -4171,12 +4375,14 @@ function startNewAnalysis() {
   cancelActiveAnalysis();
 
   selectedFile = null;
+  selectedProfileFile = null;
   currentAnalysis = null;
 
   activeResultView = "front";
   activeMetric = null;
 
   revokeSelectedObjectUrl();
+  revokeSelectedProfileObjectUrl();
 
   if (fileInput) {
     fileInput.value = "";
@@ -4186,6 +4392,19 @@ function startNewAnalysis() {
     uploadName.textContent =
       "JPG, PNG или WEBP · до 15 MB";
   }
+
+  if (profileFileInput) {
+    profileFileInput.value = "";
+  }
+
+  if (profileUploadName) {
+    profileUploadName.textContent = "Необязательно · фото сбоку";
+  }
+
+  const profileCard = document.getElementById("profile-upload-card");
+  profileCard?.classList.remove("is-ready");
+
+  startAnalysisButton?.setAttribute("disabled", "disabled");
 
   if (analysisImage) {
     analysisImage.removeAttribute(
@@ -5417,6 +5636,40 @@ function bindEvents() {
     }
   );
 
+  startAnalysisButton?.addEventListener(
+    "click",
+    event => {
+      event.preventDefault();
+      if (!selectedFile) {
+        showToast("Сначала добавь фотографию анфас.");
+        return;
+      }
+      startAnalysisButton.disabled = true;
+      startAnalysis(selectedFile, selectedProfileFile);
+    }
+  );
+
+  profileUploadButton?.addEventListener(
+    "click",
+    event => {
+      event.preventDefault();
+      if (!selectedFile) {
+        showToast("Сначала добавь фотографию анфас.");
+        return;
+      }
+      profileFileInput?.click();
+    }
+  );
+
+  profileFileInput?.addEventListener(
+    "change",
+    event => {
+      handleProfileFileSelected(
+        event.target.files?.[0]
+      );
+    }
+  );
+
   uploadZone?.addEventListener(
     "dragover",
     event => {
@@ -5508,6 +5761,7 @@ function bindEvents() {
     () => {
       cancelActiveAnalysis();
       revokeSelectedObjectUrl();
+      revokeSelectedProfileObjectUrl();
     }
   );
 }
