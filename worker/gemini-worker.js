@@ -359,9 +359,9 @@ Do not fabricate exact millimeter measurements.
     ],
 
     generationConfig: {
-      temperature: 0.15,
-      response_mime_type: "application/json"
-    }
+  temperature: 0.15,
+  responseMimeType: "application/json"
+}
   };
 
   // ----------------------------------------------------------
