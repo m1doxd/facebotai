@@ -7,19 +7,16 @@
  *
  * Frontend for the current HTML structure.
  *
- * Website:
- *   https://facebotpsl.snow4lyt.workers.dev/
- *
  * Gemini Worker:
- *   https://facebot-gemini.snow4lyt.workers.dev/api/analyze
+ * https://facebot-gemini.snow4lyt.workers.dev/api/analyze
+ *
+ * Health:
+ * https://facebot-gemini.snow4lyt.workers.dev/api/health
  *
  * IMPORTANT:
- * - The website and Gemini Worker are separate services.
- * - The browser sends multipart/form-data directly to the
- *   Gemini Worker.
- * - The file field name MUST be "file".
- * - Content-Type is NOT set manually for FormData.
- *   The browser creates the multipart boundary automatically.
+ * - Browser sends multipart/form-data directly to Worker.
+ * - File field MUST be "file".
+ * - Do NOT manually set Content-Type for FormData.
  * ============================================================
  */
 
@@ -50,7 +47,8 @@ const tg =
 // DOM REFERENCES
 // ============================================================
 
-const screens = document.querySelectorAll(".screen");
+const screens =
+  document.querySelectorAll(".screen");
 
 const fileInput =
   document.getElementById("file-input");
@@ -91,9 +89,7 @@ const loadingText =
   document.getElementById("loading-text");
 
 const loadingSteps =
-  document.querySelectorAll(
-    ".loading-step"
-  );
+  document.querySelectorAll(".loading-step");
 
 const resultScore =
   document.getElementById("result-score");
@@ -149,17 +145,11 @@ const toast =
 // ============================================================
 
 let selectedFile = null;
-
 let selectedObjectUrl = null;
-
 let currentAnalysis = null;
-
 let currentScreen = "home";
-
 let analysisInProgress = false;
-
 let toastTimer = null;
-
 let analysisRequestId = 0;
 
 
@@ -175,23 +165,15 @@ function initTelegram() {
   try {
     tg.ready();
 
-    if (
-      typeof tg.expand === "function"
-    ) {
+    if (typeof tg.expand === "function") {
       tg.expand();
     }
 
-    if (
-      typeof tg.setHeaderColor ===
-      "function"
-    ) {
+    if (typeof tg.setHeaderColor === "function") {
       tg.setHeaderColor("#08090b");
     }
 
-    if (
-      typeof tg.setBackgroundColor ===
-      "function"
-    ) {
+    if (typeof tg.setBackgroundColor === "function") {
       tg.setBackgroundColor("#08090b");
     }
 
@@ -216,9 +198,7 @@ function initTelegram() {
 
 function showScreen(name) {
   const target =
-    document.getElementById(
-      `screen-${name}`
-    );
+    document.getElementById(`screen-${name}`);
 
   if (!target) {
     console.warn(
@@ -228,33 +208,27 @@ function showScreen(name) {
     return;
   }
 
-  screens.forEach(
-    (screen) => {
-      const isTarget =
-        screen === target;
+  screens.forEach((screen) => {
+    const isTarget =
+      screen === target;
 
-      screen.classList.toggle(
-        "active",
-        isTarget
+    screen.classList.toggle(
+      "active",
+      isTarget
+    );
+
+    if (isTarget) {
+      screen.classList.remove(
+        "screen-enter"
       );
 
-      if (isTarget) {
-        /*
-         * Force the screen-enter animation
-         * every time we switch screens.
-         */
-        screen.classList.remove(
-          "screen-enter"
-        );
+      void screen.offsetWidth;
 
-        void screen.offsetWidth;
-
-        screen.classList.add(
-          "screen-enter"
-        );
-      }
+      screen.classList.add(
+        "screen-enter"
+      );
     }
-  );
+  });
 
   currentScreen = name;
 
@@ -276,32 +250,28 @@ function showScreen(name) {
 
 function updateNavigation(name) {
   const navItems =
-    document.querySelectorAll(
-      ".nav-item"
-    );
+    document.querySelectorAll(".nav-item");
 
-  navItems.forEach(
-    (item) => {
-      const target =
-        item.dataset.screen;
+  navItems.forEach((item) => {
+    const target =
+      item.dataset.screen;
 
-      const active =
-        target === name ||
-        (
-          name === "result" &&
-          target === "home"
-        ) ||
-        (
-          name === "analysis" &&
-          target === "home"
-        );
-
-      item.classList.toggle(
-        "active",
-        active
+    const active =
+      target === name ||
+      (
+        name === "result" &&
+        target === "home"
+      ) ||
+      (
+        name === "analysis" &&
+        target === "home"
       );
-    }
-  );
+
+    item.classList.toggle(
+      "active",
+      active
+    );
+  });
 }
 
 function goBack() {
@@ -336,10 +306,6 @@ function openFilePicker() {
     return;
   }
 
-  /*
-   * Reset the value so selecting the same
-   * image twice still fires the change event.
-   */
   fileInput.value = "";
 
   try {
@@ -372,9 +338,6 @@ function handleFileSelected(file) {
     return;
   }
 
-  /*
-   * Invalidate any previous analysis request.
-   */
   analysisRequestId++;
 
   selectedFile = file;
@@ -390,17 +353,11 @@ function handleFileSelected(file) {
   selectedObjectUrl =
     URL.createObjectURL(file);
 
-  /*
-   * Update filename on home screen.
-   */
   if (uploadName) {
     uploadName.textContent =
       `${file.name} · ${formatBytes(file.size)}`;
   }
 
-  /*
-   * Put the image into the analysis preview.
-   */
   if (analysisImage) {
     analysisImage.src =
       selectedObjectUrl;
@@ -408,41 +365,23 @@ function handleFileSelected(file) {
     analysisImage.alt =
       "Фото для анализа";
 
-    /*
-     * Re-trigger image reveal animation.
-     */
-    analysisImage.style.animation = "none";
+    analysisImage.style.animation =
+      "none";
 
     void analysisImage.offsetWidth;
 
     analysisImage.style.animation = "";
   }
 
-  /*
-   * Update state text.
-   */
   if (analysisState) {
     analysisState.textContent =
       "READY";
   }
 
-  /*
-   * Reset the visible score.
-   */
   resetAnalysisPreview();
 
-  /*
-   * Go straight to the analysis screen.
-   *
-   * There is no separate "Analyze" button
-   * in the supplied HTML, so uploading the
-   * photo starts the analysis automatically.
-   */
   showScreen("analysis");
 
-  /*
-   * Start the real analysis.
-   */
   startAnalysis(file);
 }
 
@@ -455,11 +394,7 @@ function validateFile(file) {
     };
   }
 
-  if (
-    !ALLOWED_TYPES.has(
-      file.type
-    )
-  ) {
+  if (!ALLOWED_TYPES.has(file.type)) {
     return {
       valid: false,
       message:
@@ -475,10 +410,7 @@ function validateFile(file) {
     };
   }
 
-  if (
-    file.size >
-    MAX_FILE_SIZE
-  ) {
+  if (file.size > MAX_FILE_SIZE) {
     return {
       valid: false,
       message:
@@ -530,9 +462,7 @@ function showAnalysisPreviewScore(score) {
   if (
     score === null ||
     score === undefined ||
-    !Number.isFinite(
-      Number(score)
-    )
+    !Number.isFinite(Number(score))
   ) {
     return;
   }
@@ -552,23 +482,15 @@ function showAnalysisPreviewScore(score) {
       "show"
     );
 
-    /*
-     * After the large central score
-     * appears, move it toward the
-     * bottom corner like a scan result.
-     */
-    setTimeout(
-      () => {
-        if (
-          currentScreen === "analysis"
-        ) {
-          analysisScore.classList.add(
-            "float"
-          );
-        }
-      },
-      900
-    );
+    setTimeout(() => {
+      if (
+        currentScreen === "analysis"
+      ) {
+        analysisScore.classList.add(
+          "float"
+        );
+      }
+    }, 900);
   }
 }
 
@@ -578,9 +500,7 @@ function clearLandmarks() {
   }
 
   const context =
-    landmarkCanvas.getContext(
-      "2d"
-    );
+    landmarkCanvas.getContext("2d");
 
   if (!context) {
     return;
@@ -624,20 +544,9 @@ async function startAnalysis(file) {
   );
 
   try {
-    /*
-     * Start the API request immediately.
-     *
-     * This is important:
-     * the animation must NOT delay the
-     * actual Gemini request.
-     */
     const analysisPromise =
       analyzePhoto(file);
 
-    /*
-     * Animate the loading UI while
-     * Gemini is processing.
-     */
     await runLoadingSequence(
       analysisPromise
     );
@@ -645,9 +554,6 @@ async function startAnalysis(file) {
     const result =
       await analysisPromise;
 
-    /*
-     * Ignore an obsolete request.
-     */
     if (
       requestId !==
       analysisRequestId
@@ -661,6 +567,7 @@ async function startAnalysis(file) {
     ) {
       throw new Error(
         result?.detail ||
+        result?.error ||
         "Анализ не выполнен."
       );
     }
@@ -670,34 +577,20 @@ async function startAnalysis(file) {
         result
       );
 
-    /*
-     * Finish loading UI.
-     */
     completeLoadingSteps();
 
     setAnalysisState(
       "COMPLETE"
     );
 
-    /*
-     * Show result score briefly
-     * on the analysis screen.
-     */
     showAnalysisPreviewScore(
       currentAnalysis.score
     );
 
-    /*
-     * Save result locally.
-     */
     saveHistory(
       currentAnalysis
     );
 
-    /*
-     * Small pause so the completion
-     * animation can be seen.
-     */
     await sleep(700);
 
     if (
@@ -743,11 +636,6 @@ async function startAnalysis(file) {
       )
     );
 
-    /*
-     * Keep the selected photo.
-     * User can simply try the same
-     * photo again by clicking upload.
-     */
     showScreen("home");
 
   } finally {
@@ -772,9 +660,6 @@ async function analyzePhoto(file) {
     );
   }
 
-  /*
-   * Validate again before sending.
-   */
   const validation =
     validateFile(file);
 
@@ -784,23 +669,13 @@ async function analyzePhoto(file) {
     );
   }
 
-  /*
-   * FormData is REQUIRED.
-   *
-   * Do NOT manually set:
-   * Content-Type: multipart/form-data
-   *
-   * The browser must generate:
-   * multipart/form-data; boundary=...
-   */
   const formData =
     new FormData();
 
   formData.append(
     "file",
     file,
-    file.name ||
-      "photo.jpg"
+    file.name || "photo.jpg"
   );
 
   let response;
@@ -844,10 +719,7 @@ async function analyzePhoto(file) {
 
   console.log(
     "FaceMetric API response:",
-    responseText.slice(
-      0,
-      2000
-    )
+    responseText.slice(0, 5000)
   );
 
   let data = null;
@@ -882,6 +754,7 @@ async function analyzePhoto(file) {
     const detail =
       data?.detail ||
       data?.error ||
+      data?.message ||
       getHttpErrorMessage(
         response.status
       );
@@ -1001,14 +874,6 @@ async function runLoadingSequence(
     }
   ];
 
-  /*
-   * We don't want the UI to hang forever
-   * if Gemini is slow.
-   *
-   * Each step gets a minimum amount of
-   * visual time, but the request itself
-   * runs in parallel.
-   */
   for (
     let i = 0;
     i < steps.length;
@@ -1031,23 +896,12 @@ async function runLoadingSequence(
         step.text;
     }
 
-    /*
-     * First four stages are relatively
-     * short. The final stage waits for
-     * the actual API response.
-     */
     if (
       i <
       steps.length - 1
     ) {
       await sleep(500);
     } else {
-      /*
-       * The request is already running.
-       * Keep the final stage visible until
-       * the API has finished, but don't block
-       * forever if something unexpected happens.
-       */
       await Promise.race([
         analysisPromise.catch(
           () => null
@@ -1140,60 +994,123 @@ function sleep(ms) {
 // RESULT NORMALIZATION
 // ============================================================
 
-function normalizeClientResult(
-  data
-) {
+function normalizeClientResult(data) {
+  /*
+   * IMPORTANT:
+   *
+   * Worker currently returns:
+   *
+   * {
+   *   success: true,
+   *   model: "...",
+   *   analysis: {
+   *     face_count: 1,
+   *     score: 8.8,
+   *     metrics: {...},
+   *     production_features: {...}
+   *   },
+   *   generated_at: "..."
+   * }
+   *
+   * Therefore we must read data.analysis first.
+   */
+
+  const analysis =
+    isObject(data?.analysis)
+      ? data.analysis
+      : data;
+
+  const metrics =
+    isObject(analysis?.metrics)
+      ? analysis.metrics
+      : {};
+
+  const productionFeatures =
+    isObject(
+      analysis?.production_features
+    )
+      ? analysis.production_features
+      : {};
+
+  const faceCount =
+    toNumberOrZero(
+      analysis?.face_count ??
+      data?.face_count
+    );
+
+  const landmarksCount =
+    nullableNumber(
+      analysis?.landmarks_count ??
+      data?.landmarks_count
+    );
+
+  const detectedFeatures =
+    toNumberOrZero(
+      analysis?.detected_features ??
+      data?.detected_features
+    );
+
+  /*
+   * Worker may not explicitly return
+   * feature_count.
+   *
+   * In that case count all leaf metrics.
+   */
+  const calculatedFeatureCount =
+    countLeaves(metrics);
+
+  const featureCount =
+    toNumberOrZero(
+      analysis?.feature_count ??
+      data?.feature_count
+    ) ||
+    detectedFeatures ||
+    calculatedFeatureCount;
+
+  const model =
+    cleanText(
+      analysis?.model ??
+      data?.model
+    ) ||
+    "Gemini";
+
+  const generatedAt =
+    cleanText(
+      analysis?.generated_at ??
+      data?.generated_at
+    ) ||
+    new Date().toISOString();
+
   return {
     success: true,
 
     score:
       normalizeScore(
-        data.score
+        analysis?.score ??
+        data?.score
       ),
 
     face_count:
-      toNumberOrZero(
-        data.face_count
-      ),
+      faceCount,
 
     landmarks_count:
-      nullableNumber(
-        data.landmarks_count
-      ),
+      landmarksCount,
 
     detected_features:
-      toNumberOrZero(
-        data.detected_features
-      ),
+      detectedFeatures,
 
     feature_count:
-      toNumberOrZero(
-        data.feature_count
-      ),
+      featureCount,
 
-    model:
-      cleanText(
-        data.model
-      ) ||
-      "Gemini",
+    model,
 
-    metrics:
-      isObject(
-        data.metrics
-      )
-        ? data.metrics
-        : {},
+    metrics,
 
     production_features:
-      isObject(
-        data.production_features
-      )
-        ? data.production_features
-        : {},
+      productionFeatures,
 
     generated_at:
-      data.generated_at ||
-      new Date().toISOString()
+      generatedAt
   };
 }
 
@@ -1202,9 +1119,7 @@ function normalizeClientResult(
 // RESULT RENDERING
 // ============================================================
 
-function renderResult(
-  result
-) {
+function renderResult(result) {
   renderScore(
     result.score
   );
@@ -1251,9 +1166,7 @@ function renderResult(
 // SCORE
 // ============================================================
 
-function renderScore(
-  score
-) {
+function renderScore(score) {
   if (
     score === null ||
     score === undefined ||
@@ -1286,11 +1199,6 @@ function renderScore(
       10
     );
 
-  /*
-   * Backend score is 0–10.
-   *
-   * UI displays 0–100.
-   */
   const displayScore =
     Math.round(
       normalized * 10
@@ -1304,11 +1212,6 @@ function renderScore(
   }
 
   if (scoreProgress) {
-    /*
-     * Because the backend score is already
-     * 0–10, multiplying by 10 gives the
-     * percentage.
-     */
     scoreProgress.style.width =
       `${clamp(
         normalized * 10,
@@ -1325,9 +1228,7 @@ function renderScore(
   }
 }
 
-function getScoreStatus(
-  score
-) {
+function getScoreStatus(score) {
   if (score < 3) {
     return "Измерения получены";
   }
@@ -1352,15 +1253,12 @@ function getScoreStatus(
 // STATS
 // ============================================================
 
-function renderStats(
-  result
-) {
+function renderStats(result) {
   if (!statsGrid) {
     return;
   }
 
-  statsGrid.innerHTML =
-    "";
+  statsGrid.innerHTML = "";
 
   const stats = [
     {
@@ -1462,15 +1360,12 @@ function renderStats(
 // OVERVIEW
 // ============================================================
 
-function renderOverview(
-  metrics
-) {
+function renderOverview(metrics) {
   if (!overviewGrid) {
     return;
   }
 
-  overviewGrid.innerHTML =
-    "";
+  overviewGrid.innerHTML = "";
 
   const leaves =
     flattenObject(
@@ -1633,15 +1528,12 @@ function renderHarmony(
 // METRICS / FEATURES
 // ============================================================
 
-function renderMetrics(
-  metrics
-) {
+function renderMetrics(metrics) {
   if (!metricsContent) {
     return;
   }
 
-  metricsContent.innerHTML =
-    "";
+  metricsContent.innerHTML = "";
 
   const groups =
     Object.entries(
@@ -1678,7 +1570,6 @@ function renderMetrics(
             );
           }
         );
-
       } else {
         metricsContent.appendChild(
           createMetricCard(
@@ -1876,9 +1767,7 @@ function renderAngularity(
   const jaw =
     getGroup(
       metrics,
-      [
-        "jaw"
-      ]
+      ["jaw"]
     );
 
   if (jaw.length) {
@@ -1893,9 +1782,7 @@ function renderAngularity(
   const cheeks =
     getGroup(
       metrics,
-      [
-        "cheeks"
-      ]
+      ["cheeks"]
     );
 
   if (cheeks.length) {
@@ -1950,9 +1837,7 @@ function renderSymmetry(
   const symmetry =
     getGroup(
       metrics,
-      [
-        "symmetry"
-      ]
+      ["symmetry"]
     );
 
   if (symmetry.length) {
@@ -1967,9 +1852,7 @@ function renderSymmetry(
   const eyeAlignment =
     getGroup(
       metrics,
-      [
-        "eyes"
-      ]
+      ["eyes"]
     ).filter(
       ([key]) =>
         key ===
@@ -1988,9 +1871,7 @@ function renderSymmetry(
   const productionSymmetry =
     getObjectGroup(
       production,
-      [
-        "symmetry"
-      ]
+      ["symmetry"]
     );
 
   if (productionSymmetry.length) {
@@ -2029,15 +1910,14 @@ function renderDimorphism(
    * biological sex/gender information.
    *
    * If the backend provides a visual
-   * "dimorphism" metric, we display
-   * only the returned measurement.
+   * "dimorphism" metric, display only
+   * the returned measurement.
    */
+
   const productionDimorphism =
     getObjectGroup(
       production,
-      [
-        "dimorphism"
-      ]
+      ["dimorphism"]
     );
 
   if (
@@ -2057,9 +1937,7 @@ function renderDimorphism(
     "Диморфизм"
   );
 
-  if (
-    !groups.length
-  ) {
+  if (!groups.length) {
     dimorphismContent.innerHTML =
       "";
 
@@ -2076,20 +1954,16 @@ function renderDimorphism(
 // HEALTH
 // ============================================================
 
-function renderHealth(
-  result
-) {
+function renderHealth(result) {
   if (!healthContent) {
     return;
   }
 
   /*
    * Keep this section strictly non-medical.
-   * The Worker prompt explicitly prohibits
-   * inferring health conditions.
    */
-  healthContent.innerHTML =
-    "";
+
+  healthContent.innerHTML = "";
 
   const icon =
     document.createElement(
@@ -2126,8 +2000,7 @@ function renderFeatureGroups(
   groups,
   emptyLabel
 ) {
-  container.innerHTML =
-    "";
+  container.innerHTML = "";
 
   if (!groups.length) {
     container.appendChild(
@@ -2333,9 +2206,7 @@ function getHistory() {
   }
 }
 
-function saveHistory(
-  result
-) {
+function saveHistory(result) {
   try {
     const history =
       getHistory();
@@ -2405,8 +2276,7 @@ function renderHistory() {
     history.length
   );
 
-  historyList.innerHTML =
-    "";
+  historyList.innerHTML = "";
 
   if (!history.length) {
     const empty =
@@ -2514,9 +2384,7 @@ function updateHistoryCount(
 
   if (historyCount) {
     historyCount.textContent =
-      String(
-        count
-      );
+      String(count);
   }
 }
 
@@ -2643,8 +2511,7 @@ function startNewAnalysis() {
   }
 
   if (fileInput) {
-    fileInput.value =
-      "";
+    fileInput.value = "";
   }
 
   if (uploadName) {
@@ -2672,9 +2539,7 @@ function startNewAnalysis() {
 // TOAST
 // ============================================================
 
-function showToast(
-  message
-) {
+function showToast(message) {
   if (!toast) {
     return;
   }
@@ -2709,9 +2574,7 @@ function showToast(
 // ERROR MESSAGES
 // ============================================================
 
-function getFriendlyErrorMessage(
-  error
-) {
+function getFriendlyErrorMessage(error) {
   const message =
     String(
       error?.message ||
@@ -2778,31 +2641,41 @@ function getFriendlyErrorMessage(
   );
 }
 
-function getHttpErrorMessage(
-  status
-) {
+function getHttpErrorMessage(status) {
   if (status === 400) {
-    return "Некорректный запрос к серверу анализа.";
+    return (
+      "Некорректный запрос к серверу анализа."
+    );
   }
 
   if (status === 401) {
-    return "Ошибка авторизации Gemini API.";
+    return (
+      "Ошибка авторизации Gemini API."
+    );
   }
 
   if (status === 403) {
-    return "Доступ к Gemini API запрещён.";
+    return (
+      "Доступ к Gemini API запрещён."
+    );
   }
 
   if (status === 413) {
-    return "Файл слишком большой.";
+    return (
+      "Файл слишком большой."
+    );
   }
 
   if (status === 429) {
-    return "Слишком много запросов. Попробуй позже.";
+    return (
+      "Слишком много запросов. Попробуй позже."
+    );
   }
 
   if (status >= 500) {
-    return "Ошибка Gemini Worker.";
+    return (
+      "Ошибка Gemini Worker."
+    );
   }
 
   return `Ошибка сервера (${status}).`;
@@ -2813,9 +2686,7 @@ function getHttpErrorMessage(
 // FORMATTING
 // ============================================================
 
-function formatBytes(
-  bytes
-) {
+function formatBytes(bytes) {
   if (
     !Number.isFinite(
       bytes
@@ -2824,9 +2695,7 @@ function formatBytes(
     return "—";
   }
 
-  if (
-    bytes < 1024
-  ) {
+  if (bytes < 1024) {
     return `${bytes} B`;
   }
 
@@ -2845,9 +2714,7 @@ function formatBytes(
   ).toFixed(2)} MB`;
 }
 
-function formatScore(
-  score
-) {
+function formatScore(score) {
   const number =
     Number(
       score
@@ -2872,9 +2739,7 @@ function formatScore(
   );
 }
 
-function formatValue(
-  value
-) {
+function formatValue(value) {
   if (
     value === null ||
     value === undefined ||
@@ -2939,9 +2804,7 @@ function formatValue(
   );
 }
 
-function formatDate(
-  value
-) {
+function formatDate(value) {
   const date =
     new Date(
       value
@@ -2967,14 +2830,12 @@ function formatDate(
   );
 }
 
-function prettifyKey(
-  key
-) {
+function prettifyKey(key) {
   return String(
     key || ""
   )
     .replace(
-      /[\_-]+/g,
+      /[\\_-]+/g,
       " "
     )
     .replace(
@@ -2993,9 +2854,7 @@ function prettifyKey(
     );
 }
 
-function prettifyPath(
-  path
-) {
+function prettifyPath(path) {
   const parts =
     String(
       path || ""
@@ -3015,9 +2874,7 @@ function prettifyPath(
     );
 }
 
-function shortenModelName(
-  model
-) {
+function shortenModelName(model) {
   const value =
     String(
       model || ""
@@ -3040,9 +2897,7 @@ function shortenModelName(
 // OBJECT HELPERS
 // ============================================================
 
-function isObject(
-  value
-) {
+function isObject(value) {
   return (
     value !== null &&
     typeof value ===
@@ -3099,17 +2954,13 @@ function flattenObject(
   return result;
 }
 
-function countLeaves(
-  object
-) {
+function countLeaves(object) {
   return flattenObject(
     object
   ).length;
 }
 
-function toNumberOrZero(
-  value
-) {
+function toNumberOrZero(value) {
   const number =
     Number(
       value
@@ -3122,9 +2973,7 @@ function toNumberOrZero(
     : 0;
 }
 
-function nullableNumber(
-  value
-) {
+function nullableNumber(value) {
   if (
     value === null ||
     value === undefined ||
@@ -3145,9 +2994,7 @@ function nullableNumber(
     : null;
 }
 
-function normalizeScore(
-  value
-) {
+function normalizeScore(value) {
   if (
     value === null ||
     value === undefined ||
@@ -3180,9 +3027,7 @@ function normalizeScore(
   );
 }
 
-function cleanText(
-  value
-) {
+function cleanText(value) {
   if (
     value === null ||
     value === undefined
@@ -3209,9 +3054,7 @@ function clamp(
   );
 }
 
-function createEmptyBlock(
-  message
-) {
+function createEmptyBlock(message) {
   const div =
     document.createElement(
       "div"
@@ -3312,17 +3155,6 @@ function getObjectGroup(
 // ============================================================
 
 function bindEvents() {
-  /*
-   * MAIN UPLOAD BUTTON
-   *
-   * This is the critical fix.
-   *
-   * Current HTML:
-   *   <button id="upload-btn">
-   *
-   * Current input:
-   *   <input id="file-input" ...>
-   */
   if (uploadButton) {
     uploadButton.addEventListener(
       "click",
@@ -3338,9 +3170,6 @@ function bindEvents() {
     );
   }
 
-  /*
-   * FILE INPUT
-   */
   if (fileInput) {
     fileInput.addEventListener(
       "change",
@@ -3359,14 +3188,6 @@ function bindEvents() {
     );
   }
 
-  /*
-   * NAVIGATION
-   *
-   * Current HTML uses:
-   *   data-screen="history"
-   *
-   * not data-go.
-   */
   document
     .querySelectorAll(
       "[data-screen]"
@@ -3376,10 +3197,6 @@ function bindEvents() {
         element.addEventListener(
           "click",
           (event) => {
-            /*
-             * Don't interfere with the
-             * actual upload button.
-             */
             if (
               element ===
               uploadButton
@@ -3390,9 +3207,7 @@ function bindEvents() {
             const target =
               element.dataset.screen;
 
-            if (
-              target
-            ) {
+            if (target) {
               showScreen(
                 target
               );
@@ -3402,9 +3217,6 @@ function bindEvents() {
       }
     );
 
-  /*
-   * BACK BUTTONS
-   */
   document
     .querySelectorAll(
       ".back-btn"
@@ -3417,9 +3229,7 @@ function bindEvents() {
             const target =
               button.dataset.screen;
 
-            if (
-              target
-            ) {
+            if (target) {
               showScreen(
                 target
               );
@@ -3431,9 +3241,6 @@ function bindEvents() {
       }
     );
 
-  /*
-   * NEW ANALYSIS
-   */
   if (newAnalysisButton) {
     newAnalysisButton.addEventListener(
       "click",
@@ -3443,9 +3250,6 @@ function bindEvents() {
     );
   }
 
-  /*
-   * REPORT TABS
-   */
   bindResultTabs();
 }
 
@@ -3455,11 +3259,6 @@ function bindEvents() {
 // ============================================================
 
 function init() {
-  /*
-   * The script is normally loaded at
-   * the bottom of <body>, so DOM elements
-   * should already exist.
-   */
   initTelegram();
 
   bindEvents();
@@ -3472,10 +3271,6 @@ function init() {
     "home"
   );
 
-  /*
-   * Don't block startup with health check.
-   * It is only diagnostic.
-   */
   checkWorkerHealth()
     .then(
       (healthy) => {
@@ -3497,7 +3292,8 @@ function init() {
 }
 
 
-/*
- * Start the application.
- */
+// ============================================================
+// START APPLICATION
+// ============================================================
+
 init();
