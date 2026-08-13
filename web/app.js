@@ -5,10 +5,12 @@ const MAX_FILE_SIZE = 15 * 1024 * 1024;
 const REQUEST_TIMEOUT = 45_000;
 const HEALTH_TIMEOUT = 8_000;
 const ALLOWED_TYPES = new Set(["image/jpeg","image/png","image/webp"]);
-const API_ENDPOINT = "/api/analyze";
-const HEALTH_ENDPOINT = "/api/health";
-const HISTORY_KEY = "facemetric_history_v2";
+const API_ENDPOINT =
+  "https://facebot-gemini.snow4lyt.workers.dev/api/analyze";
 
+const HEALTH_ENDPOINT =
+  "https://facebot-gemini.snow4lyt.workers.dev/api/health";
+const HISTORY_KEY = "facemetric_history_v2";
 const tg = window.Telegram?.WebApp || null;
 const $ = (s,r=document) => r.querySelector(s);
 const $$ = (s,r=document) => [...r.querySelectorAll(s)];
