@@ -18,7 +18,7 @@
     content="FaceMetric — измерительный анализ пропорций, симметрии и структуры лица."
   >
 
-  <title>FACEMETRIC CLOUD TEST 123</title>
+  <title>FaceMetric — Facial Analysis</title>
 
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <link rel="stylesheet" href="./style.css">
@@ -1278,28 +1278,70 @@
   <div class="api-key-card">
     <div class="api-key-eyebrow">GEMINI / BYOK</div>
 
-    <h2 id="apiKeyTitle">Подключи Gemini API</h2>
+    <h2 id="apiKeyTitle">Подключи свой Gemini</h2>
 
-    <p>
-      Для анализа фотографии нужен твой Gemini API ключ.
-      Он сохраняется только в localStorage этого браузера
-      и передаётся Worker через <code>X-Gemini-Key</code>.
+    <p class="api-key-lead">
+      FaceMetric использует ваш Gemini API ключ для анализа фотографий.
+      Ключ хранится только в этом браузере и передаётся Worker только во время анализа.
     </p>
+
+    <div class="api-key-steps">
+      <div class="api-key-step">
+        <span>01</span>
+        <div>
+          <b>Открой Google AI Studio</b>
+          <small>Войдите в свой Google-аккаунт.</small>
+        </div>
+      </div>
+      <div class="api-key-step">
+        <span>02</span>
+        <div>
+          <b>Создай API Key</b>
+          <small>Откройте раздел API Keys и создайте новый ключ.</small>
+        </div>
+      </div>
+      <div class="api-key-step">
+        <span>03</span>
+        <div>
+          <b>Скопируй ключ</b>
+          <small>Вернитесь сюда и вставьте его в поле ниже.</small>
+        </div>
+      </div>
+    </div>
+
+    <a
+      class="api-key-guide-link"
+      href="https://aistudio.google.com/apikey"
+      target="_blank"
+      rel="noopener noreferrer"
+    >
+      Открыть Google AI Studio ↗
+    </a>
 
     <form id="geminiApiKeyForm" novalidate>
       <label class="api-key-label" for="geminiApiKeyInput">
         Gemini API Key
       </label>
 
-      <input
-        id="geminiApiKeyInput"
-        type="password"
-        placeholder="AIza..."
-        autocomplete="off"
-        spellcheck="false"
-        inputmode="text"
-        required
-      >
+      <div class="api-key-input-wrap">
+        <input
+          id="geminiApiKeyInput"
+          type="password"
+          placeholder="Вставьте API ключ"
+          autocomplete="off"
+          spellcheck="false"
+          inputmode="text"
+          required
+        >
+        <button
+          id="toggleGeminiKeyBtn"
+          class="api-key-toggle"
+          type="button"
+          aria-label="Показать API ключ"
+        >
+          Показать
+        </button>
+      </div>
 
       <div
         id="geminiApiKeyError"
@@ -1310,23 +1352,16 @@
 
       <button
         id="saveGeminiKeyBtn"
+        class="api-key-submit"
         type="submit"
       >
-        Подключить и сохранить
+        Проверить и сохранить
       </button>
     </form>
 
-    <div class="api-help">
-      <b>Как получить ключ:</b><br>
-      1. Открой Google AI Studio<br>
-      2. Создай API Key<br>
-      3. Скопируй его сюда<br>
-      4. Нажми «Подключить и сохранить»
-    </div>
-
     <div class="api-security-note">
-      Ключ не хранится в <code>app.js</code> или Worker-коде.
-      Не вставляй его в публичный код проекта.
+      <b>🔒 Важно:</b> ключ не записывается в исходный код проекта,
+      не публикуется в GitHub и не показывается другим пользователям.
     </div>
   </div>
 </div>
