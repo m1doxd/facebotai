@@ -11,7 +11,7 @@ const ALLOWED_TYPES = new Set([
   "image/webp"
 ]);
 
-const API_ENDPOINT = "/api/analyze";
+const API_ENDPOINT = "https://facebot-gemini.snow4lyt.workers.dev/api/analyze";
 const HEALTH_ENDPOINT = "/api/health";
 const HISTORY_KEY = "facemetric_history_v2";
 
