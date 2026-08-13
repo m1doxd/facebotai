@@ -2,42 +2,87 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
+
   <meta
     name="viewport"
     content="width=device-width, initial-scale=1, viewport-fit=cover"
   >
-  <meta name="theme-color" content="#08090b">
-  <title>FaceMetric</title>
+
+  <meta
+    name="theme-color"
+    content="#08090b"
+  >
+
+  <meta
+    name="description"
+    content="FaceMetric — измерительный анализ пропорций, симметрии и структуры лица."
+  >
+
+  <title>FaceMetric — Facial Analysis</title>
+
   <link rel="stylesheet" href="./style.css">
 </head>
 
 <body>
+
   <div class="app">
 
-    <header class="topbar">
-      <div class="brand">
-        <div class="brand-mark">F</div>
+    <!-- =========================================================
+         TOP BAR
+    ========================================================== -->
 
-        <div>
-          <div class="brand-name">FaceMetric</div>
-          <div class="brand-subtitle">facial analysis</div>
-        </div>
-      </div>
+    <header class="topbar">
+
+      <button
+        class="brand"
+        type="button"
+        data-screen="home"
+        aria-label="FaceMetric — главная"
+      >
+
+        <span class="brand-mark">
+          F
+        </span>
+
+        <span class="brand-copy">
+          <span class="brand-name">
+            FaceMetric
+          </span>
+
+          <span class="brand-subtitle">
+            facial analysis
+          </span>
+        </span>
+
+      </button>
 
       <div class="status">
         <i class="status-dot"></i>
-        SYSTEM READY
+        <span>SYSTEM READY</span>
       </div>
+
     </header>
+
 
     <main>
 
-      <!-- HOME -->
-      <section class="screen active" id="screen-home">
-        <div class="hero-copy reveal">
-          <div class="eyebrow">FACIAL ANALYSIS</div>
+      <!-- =======================================================
+           HOME
+      ======================================================== -->
 
-          <h1>
+      <section
+        class="screen active"
+        id="screen-home"
+        aria-labelledby="home-title"
+      >
+
+        <div class="hero-copy reveal">
+
+          <div class="eyebrow">
+            FACIAL ANALYSIS
+          </div>
+
+          <h1 id="home-title">
             Анализируй.<br>
             <span>Измеряй.</span>
           </h1>
@@ -46,7 +91,9 @@
             Объективный анализ пропорций, симметрии,
             структуры и других измеряемых параметров лица.
           </p>
+
         </div>
+
 
         <input
           id="file-input"
@@ -55,357 +102,1089 @@
           hidden
         >
 
-        <button class="upload-card reveal" id="upload-btn">
-          <div class="upload-icon">
-            <span>↑</span>
-          </div>
 
-          <div class="upload-copy">
-            <strong>Загрузить фотографию</strong>
-            <span id="upload-name">
-              JPG, PNG или WEBP · до 15 MB
+        <div
+          class="upload-zone"
+          id="upload-zone"
+        >
+
+          <button
+            class="upload-card reveal"
+            id="upload-btn"
+            type="button"
+          >
+
+            <span class="upload-icon">
+              <span>↑</span>
             </span>
+
+            <span class="upload-copy">
+
+              <strong>
+                Загрузить фотографию
+              </strong>
+
+              <span id="upload-name">
+                JPG, PNG или WEBP · до 15 MB
+              </span>
+
+            </span>
+
+            <span class="chevron">
+              ↗
+            </span>
+
+          </button>
+
+          <div class="drop-hint">
+            или перетащи изображение сюда
           </div>
 
-          <span class="chevron">↗</span>
-        </button>
+        </div>
+
 
         <div class="home-grid">
-          <button class="mini-card reveal" data-screen="history">
-            <span class="mini-label">01</span>
-            <strong>История</strong>
-            <span class="mini-arrow">↗</span>
+
+          <button
+            class="mini-card reveal"
+            type="button"
+            data-screen="history"
+          >
+
+            <span class="mini-label">
+              01
+            </span>
+
+            <strong>
+              История
+            </strong>
+
+            <span class="mini-arrow">
+              ↗
+            </span>
+
             <span class="mini-line"></span>
+
           </button>
 
-          <button class="mini-card reveal" data-screen="about">
-            <span class="mini-label">02</span>
-            <strong>Методология</strong>
-            <span class="mini-arrow">↗</span>
+
+          <button
+            class="mini-card reveal"
+            type="button"
+            data-screen="about"
+          >
+
+            <span class="mini-label">
+              02
+            </span>
+
+            <strong>
+              Методология
+            </strong>
+
+            <span class="mini-arrow">
+              ↗
+            </span>
+
             <span class="mini-line"></span>
+
           </button>
+
         </div>
+
 
         <div class="trust-row">
-          <span>LOCAL PROCESSING</span>
+
+          <span>
+            MEASUREMENT BASED
+          </span>
+
           <i></i>
-          <span>MEASUREMENT BASED</span>
+
+          <span>
+            LANDMARKS
+          </span>
+
           <i></i>
-          <span>NO GUESSING</span>
+
+          <span>
+            NO GUESSING
+          </span>
+
         </div>
+
 
         <div class="home-footnote reveal">
-          <span class="home-footnote__index">/</span>
+
+          <span class="home-footnote__index">
+            /
+          </span>
 
           <div>
-            <strong>Что измеряется</strong>
+
+            <strong>
+              Что измеряется
+            </strong>
+
             <p>
-              Пропорции, расстояния, углы, симметрия
-              и другие параметры, полученные из изображения.
+              Пропорции, расстояния, углы, симметрия,
+              геометрические отношения и другие параметры,
+              которые реально удалось получить из изображения.
             </p>
+
           </div>
+
         </div>
+
+
+        <div class="home-capabilities">
+
+          <span>01&nbsp; LANDMARKS</span>
+          <span>02&nbsp; GEOMETRY</span>
+          <span>03&nbsp; SYMMETRY</span>
+          <span>04&nbsp; REPORT</span>
+
+        </div>
+
       </section>
 
-      <!-- ANALYSIS -->
-      <section class="screen" id="screen-analysis">
+
+      <!-- =======================================================
+           ANALYSIS
+      ======================================================== -->
+
+      <section
+        class="screen"
+        id="screen-analysis"
+        aria-labelledby="analysis-title"
+      >
 
         <div class="screen-title">
-          <button class="back-btn" data-screen="home">←</button>
+
+          <button
+            class="back-btn"
+            type="button"
+            data-screen="home"
+            aria-label="Назад"
+          >
+            ←
+          </button>
 
           <div>
-            <div class="eyebrow">ANALYSIS</div>
-            <h2>Сканирование</h2>
-          </div>
-        </div>
 
-        <div class="analysis-preview preview-card">
-          <div class="preview-frame" id="analysis-frame">
-            <img id="analysis-image" alt="Фото для анализа">
-
-            <canvas id="landmark-canvas"></canvas>
-
-            <div class="preview-corners">
-              <span></span>
-              <span></span>
-              <span></span>
-              <span></span>
+            <div class="eyebrow">
+              ANALYSIS
             </div>
 
-            <div class="preview-overlay" id="analysis-state">
+            <h2 id="analysis-title">
+              Сканирование
+            </h2>
+
+          </div>
+
+        </div>
+
+
+        <!-- PHOTO ANALYSIS VIEW -->
+
+        <div class="analysis-preview preview-card">
+
+          <div
+            class="preview-frame"
+            id="analysis-frame"
+          >
+
+            <img
+              id="analysis-image"
+              alt="Фото для анализа"
+              draggable="false"
+            >
+
+
+            <!-- dark overlay -->
+
+            <div class="analysis-dark-overlay"></div>
+
+
+            <!-- scanning line -->
+
+            <div
+              class="scan-line"
+              id="scan-line"
+            ></div>
+
+
+            <!-- facial analysis canvas -->
+
+            <canvas
+              id="landmark-canvas"
+              aria-hidden="true"
+            ></canvas>
+
+
+            <!-- additional face guides -->
+
+            <div
+              class="face-guide"
+              id="face-guide"
+              aria-hidden="true"
+            >
+
+              <div class="face-guide-axis"></div>
+
+              <div class="face-guide-zone face-guide-zone--forehead"></div>
+
+              <div class="face-guide-zone face-guide-zone--mid"></div>
+
+              <div class="face-guide-zone face-guide-zone--lower"></div>
+
+            </div>
+
+
+            <!-- corners -->
+
+            <div
+              class="preview-corners"
+              aria-hidden="true"
+            >
+
+              <span></span>
+              <span></span>
+              <span></span>
+              <span></span>
+
+            </div>
+
+
+            <!-- image top status -->
+
+            <div
+              class="preview-status"
+              id="analysis-state"
+            >
               ANALYZING
             </div>
 
-            <div class="analysis-score" id="analysis-score">
-              <span>RESULT</span>
-              <strong>—</strong>
+
+            <!-- image measurement -->
+
+            <div class="preview-measurements">
+
+              <span>
+                LANDMARKS
+                <b id="landmark-count">0</b>
+              </span>
+
+              <span>
+                AXIS
+                <b id="axis-status">—</b>
+              </span>
+
             </div>
+
+
+            <!-- score appears here first -->
+
+            <div
+              class="analysis-score"
+              id="analysis-score"
+            >
+
+              <span>
+                MEASURED SCORE
+              </span>
+
+              <strong>
+                —
+              </strong>
+
+              <small>
+                / 100
+              </small>
+
+            </div>
+
+
+            <!-- tiny processing indicator -->
+
+            <div
+              class="preview-processing"
+              id="preview-processing"
+            >
+
+              <i></i>
+              <span>PROCESSING</span>
+
+            </div>
+
           </div>
+
         </div>
 
-        <div class="loading-screen" id="loading-content">
+
+        <!-- LOADING / ANALYSIS DETAILS -->
+
+        <div
+          class="loading-screen"
+          id="loading-content"
+        >
+
           <div class="scan-orb">
-            <span>FM</span>
+
+            <span>
+              FM
+            </span>
+
             <i class="scan-ring"></i>
+
             <i class="scan-ring scan-ring--outer"></i>
+
           </div>
 
-          <h2 id="loading-title">Анализируем</h2>
-          <p id="loading-text">Подготавливаем изображение</p>
+
+          <h2 id="loading-title">
+            Анализируем
+          </h2>
+
+          <p id="loading-text">
+            Подготавливаем изображение
+          </p>
+
+
+          <div class="loading-progress">
+
+            <div
+              class="loading-progress-bar"
+              id="loading-progress-bar"
+            ></div>
+
+          </div>
+
 
           <div class="loading-steps">
-            <div class="loading-step active" data-step="0">
+
+            <div
+              class="loading-step active"
+              data-step="0"
+            >
+
               <span></span>
-              <b>01</b>
-              <em>Обработка изображения</em>
+
+              <b>
+                01
+              </b>
+
+              <em>
+                Обработка изображения
+              </em>
+
             </div>
 
-            <div class="loading-step" data-step="1">
+
+            <div
+              class="loading-step"
+              data-step="1"
+            >
+
               <span></span>
-              <b>02</b>
-              <em>Поиск facial landmarks</em>
+
+              <b>
+                02
+              </b>
+
+              <em>
+                Поиск facial landmarks
+              </em>
+
             </div>
 
-            <div class="loading-step" data-step="2">
+
+            <div
+              class="loading-step"
+              data-step="2"
+            >
+
               <span></span>
-              <b>03</b>
-              <em>Измерение пропорций</em>
+
+              <b>
+                03
+              </b>
+
+              <em>
+                Измерение пропорций
+              </em>
+
             </div>
 
-            <div class="loading-step" data-step="3">
+
+            <div
+              class="loading-step"
+              data-step="3"
+            >
+
               <span></span>
-              <b>04</b>
-              <em>Расчёт симметрии</em>
+
+              <b>
+                04
+              </b>
+
+              <em>
+                Расчёт симметрии
+              </em>
+
             </div>
 
-            <div class="loading-step" data-step="4">
+
+            <div
+              class="loading-step"
+              data-step="4"
+            >
+
               <span></span>
-              <b>05</b>
-              <em>Формирование отчёта</em>
+
+              <b>
+                05
+              </b>
+
+              <em>
+                Формирование отчёта
+              </em>
+
             </div>
+
           </div>
+
         </div>
 
       </section>
 
-      <!-- RESULT -->
-      <section class="screen" id="screen-result">
+
+      <!-- =======================================================
+           RESULT
+      ======================================================== -->
+
+      <section
+        class="screen"
+        id="screen-result"
+        aria-labelledby="result-title"
+      >
 
         <div class="screen-title result-title">
-          <button class="back-btn" data-screen="home">←</button>
+
+          <button
+            class="back-btn"
+            type="button"
+            data-screen="home"
+            aria-label="Назад"
+          >
+            ←
+          </button>
 
           <div>
-            <div class="eyebrow">ANALYSIS COMPLETE</div>
-            <h2>Результат</h2>
+
+            <div class="eyebrow">
+              ANALYSIS COMPLETE
+            </div>
+
+            <h2 id="result-title">
+              Результат
+            </h2>
+
           </div>
+
         </div>
+
+
+        <!-- RESULT HERO -->
 
         <div class="result-hero">
 
-          <div class="result-score-label">MEASURED SCORE</div>
+          <div class="result-glow"></div>
+
+          <div class="result-score-label">
+            MEASURED SCORE
+          </div>
+
 
           <div class="result-score">
-            <span id="result-score">—</span>
-            <small>/ 100</small>
+
+            <span id="result-score">
+              —
+            </span>
+
+            <small>
+              / 100
+            </small>
+
           </div>
+
 
           <div class="score-track">
-            <div id="score-progress"></div>
+
+            <div
+              id="score-progress"
+            ></div>
+
           </div>
 
+
           <div class="score-meta">
-            <span id="score-status">Измерения получены</span>
-            <span>DATA BASED</span>
+
+            <span id="score-status">
+              Измерения получены
+            </span>
+
+            <span>
+              DATA BASED
+            </span>
+
+          </div>
+
+
+          <div class="score-summary">
+
+            <div class="score-summary-item">
+
+              <span>
+                DATA
+              </span>
+
+              <strong id="score-data-status">
+                VERIFIED
+              </strong>
+
+            </div>
+
+
+            <div class="score-summary-item">
+
+              <span>
+                LANDMARKS
+              </span>
+
+              <strong id="result-landmark-count">
+                —
+              </strong>
+
+            </div>
+
+
+            <div class="score-summary-item">
+
+              <span>
+                MODEL
+              </span>
+
+              <strong>
+                MEASURED
+              </strong>
+
+            </div>
+
           </div>
 
         </div>
 
-        <div class="stats-grid" id="stats-grid"></div>
+
+        <!-- QUICK STATS -->
+
+        <div
+          class="stats-grid"
+          id="stats-grid"
+        ></div>
+
+
+        <!-- REPORT -->
 
         <div class="report-section">
+
           <div class="section-header">
+
             <div>
-              <div class="eyebrow">REPORT</div>
-              <h3>Разделы анализа</h3>
+
+              <div class="eyebrow">
+                REPORT
+              </div>
+
+              <h3>
+                Разделы анализа
+              </h3>
+
             </div>
+
           </div>
 
-          <div class="tabs" id="report-tabs">
-            <button class="tab active" data-tab="overview">
+
+          <div
+            class="tabs"
+            id="report-tabs"
+            role="tablist"
+          >
+
+            <button
+              class="tab active"
+              type="button"
+              data-tab="overview"
+              role="tab"
+              aria-selected="true"
+            >
               Обзор
             </button>
 
-            <button class="tab" data-tab="harmony">
+            <button
+              class="tab"
+              type="button"
+              data-tab="harmony"
+              role="tab"
+              aria-selected="false"
+            >
               Гармония
             </button>
 
-            <button class="tab" data-tab="features">
+            <button
+              class="tab"
+              type="button"
+              data-tab="features"
+              role="tab"
+              aria-selected="false"
+            >
               Черты и детали
             </button>
 
-            <button class="tab" data-tab="angularity">
+            <button
+              class="tab"
+              type="button"
+              data-tab="angularity"
+              role="tab"
+              aria-selected="false"
+            >
               Угловатость
             </button>
 
-            <button class="tab" data-tab="symmetry">
+            <button
+              class="tab"
+              type="button"
+              data-tab="symmetry"
+              role="tab"
+              aria-selected="false"
+            >
               Симметрия
             </button>
 
-            <button class="tab" data-tab="dimorphism">
+            <button
+              class="tab"
+              type="button"
+              data-tab="dimorphism"
+              role="tab"
+              aria-selected="false"
+            >
               Диморфизм
             </button>
 
-            <button class="tab" data-tab="health">
+            <button
+              class="tab"
+              type="button"
+              data-tab="health"
+              role="tab"
+              aria-selected="false"
+            >
               Здоровье
             </button>
+
           </div>
+
 
           <div class="tab-panels">
 
-            <div class="tab-panel active" data-panel="overview">
-              <div class="overview-grid" id="overview-grid"></div>
+            <!-- OVERVIEW -->
+
+            <div
+              class="tab-panel active"
+              data-panel="overview"
+              role="tabpanel"
+            >
+
+              <div
+                class="overview-grid"
+                id="overview-grid"
+              ></div>
+
             </div>
 
-            <div class="tab-panel" data-panel="harmony">
-              <div class="feature-groups" id="harmony-content"></div>
+
+            <!-- HARMONY -->
+
+            <div
+              class="tab-panel"
+              data-panel="harmony"
+              role="tabpanel"
+            >
+
+              <div
+                class="feature-groups"
+                id="harmony-content"
+              ></div>
+
             </div>
 
-            <div class="tab-panel" data-panel="features">
-              <div class="metrics" id="metrics-content"></div>
+
+            <!-- FEATURES -->
+
+            <div
+              class="tab-panel"
+              data-panel="features"
+              role="tabpanel"
+            >
+
+              <div
+                class="metrics"
+                id="metrics-content"
+              ></div>
+
             </div>
 
-            <div class="tab-panel" data-panel="angularity">
-              <div class="feature-groups" id="angularity-content"></div>
+
+            <!-- ANGULARITY -->
+
+            <div
+              class="tab-panel"
+              data-panel="angularity"
+              role="tabpanel"
+            >
+
+              <div
+                class="feature-groups"
+                id="angularity-content"
+              ></div>
+
             </div>
 
-            <div class="tab-panel" data-panel="symmetry">
-              <div class="feature-groups" id="symmetry-content"></div>
+
+            <!-- SYMMETRY -->
+
+            <div
+              class="tab-panel"
+              data-panel="symmetry"
+              role="tabpanel"
+            >
+
+              <div
+                class="feature-groups"
+                id="symmetry-content"
+              ></div>
+
             </div>
 
-            <div class="tab-panel" data-panel="dimorphism">
-              <div class="feature-groups" id="dimorphism-content"></div>
+
+            <!-- DIMORPHISM -->
+
+            <div
+              class="tab-panel"
+              data-panel="dimorphism"
+              role="tabpanel"
+            >
+
+              <div
+                class="feature-groups"
+                id="dimorphism-content"
+              ></div>
+
             </div>
 
-            <div class="tab-panel" data-panel="health">
-              <div class="note-card" id="health-content">
-                <div class="note-icon">i</div>
+
+            <!-- HEALTH -->
+
+            <div
+              class="tab-panel"
+              data-panel="health"
+              role="tabpanel"
+            >
+
+              <div
+                class="note-card"
+                id="health-content"
+              >
+
+                <div class="note-icon">
+                  i
+                </div>
+
                 <p>
-                  Этот раздел не является медицинской диагностикой.
-                  Здесь отображаются только визуальные признаки,
-                  которые реально удалось получить из изображения.
+                  Этот раздел не является медицинской
+                  диагностикой. Здесь отображаются только
+                  визуальные признаки, которые реально удалось
+                  получить из изображения.
                 </p>
+
               </div>
+
             </div>
 
           </div>
+
         </div>
 
+
+        <!-- DATA NOTE -->
+
         <div class="note-card">
-          <div class="note-icon">i</div>
+
+          <div class="note-icon">
+            i
+          </div>
 
           <p>
             Числовые показатели строятся на измеряемых данных.
             Качественные комментарии Gemini не используются
             для создания или изменения числового score.
           </p>
+
         </div>
 
-        <button class="primary-btn" id="new-analysis">
-          <span>Новый анализ</span>
-          <span>↗</span>
+
+        <button
+          class="primary-btn"
+          id="new-analysis"
+          type="button"
+        >
+
+          <span>
+            Новый анализ
+          </span>
+
+          <span>
+            ↗
+          </span>
+
         </button>
 
       </section>
 
-      <!-- HISTORY -->
-      <section class="screen" id="screen-history">
+
+      <!-- =======================================================
+           HISTORY
+      ======================================================== -->
+
+      <section
+        class="screen"
+        id="screen-history"
+        aria-labelledby="history-title"
+      >
 
         <div class="screen-title">
-          <button class="back-btn" data-screen="home">←</button>
+
+          <button
+            class="back-btn"
+            type="button"
+            data-screen="home"
+            aria-label="Назад"
+          >
+            ←
+          </button>
 
           <div>
-            <div class="eyebrow">ARCHIVE</div>
-            <h2>История</h2>
+
+            <div class="eyebrow">
+              ARCHIVE
+            </div>
+
+            <h2 id="history-title">
+              История
+            </h2>
+
           </div>
+
         </div>
+
 
         <div class="history-summary">
-          <span class="eyebrow">ANALYSES</span>
-          <strong id="history-count">0</strong>
-          <span>saved locally</span>
+
+          <span class="eyebrow">
+            ANALYSES
+          </span>
+
+          <strong id="history-count">
+            0
+          </strong>
+
+          <span>
+            saved locally
+          </span>
+
         </div>
 
-        <div class="history-list" id="history-list"></div>
+
+        <div
+          class="history-list"
+          id="history-list"
+        ></div>
 
       </section>
 
-      <!-- ABOUT -->
-      <section class="screen" id="screen-about">
+
+      <!-- =======================================================
+           ABOUT
+      ======================================================== -->
+
+      <section
+        class="screen"
+        id="screen-about"
+        aria-labelledby="about-title"
+      >
 
         <div class="screen-title">
-          <button class="back-btn" data-screen="home">←</button>
+
+          <button
+            class="back-btn"
+            type="button"
+            data-screen="home"
+            aria-label="Назад"
+          >
+            ←
+          </button>
 
           <div>
-            <div class="eyebrow">SYSTEM</div>
-            <h2>Методология</h2>
+
+            <div class="eyebrow">
+              SYSTEM
+            </div>
+
+            <h2 id="about-title">
+              Методология
+            </h2>
+
           </div>
+
         </div>
+
 
         <div class="about-intro">
-          <div class="eyebrow">MEASUREMENT FIRST</div>
+
+          <div class="eyebrow">
+            MEASUREMENT FIRST
+          </div>
 
           <p>
-            Система разделяет объективные измерения и
-            качественную интерпретацию. Gemini может описывать
-            сильные и слабые стороны, но не придумывает
-            числовые измерения.
+            Система разделяет объективные измерения
+            и качественную интерпретацию. Gemini может
+            описывать уже полученные результаты, но не
+            придумывает числовые измерения и не меняет score.
           </p>
+
         </div>
+
 
         <div class="about-stack">
 
           <div class="about-card">
-            <span>01</span>
+
+            <span>
+              01
+            </span>
+
             <div>
-              <strong>Landmarks</strong>
+
+              <strong>
+                Landmarks
+              </strong>
+
               <p>
                 Опорные точки лица используются для построения
-                расстояний, отношений и углов.
+                расстояний, отношений, углов и других
+                геометрических параметров.
               </p>
+
             </div>
+
           </div>
 
-          <div class="about-card">
-            <span>02</span>
-            <div>
-              <strong>Geometry</strong>
-              <p>
-                Параметры рассчитываются из фактически полученных
-                координат и измерений.
-              </p>
-            </div>
-          </div>
 
           <div class="about-card">
-            <span>03</span>
+
+            <span>
+              02
+            </span>
+
             <div>
-              <strong>Symmetry</strong>
+
+              <strong>
+                Geometry
+              </strong>
+
               <p>
-                Левая и правая стороны сравниваются относительно
-                выбранной центральной оси.
+                Параметры рассчитываются из фактически
+                полученных координат и измерений.
               </p>
+
             </div>
+
           </div>
 
+
           <div class="about-card">
-            <span>04</span>
+
+            <span>
+              03
+            </span>
+
             <div>
-              <strong>Gemini</strong>
+
+              <strong>
+                Symmetry
+              </strong>
+
               <p>
-                Используется для текстовой интерпретации уже
-                полученных данных.
+                Левая и правая стороны сравниваются
+                относительно выбранной центральной оси.
               </p>
+
             </div>
+
+          </div>
+
+
+          <div class="about-card">
+
+            <span>
+              04
+            </span>
+
+            <div>
+
+              <strong>
+                Gemini
+              </strong>
+
+              <p>
+                Используется для текстовой интерпретации
+                уже полученных измерительных данных.
+              </p>
+
+            </div>
+
+          </div>
+
+
+          <div class="about-card">
+
+            <span>
+              05
+            </span>
+
+            <div>
+
+              <strong>
+                No fabricated score
+              </strong>
+
+              <p>
+                Интерфейс не создаёт случайный score.
+                Если сервер не вернул валидное числовое
+                значение, результат не показывается.
+              </p>
+
+            </div>
+
           </div>
 
         </div>
@@ -416,25 +1195,76 @@
 
   </div>
 
-  <nav class="bottom-nav">
-    <button class="nav-item active" data-screen="home">
+
+  <!-- =========================================================
+       BOTTOM NAVIGATION
+  ========================================================== -->
+
+  <nav
+    class="bottom-nav"
+    aria-label="Основная навигация"
+  >
+
+    <button
+      class="nav-item active"
+      type="button"
+      data-screen="home"
+    >
+
       <span>⌂</span>
-      <small>Главная</small>
+
+      <small>
+        Главная
+      </small>
+
     </button>
 
-    <button class="nav-item" data-screen="history">
+
+    <button
+      class="nav-item"
+      type="button"
+      data-screen="history"
+    >
+
       <span>◷</span>
-      <small>История</small>
+
+      <small>
+        История
+      </small>
+
     </button>
 
-    <button class="nav-item" data-screen="about">
+
+    <button
+      class="nav-item"
+      type="button"
+      data-screen="about"
+    >
+
       <span>○</span>
-      <small>О системе</small>
+
+      <small>
+        О системе
+      </small>
+
     </button>
+
   </nav>
 
-  <div class="toast" id="toast"></div>
+
+  <!-- =========================================================
+       TOAST
+  ========================================================== -->
+
+  <div
+    class="toast"
+    id="toast"
+    role="status"
+    aria-live="polite"
+  ></div>
+
 
   <script src="./app.js"></script>
+
 </body>
 </html>
