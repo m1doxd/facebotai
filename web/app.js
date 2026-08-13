@@ -3133,6 +3133,49 @@ function renderMetricInspector(
 }
 
 
+function drawMetricOverlay(metric) {
+  const canvas = landmarkCanvas;
+  const img = analysisImage;
+  if (!canvas || !img) return;
+
+  const ctx = canvas.getContext("2d");
+  const rect = img.getBoundingClientRect();
+  canvas.width = rect.width;
+  canvas.height = rect.height;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  const landmarks =
+    currentAnalysis?.landmarks ||
+    currentAnalysis?.frontal?.landmarks ||
+    {};
+
+  const zone = getMetricZone(metric?.key);
+  const names = metric?.value?.landmarks || [];
+
+  const points = names
+    .map(n => landmarks[n])
+    .filter(Boolean);
+
+  if (!points.length) return;
+
+  ctx.lineWidth = 3;
+  ctx.strokeStyle =
+    getMetricLevel(normalizeMetricValue(metric.value)) === "good"
+      ? "#55d98b"
+      : "#ff5368";
+
+  ctx.beginPath();
+  points.forEach((p,i)=>{
+    const x=p.x*canvas.width;
+    const y=p.y*canvas.height;
+    if(i===0) ctx.moveTo(x,y);
+    else ctx.lineTo(x,y);
+    ctx.fillStyle=ctx.strokeStyle;
+    ctx.fillRect(x-4,y-4,8,8);
+  });
+  ctx.stroke();
+}
+
 function selectMetric(
   key,
   value
@@ -3155,6 +3198,7 @@ function selectMetric(
     renderMetricInspector(
       currentAnalysis
     );
+    drawMetricOverlay(activeMetric);
   }
 
   const inspector =
