@@ -9,11 +9,7 @@ const ALLOWED_TYPES = new Set([
 ]);
 
 const DEFAULT_MODEL = "gemini-3.6-flash";
-
-// Deployment marker: 2026-08-13-cors-fix-v2
-// This intentionally changes the Worker source so Git/Cloudflare
-// detects a new deployment.
-const WORKER_BUILD = "2026-08-13-cors-fix-v2";
+const WORKER_BUILD = "2026-08-13-byok-russian-v1";
 
 const SCORE_MIN = 0;
 const SCORE_MAX = 10;
@@ -39,10 +35,19 @@ export default {
         success: true,
         service: "facebot-gemini",
         status: "ok",
-        model: env.GEMINI_MODEL || DEFAULT_MODEL,
-        build: WORKER_BUILD,
-        cors_headers: "Content-Type,Accept,X-Gemini-Key"
+        model: env.GEMINI_MODEL || DEFAULT_MODEL
       });
+    }
+
+    // ========================================================
+    // VALIDATE USER GEMINI KEY
+    // ========================================================
+
+    if (url.pathname === "/api/validate-key") {
+      if (request.method !== "POST") {
+        return json({ success: false, detail: "Method not allowed." }, 405);
+      }
+      return await validateGeminiKey(request);
     }
 
     // ========================================================
@@ -96,6 +101,63 @@ export default {
   }
 };
 
+
+// ============================================================
+// VALIDATE USER GEMINI KEY
+// ============================================================
+
+async function validateGeminiKey(request) {
+  const apiKey = request.headers.get("X-Gemini-Key")?.trim() || "";
+
+  if (!apiKey) {
+    return json({
+      success: false,
+      code: "GEMINI_KEY_REQUIRED",
+      detail: "Gemini API key is required."
+    }, 400);
+  }
+
+  const model = DEFAULT_MODEL;
+  const endpoint =
+    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}`;
+
+  try {
+    const response = await fetch(endpoint, {
+      method: "GET",
+      headers: { "x-goog-api-key": apiKey }
+    });
+
+    const raw = await response.text();
+    let data = null;
+    try { data = raw ? JSON.parse(raw) : null; } catch { /* ignore */ }
+
+    if (!response.ok) {
+      const googleMessage = data?.error?.message || "Gemini API rejected the key.";
+      const status = response.status;
+      return json({
+        success: false,
+        code: status === 401 || status === 403 || status === 400
+          ? "GEMINI_INVALID_KEY"
+          : "GEMINI_UNAVAILABLE",
+        detail: googleMessage
+      }, status === 401 ? 401 : status === 403 ? 403 : status >= 500 ? 502 : 400);
+    }
+
+    return json({
+      success: true,
+      code: "GEMINI_KEY_VALID",
+      detail: "Gemini API key is valid.",
+      model
+    });
+  } catch (error) {
+    console.error("GEMINI KEY VALIDATION ERROR:", error);
+    return json({
+      success: false,
+      code: "GEMINI_UNAVAILABLE",
+      detail: "Could not connect to Gemini API."
+    }, 502);
+  }
+}
 
 // ============================================================
 // MAIN ANALYSIS
@@ -892,6 +954,7 @@ with the remaining fields populated as reasonably as possible.
     return json(
       {
         success: false,
+        code: "GEMINI_UNAVAILABLE",
         detail:
           "Could not connect to Gemini API.",
         error:
@@ -998,10 +1061,22 @@ with the remaining fields populated as reasonably as possible.
       )
     );
 
+    let code = "GEMINI_API_ERROR";
+    if (geminiResponse.status === 401 || geminiResponse.status === 403) {
+      code = "GEMINI_INVALID_KEY";
+    } else if (geminiResponse.status === 429) {
+      code = "GEMINI_QUOTA_EXCEEDED";
+    } else if (geminiResponse.status >= 500) {
+      code = "GEMINI_UNAVAILABLE";
+    }
+
     return json(
       {
         success: false,
-        detail: message
+        code,
+        detail: message,
+        gemini_status: geminiResponse.status,
+        gemini_error: geminiData?.error || null
       },
       geminiResponse.status
     );
@@ -2483,7 +2558,7 @@ function corsHeaders() {
       "GET,POST,OPTIONS",
 
     "Access-Control-Allow-Headers":
-      "Content-Type, Accept, X-Gemini-Key"
+      "Content-Type,Accept,X-Gemini-Key"
   };
 }
 
