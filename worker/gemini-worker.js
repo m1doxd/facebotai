@@ -10,10 +10,8 @@ const ALLOWED_TYPES = new Set([
 
 const DEFAULT_MODEL = "gemini-3.6-flash";
 
-// Deployment marker: 2026-08-13-cors-fix-v2
-// This intentionally changes the Worker source so Git/Cloudflare
-// detects a new deployment.
-const WORKER_BUILD = "2026-08-13-byok-quota-modal-v1";
+// Deployment marker: 2026-08-13-byok-profile-v1
+const WORKER_BUILD = "2026-08-13-byok-profile-v1";
 
 const SCORE_MIN = 0;
 const SCORE_MAX = 10;
@@ -299,6 +297,7 @@ async function analyze(request, env) {
   }
 
   const file = formData.get("file");
+  const profileFile = formData.get("profile");
 
   if (
     !file ||
@@ -349,11 +348,34 @@ async function analyze(request, env) {
     );
   }
 
+  if (profileFile && typeof profileFile.arrayBuffer === "function") {
+    const profileMimeType = profileFile.type || "";
+    if (!ALLOWED_TYPES.has(profileMimeType)) {
+      return json(
+        { success: false, detail: "Only JPG, PNG and WEBP profile images are supported." },
+        400
+      );
+    }
+    if (profileFile.size <= 0) {
+      return json(
+        { success: false, detail: "The profile image file is empty." },
+        400
+      );
+    }
+    if (profileFile.size > MAX_FILE_SIZE) {
+      return json(
+        { success: false, detail: "Profile image is too large. Maximum size is 15 MB." },
+        413
+      );
+    }
+  }
+
   // ========================================================
   // IMAGE -> BASE64
   // ========================================================
 
   let base64;
+  let profileBase64 = null;
 
   try {
     const bytes =
@@ -362,6 +384,11 @@ async function analyze(request, env) {
       );
 
     base64 = uint8ToBase64(bytes);
+
+    if (profileFile && typeof profileFile.arrayBuffer === "function") {
+      const profileBytes = new Uint8Array(await profileFile.arrayBuffer());
+      profileBase64 = uint8ToBase64(profileBytes);
+    }
   } catch (error) {
     console.error(
       "IMAGE READ ERROR:",
@@ -442,7 +469,9 @@ Possible view values:
 
 A frontal image is the preferred primary analysis view.
 
-A profile image is optional.
+A profile image is optional. If a separate profile image is supplied,
+use it for profile-specific measurements and include its result in the overall score.
+If no profile image is supplied, profile_harmony MUST remain null and must not affect score.
 
 A three-quarter image must NOT be treated as a perfect frontal
 or perfect profile image.
@@ -707,8 +736,10 @@ OVERALL SCORE
 
 Return one overall visual harmony score from 0 to 10.
 
-This score should reflect the visible facial geometry
-and the quality of the usable image.
+If a profile image is supplied and usable, the overall score MUST reflect both
+frontal and profile harmony. Return separate frontal_harmony and profile_harmony
+so the frontend can show both. If no profile image is supplied, the overall score
+must be based only on the frontal image.
 
 Do not make the score artificially high.
 
@@ -868,7 +899,9 @@ Return exactly this high-level structure:
   "profile": {
     "available": false,
     "confidence": 0.0,
-    "harmony": null
+    "harmony": null,
+    "landmarks": {},
+    "metrics": {}
   },
 
   "landmarks": {
@@ -973,6 +1006,24 @@ with the remaining fields populated as reasonably as possible.
               data: base64
             }
           },
+          {
+            text: profileBase64
+              ? "IMAGE 1 — FRONT / FRONTAL VIEW"
+              : "IMAGE — FRONT / FRONTAL VIEW"
+          },
+          ...(profileBase64
+            ? [
+                {
+                  inline_data: {
+                    mime_type: profileFile.type,
+                    data: profileBase64
+                  }
+                },
+                {
+                  text: "IMAGE 2 — PROFILE VIEW. This is the optional profile photo of the same person."
+                }
+              ]
+            : []),
           {
             text: prompt
           }
@@ -1462,11 +1513,26 @@ function normalizeAnalysis(
       false
     );
 
-  const profile =
+  const rawProfile =
+    isPlainObject(data.profile)
+      ? data.profile
+      : {};
+
+  const normalizedProfile =
     normalizeViewResult(
-      data.profile,
+      rawProfile,
       true
     );
+
+  const profile = {
+    ...normalizedProfile,
+    landmarks:
+      normalizeLandmarks(rawProfile.landmarks),
+    metrics:
+      normalizeMetrics(rawProfile.metrics),
+    landmarks_count:
+      Object.keys(rawProfile.landmarks || {}).length || null
+  };
 
   const landmarks =
     normalizeLandmarks(
@@ -1489,15 +1555,35 @@ function normalizeAnalysis(
       sections
     );
 
+  const frontalScore =
+    normalizeNullableScore(
+      frontal.harmony
+    );
+
+  const profileScore =
+    normalizeNullableScore(
+      profile.harmony
+    );
+
+  // Deterministic application rule: when a real profile image is present,
+  // it participates in the final score. Without a profile, nothing changes.
+  const combinedScore =
+    frontalScore !== null && profileScore !== null
+      ? clampScore(
+          frontalScore * 0.7 +
+          profileScore * 0.3
+        )
+      : score !== null
+        ? score
+        : faceCount > 0
+          ? calculateFallbackOverallScore(
+              sections,
+              production
+            )
+          : null;
+
   const normalizedScore =
-    score !== null
-      ? score
-      : faceCount > 0
-        ? calculateFallbackOverallScore(
-            sections,
-            production
-          )
-        : null;
+    combinedScore;
 
   const percent =
     normalizedScore === null
@@ -2080,6 +2166,14 @@ function normalizeProductionFeatures(
 // ============================================================
 // FALLBACK SCORE
 // ============================================================
+
+function clampScore(value) {
+  if (value === null || value === undefined) return null;
+  const number = Number(value);
+  if (!Number.isFinite(number)) return null;
+  return Math.round(Math.max(SCORE_MIN, Math.min(SCORE_MAX, number)) * 10) / 10;
+}
+
 
 function calculateFallbackOverallScore(
   sections,
