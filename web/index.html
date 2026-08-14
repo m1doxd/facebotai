@@ -448,7 +448,7 @@
         </div>
 
 
-        <div class="classification-settings" id="classification-settings">
+        <div class="classification-settings" id="classification-settings" hidden>
           <div class="classification-settings__title">Профиль оценки</div>
           <div class="classification-settings__grid">
             <label class="classification-field">
@@ -1333,6 +1333,44 @@
   ></div>
 
 
+
+<div
+  id="classificationModal"
+  class="api-key-modal classification-modal"
+  hidden
+  aria-hidden="true"
+  role="dialog"
+  aria-modal="true"
+  aria-labelledby="classificationModalTitle"
+>
+  <div class="api-key-card classification-modal-card">
+    <div class="api-key-eyebrow">FACEMETRIC / PROFILE</div>
+    <h2 id="classificationModalTitle">Настроим анализ</h2>
+    <p>Выбери профиль анализа перед началом. Геометрические измерения лица остаются отдельными от классификационного ярлыка.</p>
+
+    <form id="classificationForm" novalidate>
+      <label class="api-key-label" for="classificationGender">Профиль</label>
+      <select id="classificationGender" class="classification-modal-select">
+        <option value="male">Мужчина</option>
+        <option value="female">Женщина</option>
+      </select>
+
+      <label class="classification-modal-check" for="classificationAdult">
+        <input id="classificationAdult" type="checkbox">
+        <span>Мне уже есть 18 лет</span>
+      </label>
+
+      <div id="classificationModalError" class="api-key-error" role="alert" hidden></div>
+
+      <button id="saveClassificationBtn" type="submit">Продолжить анализ</button>
+    </form>
+
+    <div class="api-help">
+      <b>Зачем это нужно:</b><br>
+      выбор профиля нужен для корректного отображения классификации. Сами геометрические измерения рассчитываются отдельно.
+    </div>
+  </div>
+</div>
 
 <div
   id="apiKeyModal"
