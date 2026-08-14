@@ -1350,7 +1350,8 @@ async function analyzePhoto(file, signal, profileFile = null) {
     );
   }
 
-  formData.append("gender", selectedGender);
+  const gender = (selectedGender === "female" ? "female" : "male");
+  formData.append("gender", gender);
   formData.append("adult_confirmed", adultConfirmed ? "true" : "false");
 
   const userGeminiKey = getGeminiApiKey();
