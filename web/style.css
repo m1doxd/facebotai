@@ -2690,3 +2690,63 @@ button:focus-visible,
     grid-template-columns: 1fr;
   }
 }
+
+
+/* ============================================================
+   CLASSIFICATION / AGE MODAL
+============================================================ */
+.classification-modal{
+  opacity:0;
+  transition:opacity .22s ease;
+}
+.classification-modal.show{
+  opacity:1;
+}
+.classification-modal-card{
+  transform:translateY(10px) scale(.985);
+  transition:transform .28s cubic-bezier(.2,.8,.2,1);
+}
+.classification-modal.show .classification-modal-card{
+  transform:translateY(0) scale(1);
+}
+.classification-modal-select{
+  box-sizing:border-box;
+  display:block;
+  width:100%;
+  min-height:46px;
+  margin:0 0 14px;
+  padding:12px 13px;
+  border:1px solid #303640;
+  border-radius:11px;
+  outline:none;
+  background:#08090b;
+  color:#fff;
+  font:inherit;
+  font-size:13px;
+}
+.classification-modal-select:focus{
+  border-color:rgba(255,255,255,.55);
+  box-shadow:0 0 0 3px rgba(255,255,255,.06);
+}
+.classification-modal-check{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  min-height:44px;
+  margin:4px 0 10px;
+  color:#d8dbe0;
+  font-size:12px;
+  line-height:1.4;
+  cursor:pointer;
+}
+.classification-modal-check input{
+  width:18px;
+  height:18px;
+  margin:0;
+  accent-color:#fff;
+}
+@media (prefers-reduced-motion:reduce){
+  .classification-modal,.classification-modal-card{
+    transition:none!important;
+  }
+}
