@@ -786,52 +786,133 @@ function stopAnalysisScanner(done = false) {
   analysisFrame?.classList.toggle("scanner-active", !done);
 }
 
-function drawAnalysisNetwork(result) {
-  const canvas = landmarkCanvas;
-  if (!canvas || !analysisFrame) return;
-  const landmarks = result?.landmarks || result?.frontal?.landmarks || {};
-  const points = Object.fromEntries(
+function getMetricLandmarkNames(key, viewType = "front") {
+  const k = String(key || "").split(".").pop();
+  if (viewType === "profile") {
+    const profileMap = {
+      nasofacial_angle: ["profile_glabella","profile_nasion","profile_pronasale"],
+      nasolabial_angle: ["profile_pronasale","profile_subnasale","profile_labiale_superius"],
+      gonial_angle: ["profile_pogonion","profile_gonion","profile_chin_neck"],
+      nose_chin_projection: ["profile_nasion","profile_pronasale","profile_pogonion"],
+      profile_projection_balance: ["profile_pronasale","profile_labiale_superius","profile_pogonion"],
+      profile_harmony: ["profile_glabella","profile_nasion","profile_pronasale","profile_pogonion","profile_menton"]
+    };
+    return profileMap[k] || ["profile_glabella","profile_nasion","profile_pronasale","profile_pogonion","profile_menton"];
+  }
+  const map = {
+    face_aspect_ratio: ["left_cheekbone","right_cheekbone","forehead_center","chin"],
+    eye_alignment: ["left_eye_inner","right_eye_inner"],
+    eye_spacing: ["left_eye_inner","right_eye_inner"],
+    left_eye_width: ["left_eye_inner","left_eye_outer"],
+    right_eye_width: ["right_eye_inner","right_eye_outer"],
+    mouth_symmetry: ["mouth_left","mouth_right"],
+    mouth_width: ["mouth_left","mouth_right"],
+    jaw_symmetry: ["left_jaw","right_jaw"],
+    jaw_width: ["left_jaw","right_jaw"],
+    cheek_symmetry: ["left_cheekbone","right_cheekbone"],
+    nose_width: ["nose_left","nose_right"],
+    nose_length: ["nose_bridge","nose_tip"],
+    chin_width: ["left_jaw","chin","right_jaw"],
+    upper_to_lower_third: ["forehead_center","left_eye_inner","right_eye_inner","chin"],
+    mid_to_lower_face: ["left_eye_inner","right_eye_inner","upper_lip_center","chin"],
+    jaw_angle: ["left_cheekbone","left_jaw","chin","right_jaw","right_cheekbone"],
+    overall_symmetry: ["left_eye_inner","right_eye_inner","mouth_left","mouth_right","left_jaw","right_jaw"],
+    symmetry: ["left_eye_inner","right_eye_inner","mouth_left","mouth_right","left_jaw","right_jaw"]
+  };
+  return map[k] || [];
+}
+
+function metricOverlayColor(metric) {
+  const status = String(metric?.value?.status || "").toLowerCase();
+  const score = normalizeMetricValue(metric?.value);
+  if (status === "poor" || (score !== null && score < 5)) return "#ff5368";
+  if (status === "average" || (score !== null && score < 7)) return "#f2c75c";
+  if (status === "good" || (score !== null && score >= 7)) return "#55d98b";
+  return "#75a9ff";
+}
+
+function getOverlayPoints(view) {
+  const landmarks = view?.landmarks || {};
+  return Object.fromEntries(
     Object.entries(landmarks).filter(([, p]) =>
       p && Number.isFinite(Number(p.x)) && Number.isFinite(Number(p.y))
     )
   );
-  const names = Object.keys(points);
-  if (!names.length) return;
+}
 
-  resizeLandmarkCanvas();
-  const rect = analysisFrame.getBoundingClientRect();
+function drawFaceLandmarkNetwork(canvas, view, metric = null, progress = 1) {
+  if (!canvas) return;
+  const rect = canvas.getBoundingClientRect();
+  const width = rect.width || canvas.clientWidth;
+  const height = rect.height || canvas.clientHeight;
+  if (!width || !height) return;
+  const ratio = window.devicePixelRatio || 1;
+  if (canvas.width !== Math.round(width * ratio) || canvas.height !== Math.round(height * ratio)) {
+    canvas.width = Math.max(1, Math.round(width * ratio));
+    canvas.height = Math.max(1, Math.round(height * ratio));
+  }
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
-  ctx.clearRect(0, 0, rect.width, rect.height);
+  ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+  ctx.clearRect(0, 0, width, height);
 
-  const xy = name => ({
-    x: Number(points[name].x) * rect.width,
-    y: Number(points[name].y) * rect.height
-  });
-  const pairs = [
-    ["left_eye_outer","left_eye_inner"],["left_eye_inner","right_eye_inner"],["right_eye_inner","right_eye_outer"],
-    ["left_eyebrow_inner","left_eyebrow_outer"],["right_eyebrow_inner","right_eyebrow_outer"],
-    ["nose_bridge","nose_tip"],["nose_left","nose_tip"],["nose_tip","nose_right"],
-    ["mouth_left","mouth_right"],["mouth_left","mouth_center"],["mouth_center","mouth_right"],
-    ["left_cheek","left_jaw"],["left_jaw","chin"],["chin","right_jaw"],["right_jaw","right_cheek"],
-    ["forehead_center","nose_bridge"],["nose_bridge","mouth_center"]
-  ];
+  const viewType = view?.type === "profile" ? "profile" : "front";
+  const points = getOverlayPoints(view);
+  const names = Object.keys(points);
+  if (!names.length) return;
+  const xy = name => ({x:Number(points[name].x)*width, y:Number(points[name].y)*height});
+  const pairs = viewType === "profile"
+    ? [["profile_forehead","profile_glabella"],["profile_glabella","profile_nasion"],["profile_nasion","profile_pronasale"],["profile_pronasale","profile_subnasale"],["profile_subnasale","profile_labiale_superius"],["profile_labiale_superius","profile_labiale_inferius"],["profile_labiale_inferius","profile_pogonion"],["profile_pogonion","profile_menton"],["profile_menton","profile_chin_neck"]]
+    : [["left_eye_outer","left_eye_inner"],["left_eye_inner","right_eye_inner"],["right_eye_inner","right_eye_outer"],["left_brow_inner","left_brow_outer"],["right_brow_inner","right_brow_outer"],["nose_bridge","nose_tip"],["nose_left","nose_tip"],["nose_tip","nose_right"],["mouth_left","mouth_right"],["forehead_center","nose_bridge"],["nose_bridge","mouth_center"],["mouth_center","chin"],["left_cheekbone","left_jaw"],["left_jaw","chin"],["chin","right_jaw"],["right_jaw","right_cheekbone"]];
 
-  ctx.lineWidth = 1.2;
-  ctx.strokeStyle = "rgba(255,255,255,.48)";
-  ctx.shadowColor = "rgba(255,255,255,.24)";
-  ctx.shadowBlur = 8;
-  for (const [a,b] of pairs) {
-    if (!points[a] || !points[b]) continue;
-    const A=xy(a), B=xy(b);
+  const visiblePairs = pairs.filter(([a,b]) => points[a] && points[b]);
+  const count = Math.max(0, Math.floor(visiblePairs.length * Math.max(0, Math.min(1, progress))));
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.lineWidth = metric ? 2.6 : 1.15;
+  ctx.strokeStyle = metric ? metricOverlayColor(metric) : "rgba(255,255,255,.78)";
+  ctx.shadowColor = metric ? metricOverlayColor(metric) : "rgba(255,255,255,.28)";
+  ctx.shadowBlur = metric ? 14 : 7;
+  for (let i=0;i<count;i++) {
+    const [a,b]=visiblePairs[i]; const A=xy(a), B=xy(b);
     ctx.beginPath(); ctx.moveTo(A.x,A.y); ctx.lineTo(B.x,B.y); ctx.stroke();
   }
   ctx.shadowBlur = 0;
-  for (const name of names) {
+
+  const selectedNames = metric
+    ? (Array.isArray(metric.value?.landmarks) && metric.value.landmarks.length ? metric.value.landmarks : getMetricLandmarkNames(metric.key, viewType))
+    : names;
+  const radius = metric ? 3.2 : 2.1;
+  for (const name of selectedNames) {
+    if (!points[name]) continue;
     const p=xy(name);
-    ctx.beginPath(); ctx.arc(p.x,p.y,2.2,0,Math.PI*2);
-    ctx.fillStyle="rgba(255,255,255,.92)"; ctx.fill();
+    ctx.beginPath(); ctx.arc(p.x,p.y,radius,0,Math.PI*2);
+    ctx.fillStyle=metric ? metricOverlayColor(metric) : "rgba(255,255,255,.95)";
+    ctx.fill();
+    if (metric) {
+      ctx.beginPath(); ctx.arc(p.x,p.y,radius+4,0,Math.PI*2);
+      ctx.strokeStyle="rgba(255,255,255,.55)"; ctx.lineWidth=1; ctx.stroke();
+    }
   }
+}
+
+function drawAnalysisNetwork(result, metric = null, progress = 1) {
+  const canvas = landmarkCanvas;
+  if (!canvas || !analysisFrame) return;
+  const view = getActiveView(result) || result?.frontal || {landmarks: result?.landmarks || {}, type:"front"};
+  drawFaceLandmarkNetwork(canvas, view, metric, progress);
+}
+
+function animateAnalysisNetwork(result) {
+  const start = performance.now();
+  const duration = 1250;
+  const tick = now => {
+    const p = Math.min(1, (now-start)/duration);
+    const eased = 1 - Math.pow(1-p, 2);
+    drawAnalysisNetwork(result, null, eased);
+    if (p < 1) requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
 }
 
 function revealAnalysisScore(score) {
@@ -1071,7 +1152,11 @@ async function startAnalysis(file, profileFile = null) {
 
     currentAnalysis = result;
     applyAnalysisAlignment(result);
-    requestAnimationFrame(() => drawAnalysisNetwork(result));
+    requestAnimationFrame(() => animateAnalysisNetwork(result));
+    if (alignmentStatus) {
+      alignmentStatus.textContent = "ЛИЦО ВЫРОВНЕНО ✓";
+      alignmentStatus.dataset.state = "done";
+    }
     stopAnalysisScanner(true);
 
     const visibleFeatureCount =
@@ -1660,12 +1745,8 @@ function normalizeClientResult(data) {
       normalizeRotation(
         source.rotation ??
         source.rotation_angle ??
-        source.alignment?.rotation
-      ),
-
-    alignment:
-      normalizeAlignment(
-        source.alignment
+        source.alignment?.rotation ??
+        source.alignment?.front?.correction_degrees
       ),
 
     regions:
@@ -2211,13 +2292,12 @@ function applyAnalysisAlignment(result) {
   }
 
   if (alignmentStatus) {
-    alignmentStatus.textContent = "ЦЕНТРИРУЕМ ЛИЦО · ПОВОРОТ + ОСЬ + МАСШТАБ";
+    alignmentStatus.textContent = "ВЫРАВНИВАЕМ · ПОВОРОТ + ЦЕНТР + МАСШТАБ";
     alignmentStatus.dataset.state = "active";
   }
 
   requestAnimationFrame(() => {
     applyImageAlignment(analysisImage, alignment, analysisFrame);
-    applyImageAlignment(landmarkCanvas, alignment, analysisFrame);
     setTimeout(() => setAlignmentStatus(alignment, "done"), 450);
   });
 }
@@ -2271,6 +2351,7 @@ function renderResult(result) {
   renderClassification(result);
 
   renderMetricInspector(result);
+  requestAnimationFrame(() => drawResultMetricOverlay(activeMetric));
 
   injectStageTwoStyles();
 }
@@ -2311,6 +2392,12 @@ function ensureResultFace(result) {
           class="result-visual__image"
           alt="Результат анализа"
         >
+
+        <canvas
+          id="result-landmark-canvas"
+          class="result-landmark-canvas"
+          aria-hidden="true"
+        ></canvas>
 
         <div class="result-visual__shade"></div>
 
@@ -2429,10 +2516,8 @@ function ensureResultFace(result) {
     "score-landed"
   );
 
-  renderRegionOverlay(
-    visual,
-    result
-  );
+  renderRegionOverlay(visual, result);
+  requestAnimationFrame(() => drawResultMetricOverlay(activeMetric));
 }
 
 
@@ -2614,7 +2699,8 @@ function switchResultView(view) {
 
     renderMetrics(viewMetrics);
     renderMetricInspector(currentAnalysis);
-    drawMetricOverlay(null);
+    requestAnimationFrame(() => drawResultMetricOverlay(activeMetric));
+    drawMetricOverlay(activeMetric);
   }
 }
 
@@ -3168,39 +3254,49 @@ function renderHarmony(
    METRICS
 ============================================================ */
 
-function renderMetrics(metrics) {
-  if (!metricsContent) {
-    return;
-  }
-
-  metricsContent.innerHTML = "";
-
-  const entries =
-    flattenObject(metrics);
-
-  if (!entries.length) {
-    metricsContent.appendChild(
-      createEmptyBlock(
-        "Подробные измерения не были получены."
-      )
-    );
-
-    return;
-  }
-
-  entries.forEach(
-    ([path, value]) => {
-      const card =
-        createMetricCard(
-          path,
-          value
-        );
-
-      metricsContent.appendChild(
-        card
-      );
+function extractMetricLeaves(object, prefix = "") {
+  const result = [];
+  if (!isObject(object)) return result;
+  Object.entries(object).forEach(([key, value]) => {
+    const path = prefix ? `${prefix}.${key}` : key;
+    if (isObject(value) && Object.prototype.hasOwnProperty.call(value, "score") && Object.prototype.hasOwnProperty.call(value, "status")) {
+      result.push([path, value]);
+      return;
     }
-  );
+    if (isObject(value)) result.push(...extractMetricLeaves(value, path));
+  });
+  return result;
+}
+
+function renderMetrics(metrics) {
+  if (!metricsContent) return;
+  metricsContent.innerHTML = "";
+  const entries = extractMetricLeaves(metrics);
+  if (!entries.length) {
+    metricsContent.appendChild(createEmptyBlock("Подробные геометрические измерения не были получены."));
+    return;
+  }
+
+  const groups = new Map();
+  entries.forEach(([path, metric]) => {
+    const group = path.split(".")[0];
+    if (!groups.has(group)) groups.set(group, []);
+    groups.get(group).push([path, metric]);
+  });
+
+  groups.forEach((items, group) => {
+    const section = document.createElement("section");
+    section.className = "metric-group";
+    const heading = document.createElement("div");
+    heading.className = "metric-group__heading";
+    heading.innerHTML = `<strong>${getRussianLabel(group)}</strong><span>${items.length} измерений</span>`;
+    section.appendChild(heading);
+    const grid = document.createElement("div");
+    grid.className = "metric-group__grid";
+    items.forEach(([path, metric]) => grid.appendChild(createMetricCard(path, metric)));
+    section.appendChild(grid);
+    metricsContent.appendChild(section);
+  });
 }
 
 
@@ -3217,7 +3313,7 @@ function renderAngularity(
 
     "Угловатость и выраженность",
 
-    "Только фактически возвращённые числовые показатели.",
+    "Каждый показатель связан с landmarks на лице. Нажми на карточку — увидишь точки и линию измерения.",
 
     [
       ...getGroup(
@@ -3465,8 +3561,8 @@ function createMetricCard(
   card.className =
     "scale-card";
 
-  card.dataset.metric =
-    key;
+  card.dataset.metric = key;
+  if (metricObject?.status) card.dataset.status = metricObject.status;
 
   const top =
     document.createElement(
@@ -3495,11 +3591,11 @@ function createMetricCard(
   score.className =
     "scale-card__score";
 
-  const numeric =
-    normalizeMetricValue(value);
-
-  const isScore =
-    numeric !== null;
+  const metricObject = isObject(value) && Object.prototype.hasOwnProperty.call(value, "score")
+    ? value
+    : null;
+  const numeric = normalizeMetricValue(metricObject ? metricObject.score : value);
+  const isScore = numeric !== null;
 
   score.textContent =
     isScore
@@ -3527,10 +3623,9 @@ function createMetricCard(
     status.dataset.level =
       getMetricLevel(numeric);
 
-    status.textContent =
-      getMetricStatus(
-        numeric
-      );
+    status.textContent = metricObject?.status
+      ? getMetricStatusLabel(metricObject.status)
+      : getMetricStatus(numeric);
 
     card.appendChild(
       status
@@ -3851,47 +3946,18 @@ function renderMetricInspector(
 
 
 function drawMetricOverlay(metric) {
-  const canvas = landmarkCanvas;
-  const img = analysisImage;
-  if (!canvas || !img) return;
-
-  const ctx = canvas.getContext("2d");
-  const rect = img.getBoundingClientRect();
-  canvas.width = rect.width;
-  canvas.height = rect.height;
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-
+  if (!currentAnalysis) return;
   const view = getActiveView(currentAnalysis) || {};
-  const landmarks =
-    view.landmarks ||
-    currentAnalysis?.landmarks ||
-    {};
+  drawFaceLandmarkNetwork(landmarkCanvas, view, metric, 1);
+  drawResultMetricOverlay(metric);
+}
 
-  const names = metric?.value?.landmarks || [];
-
-  const points = names
-    .map(n => landmarks[n])
-    .filter(p => p && Number.isFinite(Number(p.x)) && Number.isFinite(Number(p.y)));
-
-  if (!points.length) return;
-
-  ctx.lineWidth = 3;
-  const status = String(metric?.value?.status || "").toLowerCase();
-  ctx.strokeStyle =
-    status === "good" ? "#55d98b" :
-    status === "average" ? "#f2c75c" :
-    status === "poor" ? "#ff5368" : "#75a9ff";
-
-  ctx.beginPath();
-  points.forEach((p,i)=>{
-    const x=p.x*canvas.width;
-    const y=p.y*canvas.height;
-    if(i===0) ctx.moveTo(x,y);
-    else ctx.lineTo(x,y);
-    ctx.fillStyle=ctx.strokeStyle;
-    ctx.fillRect(x-4,y-4,8,8);
-  });
-  ctx.stroke();
+function drawResultMetricOverlay(metric = null) {
+  const canvas = document.getElementById("result-landmark-canvas");
+  const visual = document.getElementById("result-visual");
+  if (!canvas || !visual || !currentAnalysis) return;
+  const view = getActiveView(currentAnalysis) || {};
+  drawFaceLandmarkNetwork(canvas, view, metric, 1);
 }
 
 function selectMetric(
@@ -3960,6 +4026,14 @@ function getMetricZone(key) {
   };
 }
 
+
+function getMetricStatusLabel(status) {
+  const s = String(status || "").toLowerCase();
+  if (s === "good") return "Хорошее соответствие";
+  if (s === "average") return "Пограничное соответствие";
+  if (s === "poor") return "Выраженное отклонение";
+  return "Недостаточно данных";
+}
 
 function getMetricStatus(value) {
   if (value < 4) {
