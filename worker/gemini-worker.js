@@ -11,7 +11,7 @@ const ALLOWED_TYPES = new Set([
 const DEFAULT_MODEL = "gemini-3.6-flash";
 
 // Deployment marker: 2026-08-15-landmark-ui-objective-v2
-const WORKER_BUILD = "2026-08-15-gender-alignment-metric-v1";
+const WORKER_BUILD = "2026-08-15-gender-normalize-fix-v2";
 
 const SCORE_MIN = 0;
 const SCORE_MAX = 10;
@@ -800,7 +800,9 @@ If IMAGE 2 is present but unusable, profile.available=false. Never fabricate pro
     normalized =
       normalizeAnalysis(
         parsed,
-        model
+        model,
+        gender,
+        adultConfirmed
       );
   } catch (error) {
     console.error(
@@ -989,7 +991,7 @@ function parseJsonResponse(text) {
 // NORMALIZE ANALYSIS
 // ============================================================
 
-function normalizeAnalysis(data, model) {
+function normalizeAnalysis(data, model, gender = "male", adultConfirmed = false) {
   if (!isPlainObject(data)) {
     throw new Error("Invalid analysis payload.");
   }
