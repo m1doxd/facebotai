@@ -283,6 +283,7 @@ const landmarkCanvas = $("#landmark-canvas");
 const featureCount = $("#feature-count");
 const resultFeatureCount = $("#result-feature-count");
 const analysisState = $("#analysis-state");
+const alignmentStatus = $("#alignment-status");
 const analysisScore = $("#analysis-score");
 const analysisScoreValue = analysisScore
   ? $("strong", analysisScore)
@@ -748,6 +749,11 @@ function resetAnalysisPreview() {
     analysisState.textContent = "АНАЛИЗ";
   }
 
+  if (alignmentStatus) {
+    alignmentStatus.textContent = "АВТОВЫРАВНИВАНИЕ · ОЖИДАНИЕ";
+    alignmentStatus.dataset.state = "waiting";
+  }
+
   if (featureCount) {
     featureCount.textContent = "—";
   }
@@ -761,8 +767,8 @@ function resetAnalysisPreview() {
   clearLandmarks();
   clearAnalysisError();
 
-  if (analysisImage) analysisImage.style.transform = "rotate(0deg)";
-  if (landmarkCanvas) landmarkCanvas.style.transform = "rotate(0deg)";
+  if (analysisImage) analysisImage.style.transform = "none";
+  if (landmarkCanvas) landmarkCanvas.style.transform = "none";
 }
 
 
@@ -932,7 +938,7 @@ async function startAnalysis(file, profileFile = null) {
     }
 
     currentAnalysis = result;
-    applyAnalysisRotation(result);
+    applyAnalysisAlignment(result);
 
     const visibleFeatureCount =
       result.feature_count ||
@@ -1505,6 +1511,12 @@ function normalizeClientResult(data) {
 
     dimorphism,
 
+    alignment: normalizeAlignmentSet(
+      source.alignment,
+      front.landmarks,
+      profile.landmarks
+    ),
+
     classification:
       normalizeClassification(
         source.classification ||
@@ -1667,6 +1679,8 @@ function normalizeView(
     metrics,
 
     regions,
+
+    alignment: isObject(data.alignment) ? data.alignment : null,
 
     confidence:
       normalizeScore(
@@ -1976,20 +1990,117 @@ function normalizeRegion(region) {
    AUTO ALIGNMENT
 ============================================================ */
 
-function applyAnalysisRotation(result) {
-  const correction = Number(
-    result?.view?.roll?.correction_degrees ??
-    result?.rotation ??
-    0
-  );
+function normalizeAlignmentSet(raw, frontLandmarks = {}, profileLandmarks = {}) {
+  const make = (value, type, landmarks) => {
+    if (isObject(value) && Number.isFinite(Number(value.center_x))) {
+      return {
+        available: value.available !== false,
+        type,
+        roll_degrees: Number(value.roll_degrees) || 0,
+        correction_degrees: Number(value.correction_degrees) || 0,
+        center_x: Number(value.center_x),
+        center_y: Number(value.center_y),
+        scale: Number(value.scale) || 1,
+        confidence: Number(value.confidence) || 0
+      };
+    }
+    return calculateClientAlignment(landmarks, type);
+  };
 
-  if (!Number.isFinite(correction)) return;
+  return {
+    front: make(raw?.front, "front", frontLandmarks),
+    profile: make(raw?.profile, "profile", profileLandmarks)
+  };
+}
 
-  const value = clamp(correction, -15, 15);
-  const transform = `rotate(${value}deg)`;
+function calculateClientAlignment(landmarks, type) {
+  const entries = Object.entries(landmarks || {}).filter(([, p]) => p && Number.isFinite(Number(p.x)) && Number.isFinite(Number(p.y)));
+  if (entries.length < 3) {
+    return { available: false, type, roll_degrees: 0, correction_degrees: 0, center_x: 0.5, center_y: 0.5, scale: 1, confidence: 0 };
+  }
 
-  if (analysisImage) analysisImage.style.transform = transform;
-  if (landmarkCanvas) landmarkCanvas.style.transform = transform;
+  const lm = Object.fromEntries(entries);
+  let roll = 0;
+  if (type === "front") {
+    const left = lm.left_eye_inner || lm.left_eye_outer;
+    const right = lm.right_eye_inner || lm.right_eye_outer;
+    if (left && right) roll = Math.atan2(right.y - left.y, right.x - left.x) * 180 / Math.PI;
+  } else {
+    const a = lm.profile_glabella || lm.profile_nasion || lm.profile_forehead;
+    const b = lm.profile_pogonion || lm.profile_menton || lm.profile_chin_neck;
+    if (a && b) roll = Math.atan2(b.x - a.x, b.y - a.y) * 180 / Math.PI;
+  }
+
+  const xs = entries.map(([, p]) => Number(p.x));
+  const ys = entries.map(([, p]) => Number(p.y));
+  const minX = Math.min(...xs), maxX = Math.max(...xs);
+  const minY = Math.min(...ys), maxY = Math.max(...ys);
+  const width = Math.max(maxX - minX, 0.01);
+  const height = Math.max(maxY - minY, 0.01);
+  const targetHeight = type === "front" ? 0.76 : 0.78;
+  const targetWidth = type === "front" ? 0.68 : 0.62;
+  const scale = Math.max(0.82, Math.min(1.45, Math.max(targetHeight / height, targetWidth / width)));
+  const confidence = entries.reduce((sum, [, p]) => sum + (Number(p.confidence) || 0), 0) / entries.length;
+
+  return {
+    available: true,
+    type,
+    roll_degrees: roll,
+    correction_degrees: -roll,
+    center_x: (minX + maxX) / 2,
+    center_y: (minY + maxY) / 2,
+    scale,
+    confidence
+  };
+}
+
+function alignmentLabel(alignment) {
+  if (!alignment?.available) return "АВТОВЫРАВНИВАНИЕ · НЕДОСТАТОЧНО ДАННЫХ";
+  const angle = Number(alignment.correction_degrees) || 0;
+  const dx = (0.5 - Number(alignment.center_x || 0.5)) * 100;
+  const dy = (0.5 - Number(alignment.center_y || 0.5)) * 100;
+  const scale = Number(alignment.scale || 1);
+  const sign = n => `${n >= 0 ? "+" : ""}${n.toFixed(1)}`;
+  return `ЦЕНТРИРОВАНО · ПОВОРОТ ${sign(angle)}° · X ${sign(dx)}% · Y ${sign(dy)}% · ${Math.round(scale * 100)}%`;
+}
+
+function setAlignmentStatus(alignment, state = "done") {
+  if (!alignmentStatus) return;
+  alignmentStatus.textContent = alignmentLabel(alignment);
+  alignmentStatus.dataset.state = state;
+}
+
+function applyImageAlignment(image, alignment, frameElement = null) {
+  if (!image || !alignment?.available) return;
+  const rect = (frameElement || image.parentElement || image).getBoundingClientRect();
+  const tx = (0.5 - Number(alignment.center_x || 0.5)) * rect.width;
+  const ty = (0.5 - Number(alignment.center_y || 0.5)) * rect.height;
+  const rotate = Number(alignment.correction_degrees) || 0;
+  const scale = Number(alignment.scale) || 1;
+  image.style.transformOrigin = "50% 50%";
+  image.style.transform = `translate(${tx.toFixed(1)}px, ${ty.toFixed(1)}px) rotate(${rotate.toFixed(2)}deg) scale(${scale.toFixed(3)})`;
+}
+
+function applyAnalysisAlignment(result) {
+  const alignment = result?.alignment?.front;
+  if (!alignment?.available) {
+    if (alignmentStatus) {
+      alignmentStatus.textContent = "АВТОВЫРАВНИВАНИЕ · НЕДОСТАТОЧНО ДАННЫХ";
+      alignmentStatus.dataset.state = "uncertain";
+    }
+    return;
+  }
+
+  if (alignmentStatus) {
+    alignmentStatus.textContent = "ЦЕНТРИРУЕМ ЛИЦО · ПОВОРОТ + ОСЬ + МАСШТАБ";
+    alignmentStatus.dataset.state = "active";
+  }
+
+  requestAnimationFrame(() => {
+    applyImageAlignment(analysisImage, alignment, analysisFrame);
+    applyImageAlignment(landmarkCanvas, alignment, analysisFrame);
+    setTimeout(() => setAlignmentStatus(alignment, "done"), 450);
+  });
 }
 
 
@@ -2149,6 +2260,10 @@ function ensureResultFace(result) {
 
   if (image && source) {
     image.src = source;
+    const alignment = result?.alignment?.[view?.type === "profile" ? "profile" : "front"];
+    if (alignment?.available) {
+      requestAnimationFrame(() => applyImageAlignment(image, alignment, visual));
+    }
   }
 
   if (score) {
