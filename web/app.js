@@ -5,6 +5,7 @@
 
 const GEMINI_STORAGE_KEY = "facemetric_gemini_key";
 const LEGACY_GEMINI_STORAGE_KEY = "gemini_api_key";
+const CLASSIFICATION_STORAGE_KEY = "facemetric_classification_settings_v1";
 
 function readStorage(key) {
   try {
@@ -22,6 +23,147 @@ function writeStorage(key, value) {
   } catch (error) {
     console.warn("FaceMetric: could not save Gemini API key.", error);
     return false;
+  }
+}
+
+function getClassificationSettings() {
+  try {
+    const raw = window.localStorage.getItem(CLASSIFICATION_STORAGE_KEY);
+    if (!raw) return null;
+    const data = JSON.parse(raw);
+    if (!data || (data.gender !== "male" && data.gender !== "female")) return null;
+    return {
+      gender: data.gender,
+      adultConfirmed: data.adultConfirmed === true
+    };
+  } catch (error) {
+    console.warn("FaceMetric: classification settings are unavailable.", error);
+    return null;
+  }
+}
+
+function saveClassificationSettings(gender, adultConfirmedValue) {
+  try {
+    window.localStorage.setItem(
+      CLASSIFICATION_STORAGE_KEY,
+      JSON.stringify({
+        gender: gender === "female" ? "female" : "male",
+        adultConfirmed: adultConfirmedValue === true
+      })
+    );
+    return true;
+  } catch (error) {
+    console.warn("FaceMetric: could not save classification settings.", error);
+    return false;
+  }
+}
+
+function clearClassificationSettings() {
+  try {
+    window.localStorage.removeItem(CLASSIFICATION_STORAGE_KEY);
+  } catch (error) {
+    console.warn("FaceMetric: could not clear classification settings.", error);
+  }
+}
+
+function openClassificationModal(options = {}) {
+  const modal = document.getElementById("classificationModal");
+  const gender = document.getElementById("classificationGender");
+  const adult = document.getElementById("classificationAdult");
+  const error = document.getElementById("classificationModalError");
+
+  if (!modal || !gender || !adult) {
+    console.error("FaceMetric: classification modal is missing from index.html.");
+    return false;
+  }
+
+  const saved = getClassificationSettings();
+  gender.value = selectedGender === "female" ? "female" : (saved?.gender || "male");
+  adult.checked = adultConfirmed || saved?.adultConfirmed === true;
+  if (error) { error.hidden = true; error.textContent = ""; }
+
+  modal.hidden = false;
+  modal.classList.add("show");
+  modal.setAttribute("aria-hidden", "false");
+
+  if (options.focus !== false) {
+    window.setTimeout(() => gender.focus(), 0);
+  }
+  return true;
+}
+
+function closeClassificationModal() {
+  const modal = document.getElementById("classificationModal");
+  if (!modal) return;
+  modal.classList.remove("show");
+  modal.hidden = true;
+  modal.setAttribute("aria-hidden", "true");
+}
+
+function initClassificationModal() {
+  const modal = document.getElementById("classificationModal");
+  const form = document.getElementById("classificationForm");
+  const gender = document.getElementById("classificationGender");
+  const adult = document.getElementById("classificationAdult");
+  const error = document.getElementById("classificationModalError");
+
+  if (!modal || !form || !gender || !adult) {
+    console.error("FaceMetric: classification modal elements were not found.");
+    return;
+  }
+
+  const saved = getClassificationSettings();
+  if (saved) {
+    selectedGender = saved.gender;
+    adultConfirmed = saved.adultConfirmed;
+    if (genderSelect) genderSelect.value = selectedGender;
+    if (adultConfirm) adultConfirm.checked = adultConfirmed;
+    modal.hidden = true;
+    modal.setAttribute("aria-hidden", "true");
+  } else {
+    modal.hidden = true;
+    modal.setAttribute("aria-hidden", "true");
+  }
+
+  form.addEventListener("submit", event => {
+    event.preventDefault();
+    const nextGender = gender.value === "female" ? "female" : "male";
+    if (!adult.checked) {
+      if (error) {
+        error.textContent = "Для классификационного результата нужно подтвердить, что вам 18 лет или больше.";
+        error.hidden = false;
+      }
+      adult.focus();
+      return;
+    }
+
+    selectedGender = nextGender;
+    adultConfirmed = true;
+    if (genderSelect) genderSelect.value = selectedGender;
+    if (adultConfirm) adultConfirm.checked = true;
+
+    if (!saveClassificationSettings(selectedGender, adultConfirmed)) {
+      if (error) {
+        error.textContent = "Не удалось сохранить настройки в браузере.";
+        error.hidden = false;
+      }
+      return;
+    }
+
+    closeClassificationModal();
+    updateAnalysisButtonState();
+    showToast("Настройки анализа сохранены.");
+  });
+
+  modal.addEventListener("keydown", event => {
+    if (event.key === "Escape") event.preventDefault();
+  });
+}
+
+function maybeOpenClassificationModal() {
+  if (!getGeminiApiKey()) return;
+  if (!getClassificationSettings()) {
+    window.setTimeout(() => openClassificationModal(), 120);
   }
 }
 
@@ -97,6 +239,7 @@ function closeGeminiKeyModal() {
   modal.classList.remove("show");
   modal.hidden = true;
   modal.setAttribute("aria-hidden", "true");
+  maybeOpenClassificationModal();
 }
 
 function initGeminiKeyModal() {
@@ -237,6 +380,8 @@ function initGeminiKeyModal() {
 
   if (!savedKey) {
     window.setTimeout(() => openGeminiKeyModal(), 0);
+  } else {
+    window.setTimeout(() => maybeOpenClassificationModal(), 120);
   }
 }
 
@@ -1160,6 +1305,10 @@ function resizeLandmarkCanvas() {
 ============================================================ */
 
 async function startAnalysis(file, profileFile = null) {
+  if (!getClassificationSettings() || !adultConfirmed) {
+    openClassificationModal();
+    return;
+  }
   cancelActiveAnalysis();
 
   const requestId =
@@ -1350,8 +1499,7 @@ async function analyzePhoto(file, signal, profileFile = null) {
     );
   }
 
-  const gender = (selectedGender === "female" ? "female" : "male");
-  formData.append("gender", gender);
+  formData.append("gender", selectedGender === "female" ? "female" : "male");
   formData.append("adult_confirmed", adultConfirmed ? "true" : "false");
 
   const userGeminiKey = getGeminiApiKey();
@@ -6029,15 +6177,22 @@ function injectStageTwoStyles() {
 ============================================================ */
 
 function initClassificationSettings() {
+  const saved = getClassificationSettings();
+
+  if (saved) {
+    selectedGender = saved.gender;
+    adultConfirmed = saved.adultConfirmed;
+  }
+
   if (genderSelect) {
-    selectedGender = genderSelect.value === "female" ? "female" : "male";
+    genderSelect.value = selectedGender;
     genderSelect.addEventListener("change", () => {
       selectedGender = genderSelect.value === "female" ? "female" : "male";
     });
   }
 
   if (adultConfirm) {
-    adultConfirmed = Boolean(adultConfirm.checked);
+    adultConfirm.checked = adultConfirmed;
     adultConfirm.addEventListener("change", () => {
       adultConfirmed = Boolean(adultConfirm.checked);
       updateAnalysisButtonState();
@@ -6049,10 +6204,10 @@ function initClassificationSettings() {
 
 function updateAnalysisButtonState() {
   if (!startAnalysisButton) return;
-  const ready = Boolean(selectedFile) && adultConfirmed;
+  const ready = Boolean(selectedFile) && adultConfirmed && Boolean(getClassificationSettings());
   startAnalysisButton.disabled = !ready;
   startAnalysisButton.title = !adultConfirmed
-    ? "Подтвердите, что вам 18 или больше"
+    ? "Настройте профиль анализа и подтвердите 18+"
     : "";
 }
 
@@ -6211,6 +6366,7 @@ function bindEvents() {
 
 function init() {
   try { initGeminiKeyModal(); } catch (e) { console.warn("Gemini modal init failed", e); }
+  try { initClassificationModal(); } catch (e) { console.warn("Classification modal init failed", e); }
 
   initTelegram();
   initClassificationSettings();
