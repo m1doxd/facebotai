@@ -1,3 +1,9 @@
+// ============================================================
+// FACE METRIC APP - UNIFIED FRONTEND v2026.08.15-gender-modal-fix
+// ============================================================
+
+window.__FACEMETRIC_APP_VERSION__ = "2026-08-15-gender-modal-fix-v1";
+
 
 // ============================================================
 // GEMINI BYOK
@@ -475,6 +481,12 @@ let selectedProfileObjectUrl = null;
 // Classification settings. Geometric measurements remain independent.
 let selectedGender = "male";
 let adultConfirmed = false;
+
+// Expose read-only diagnostics for debugging the deployed frontend.
+window.FaceMetricClassification = {
+  get gender() { return selectedGender === "female" ? "female" : "male"; },
+  get adultConfirmed() { return adultConfirmed === true; }
+};
 
 let currentAnalysis = null;
 let currentScreen = "home";
@@ -1499,8 +1511,13 @@ async function analyzePhoto(file, signal, profileFile = null) {
     );
   }
 
-  formData.append("gender", selectedGender === "female" ? "female" : "male");
-  formData.append("adult_confirmed", adultConfirmed ? "true" : "false");
+  // Classification state is read only from the declared frontend state.
+  // There is intentionally no standalone `gender` variable here.
+  const requestGender = selectedGender === "female" ? "female" : "male";
+  const requestAdultConfirmed = adultConfirmed === true;
+
+  formData.append("gender", requestGender);
+  formData.append("adult_confirmed", requestAdultConfirmed ? "true" : "false");
 
   const userGeminiKey = getGeminiApiKey();
 
@@ -6177,6 +6194,7 @@ function injectStageTwoStyles() {
 ============================================================ */
 
 function initClassificationSettings() {
+  // Restore saved classification settings once, after all lexical declarations exist.
   const saved = getClassificationSettings();
 
   if (saved) {
