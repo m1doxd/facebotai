@@ -1022,6 +1022,24 @@ p{
   animation:resultVisualIn .65s var(--ease) both;
 }
 
+.result-visual{
+  transition:transform .65s cubic-bezier(.22,.61,.36,1), box-shadow .65s ease, border-color .35s ease;
+  transform-origin:center center;
+}
+.result-visual.metric-focus{
+  transform:scale(1.018);
+  border-color:rgba(255,255,255,.22);
+  box-shadow:0 28px 80px rgba(0,0,0,.48), 0 0 0 1px rgba(255,255,255,.035);
+}
+.metric-inspector--focused{
+  animation:metricInspectorFocus .85s ease both;
+}
+@keyframes metricInspectorFocus{
+  0%{transform:translateY(5px);opacity:.78}
+  45%{transform:translateY(0);opacity:1}
+  100%{transform:none;opacity:1}
+}
+
 @keyframes resultVisualIn{
   from{
     opacity:0;
@@ -2591,3 +2609,84 @@ button:focus-visible,
 
 .analysis-frame .landmark-canvas,
 #landmark-canvas{z-index:7}
+
+
+/* ============================================================
+   CLASSIFICATION SETTINGS
+============================================================ */
+.classification-settings {
+  margin: 14px 0;
+  padding: 16px;
+  border: 1px solid rgba(255,255,255,.09);
+  border-radius: 18px;
+  background: rgba(255,255,255,.025);
+}
+
+.classification-settings__title {
+  margin-bottom: 12px;
+  font-size: 11px;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  opacity: .62;
+}
+
+.classification-settings__grid {
+  display: grid;
+  grid-template-columns: minmax(160px, .8fr) minmax(220px, 1.2fr);
+  gap: 12px;
+  align-items: end;
+}
+
+.classification-field,
+.classification-age {
+  display: flex;
+  gap: 8px;
+}
+
+.classification-field {
+  flex-direction: column;
+}
+
+.classification-field > span {
+  font-size: 12px;
+  opacity: .65;
+}
+
+.classification-field select {
+  width: 100%;
+  min-height: 42px;
+  padding: 0 12px;
+  border: 1px solid rgba(255,255,255,.1);
+  border-radius: 12px;
+  background: #101113;
+  color: inherit;
+  font: inherit;
+}
+
+.classification-age {
+  align-items: center;
+  min-height: 42px;
+  padding: 0 12px;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 12px;
+  font-size: 12px;
+}
+
+.classification-age input {
+  width: 16px;
+  height: 16px;
+  accent-color: #55df8a;
+}
+
+.classification-settings__note {
+  margin: 10px 0 0;
+  font-size: 10px;
+  line-height: 1.5;
+  opacity: .48;
+}
+
+@media (max-width: 640px) {
+  .classification-settings__grid {
+    grid-template-columns: 1fr;
+  }
+}
