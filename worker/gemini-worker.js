@@ -11,7 +11,7 @@ const ALLOWED_TYPES = new Set([
 const DEFAULT_MODEL = "gemini-3.6-flash";
 
 // Deployment marker: 2026-08-13-byok-profile-v1
-const WORKER_BUILD = "2026-08-14-objective-v2";
+const WORKER_BUILD = "2026-08-14-objective-v3-calibrated";
 
 const SCORE_MIN = 0;
 const SCORE_MAX = 10;
@@ -1075,8 +1075,11 @@ function normalizeAnalysis(data, model) {
       ], 1)
     : frontalHarmony;
 
-  const score = combined === null ? null : clampScore(combined);
+  const rawScore = combined === null ? null : clampScore(combined);
   const sections = buildSections(front.metrics, profile.metrics, frontQuality, profileQuality, profile.available);
+  const sectionScores = [sections.features, sections.angularity, sections.symmetry, sections.proportions].filter(Number.isFinite);
+  const conservativeScore = sectionScores.length ? clampScore(average(sectionScores)) : rawScore;
+  const score = rawScore === null ? null : clampScore(Math.min(rawScore, conservativeScore));
   const production = {
     overall_harmony: score,
     frontal_harmony: frontalHarmony,
@@ -1296,7 +1299,7 @@ function buildFrontalGeometry(lm, quality) {
     if (lc&&rc) metrics.symmetry.cheek_symmetry=metricWithPoints(scoreCentered(Math.abs(lc.y-rc.y)/faceW,0,0.05),["left_cheekbone","right_cheekbone"]);
     const symVals=metricScores(metrics.symmetry); metrics.symmetry.overall_symmetry=metricWithPoints({value:symVals.length?round(symVals.reduce((a,x)=>a+x.score,0)/symVals.length/10,3):null,score:symVals.length?round(symVals.reduce((a,x)=>a+x.score,0)/symVals.length,1):null,status:symVals.length?"good":"uncertain",ideal_min:0.9,ideal_max:1,unit:"index",landmarks:["left_eye_inner","right_eye_inner","mouth_left","mouth_right","left_jaw","right_jaw"]},["left_eye_inner","right_eye_inner","mouth_left","mouth_right","left_jaw","right_jaw"]);
     metrics.eyes={};
-    if (le&&re) metrics.eyes.eye_spacing=metricWithPoints(scoreRange(dist(le,re)/faceW,0.55,0.78,0.20),["left_eye_inner","right_eye_inner"]);
+    if (le&&re) metrics.eyes.eye_spacing=metricWithPoints(scoreRange(dist(le,re)/faceW,0.20,0.38,0.12),["left_eye_inner","right_eye_inner"]);
     if (le&&leO) metrics.eyes.left_eye_width=metricWithPoints(scoreRange(dist(le,leO)/faceW,0.10,0.20,0.10),["left_eye_inner","left_eye_outer"]);
     if (re&&reO) metrics.eyes.right_eye_width=metricWithPoints(scoreRange(dist(re,reO)/faceW,0.10,0.20,0.10),["right_eye_inner","right_eye_outer"]);
     if (nl&&nr) metrics.nose={nose_width:metricWithPoints(scoreRange(dist(nl,nr)/faceW,0.15,0.30,0.14),["nose_left","nose_right"])};
@@ -1307,10 +1310,10 @@ function buildFrontalGeometry(lm, quality) {
     if (lj&&rj) metrics.jaw={jaw_width:metricWithPoints(scoreRange(dist(lj,rj)/faceW,0.62,1.02,0.30),["left_jaw","right_jaw"])};
     else metrics.jaw={};
     metrics.chin={};
-    if (chin&&faceW&&lj&&rj) metrics.chin.chin_width=metricWithPoints(scoreRange(Math.min(dist(lj,chin),dist(rj,chin))/faceW,0.18,0.38,0.18),["left_jaw","right_jaw","chin"]);
+    if (lm.chin_left&&lm.chin_right&&faceW) metrics.chin.chin_width=metricWithPoints(scoreRange(dist(point(lm,"chin_left"),point(lm,"chin_right"))/faceW,0.16,0.34,0.14),["chin_left","chin_right"]); else metrics.chin.chin_width=metricWithPoints(metric(null,null,"uncertain",null,null,"ratio",[]),["chin"]);
     metrics.proportions={};
-    if (fc&&eyeMid&&chin&&faceH) metrics.proportions.upper_to_lower_third=metricWithPoints(scoreRange(dist(fc,eyeMid)/dist(eyeMid,chin),0.78,1.22,0.50),["forehead_center","left_eye_inner","right_eye_inner","chin"]);
-    if (eyeMid&&ul&&chin&&faceH) metrics.proportions.mid_to_lower_face=metricWithPoints(scoreRange(dist(eyeMid,ul)/dist(ul,chin),0.85,1.25,0.55),["left_eye_inner","right_eye_inner","upper_lip_center","chin"]);
+    if (fc&&eyeMid&&chin&&faceH) metrics.proportions.upper_to_lower_third=metricWithPoints(scoreRange(dist(fc,eyeMid)/dist(eyeMid,chin),0.60,1.10,0.30),["forehead_center","left_eye_inner","right_eye_inner","chin"]);
+    if (eyeMid&&ul&&chin&&faceH) metrics.proportions.mid_to_lower_face=metricWithPoints(scoreRange(dist(eyeMid,ul)/dist(ul,chin),0.70,1.35,0.35),["left_eye_inner","right_eye_inner","upper_lip_center","chin"]);
     metrics.angularity={};
     if (lc&&lj&&rj&&rc) {
       const la=angle(lc,lj,chin), ra=angle(rc,rj,chin);
