@@ -11,7 +11,7 @@ const ALLOWED_TYPES = new Set([
 const DEFAULT_MODEL = "gemini-3.6-flash";
 
 // Deployment marker: 2026-08-15-landmark-ui-objective-v2
-const WORKER_BUILD = "2026-08-15-landmark-ui-objective-v2";
+const WORKER_BUILD = "2026-08-15-gender-alignment-metric-v1";
 
 const SCORE_MIN = 0;
 const SCORE_MAX = 10;
@@ -298,6 +298,8 @@ async function analyze(request, env) {
 
   const file = formData.get("file");
   const profileFile = formData.get("profile");
+  const gender = formData.get("gender") === "female" ? "female" : "male";
+  const adultConfirmed = formData.get("adult_confirmed") === "true";
 
   if (
     !file ||
@@ -1109,7 +1111,9 @@ function normalizeAnalysis(data, model) {
     },
     profile,
     landmarks: allLandmarks,
-    tier: getTier(score),
+    gender,
+    adult_confirmed: adultConfirmed,
+    tier: adultConfirmed ? getTier(score, gender) : { name: null, level: null },
     sections,
     metrics,
     production_features: production,
@@ -1193,6 +1197,13 @@ function metricWithPoints(m,names) { return {...m, landmarks:names.filter(Boolea
 function round(v,n=4){ const p=10**n; return Math.round(v*p)/p; }
 
 
+function normalizeHalfTurnAngle(degrees) {
+  let angle = Number(degrees) || 0;
+  while (angle > 90) angle -= 180;
+  while (angle < -90) angle += 180;
+  return angle;
+}
+
 function calculateAlignment(lm, type) {
   const entries = Object.entries(lm || {}).filter(([, p]) => p && Number.isFinite(Number(p.x)) && Number.isFinite(Number(p.y)));
   if (entries.length < 3) {
@@ -1201,6 +1212,7 @@ function calculateAlignment(lm, type) {
 
   const points = Object.fromEntries(entries);
   let roll = 0;
+  let upsideDown = false;
   let axisStart = null;
   let axisEnd = null;
 
@@ -1208,19 +1220,26 @@ function calculateAlignment(lm, type) {
     const left = points.left_eye_inner || points.left_eye_outer;
     const right = points.right_eye_inner || points.right_eye_outer;
     if (left && right) {
-      roll = Math.atan2(right.y - left.y, right.x - left.x) * 180 / Math.PI;
+      roll = normalizeHalfTurnAngle(Math.atan2(right.y - left.y, right.x - left.x) * 180 / Math.PI);
     }
     axisStart = points.forehead_center || points.nose_bridge || null;
     axisEnd = points.chin || null;
+    // Eye-line roll cannot distinguish a normal face from a 180° rotated image.
+    // The forehead -> chin axis does: in a normal image chin must be below forehead.
+    if (axisStart && axisEnd && Number(axisEnd.y) < Number(axisStart.y)) upsideDown = true;
   } else {
     axisStart = points.profile_glabella || points.profile_nasion || points.profile_forehead || null;
     axisEnd = points.profile_pogonion || points.profile_menton || points.profile_chin_neck || null;
     if (axisStart && axisEnd) {
-      roll = Math.atan2(axisEnd.x - axisStart.x, axisEnd.y - axisStart.y) * 180 / Math.PI;
+      roll = normalizeHalfTurnAngle(Math.atan2(axisEnd.x - axisStart.x, axisEnd.y - axisStart.y) * 180 / Math.PI);
+      if (Number(axisEnd.y) < Number(axisStart.y)) upsideDown = true;
     }
   }
 
-  const correction = -roll;
+  let correction = -roll;
+  if (upsideDown) correction += 180;
+  while (correction > 180) correction -= 360;
+  while (correction < -180) correction += 360;
   const xs = entries.map(([, p]) => Number(p.x));
   const ys = entries.map(([, p]) => Number(p.y));
   const minX = Math.min(...xs), maxX = Math.max(...xs);
@@ -1936,7 +1955,8 @@ function calculateFallbackOverallScore(
 // ============================================================
 
 function getTier(
-  score
+  score,
+  gender = "male"
 ) {
   if (
     score === null ||
@@ -1977,7 +1997,7 @@ function getTier(
 
   if (value < 5) {
     return {
-      name: "LTN",
+      name: gender === "female" ? "LTB" : "LTN",
       level: getTierLevel(
         value,
         4,
@@ -1988,7 +2008,7 @@ function getTier(
 
   if (value < 5.5) {
     return {
-      name: "MTN",
+      name: gender === "female" ? "MTB" : "MTN",
       level: getTierLevel(
         value,
         5,
@@ -1997,63 +2017,47 @@ function getTier(
     };
   }
 
-  if (value < 6.5) {
+  if (value < 6) {
     return {
-      name: "HTN",
+      name: gender === "female" ? "HTB" : "HTN",
       level: getTierLevel(
         value,
         5.5,
-        6.5
+        6
       )
     };
   }
 
-  if (value < 7.5) {
+  if (value < 7) {
     return {
-      name: "Chadlite",
-      level: getTierLevel(
-        value,
-        6.5,
-        7.5
-      )
+      name: gender === "female" ? "Stacylite" : "Chadlite",
+      level: getTierLevel(value, 6, 7)
+    };
+  }
+
+  if (value < 8) {
+    return {
+      name: gender === "female" ? "Stacy" : "Chad",
+      level: getTierLevel(value, 7, 8)
     };
   }
 
   if (value < 9) {
     return {
-      name: "Chad",
-      level: getTierLevel(
-        value,
-        7.5,
-        9
-      )
-    };
-  }
-
-  if (value < 9.5) {
-    return {
-      name: "Adamlite",
-      level: getTierLevel(
-        value,
-        9,
-        9.5
-      )
+      name: gender === "female" ? "Stacy" : "Chad",
+      level: getTierLevel(value, 8, 9)
     };
   }
 
   if (value < 10) {
     return {
-      name: "Near True Adam",
-      level: getTierLevel(
-        value,
-        9.5,
-        10
-      )
+      name: gender === "female" ? "Evalite" : "Adamlite",
+      level: getTierLevel(value, 9, 10)
     };
   }
 
   return {
-    name: "True Adam",
+    name: gender === "female" ? "True Eva" : "True Adam",
     level: "base"
   };
 }
