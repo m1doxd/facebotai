@@ -3562,6 +3562,16 @@ function createMetricCard(
     "scale-card";
 
   card.dataset.metric = key;
+
+  // Normalize the metric object before reading any of its fields.
+  // This must be declared before the optional-chaining access below;
+  // otherwise JavaScript hits the temporal-dead-zone and aborts the
+  // whole result renderer with:
+  // "Cannot access lexical declaration 'metricObject' before initialization".
+  const metricObject = isObject(value) && Object.prototype.hasOwnProperty.call(value, "score")
+    ? value
+    : null;
+
   if (metricObject?.status) card.dataset.status = metricObject.status;
 
   const top =
@@ -3591,9 +3601,6 @@ function createMetricCard(
   score.className =
     "scale-card__score";
 
-  const metricObject = isObject(value) && Object.prototype.hasOwnProperty.call(value, "score")
-    ? value
-    : null;
   const numeric = normalizeMetricValue(metricObject ? metricObject.score : value);
   const isScore = numeric !== null;
 
