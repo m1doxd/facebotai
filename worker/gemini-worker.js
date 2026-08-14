@@ -11,7 +11,7 @@ const ALLOWED_TYPES = new Set([
 const DEFAULT_MODEL = "gemini-3.6-flash";
 
 // Deployment marker: 2026-08-13-byok-profile-v1
-const WORKER_BUILD = "2026-08-14-auto-center-v1";
+const WORKER_BUILD = "2026-08-14-objective-v2";
 
 const SCORE_MIN = 0;
 const SCORE_MAX = 10;
@@ -465,13 +465,20 @@ A point hidden by hair, hand, glasses glare, heavy shadow, cropping, or extreme
 pose should be omitted or have low confidence.
 If no usable face exists, return face_count=0.
 
-OUTPUT ONLY VALID JSON with exactly this general structure:
+OUTPUT ONLY VALID JSON. Treat IMAGE 1 and IMAGE 2 as completely independent observations.
+Return exactly this structure:
 {
   "face_count": 1,
-  "view": {
+  "front_view": {
     "type": "frontal",
     "confidence": 0.0,
     "frontal_suitability": 0.0,
+    "image_quality": 0.0,
+    "roll": {"angle_degrees": 0.0,"correction_degrees": 0.0,"confidence": 0.0}
+  },
+  "profile_view": {
+    "type": "profile",
+    "confidence": 0.0,
     "profile_suitability": 0.0,
     "image_quality": 0.0,
     "roll": {"angle_degrees": 0.0,"correction_degrees": 0.0,"confidence": 0.0}
@@ -485,8 +492,7 @@ OUTPUT ONLY VALID JSON with exactly this general structure:
     "available": false,
     "confidence": 0.0,
     "landmarks": {}
-  },
-  "landmarks": {}
+  }
 }
 
 If IMAGE 2 is absent, profile.available MUST be false and profile.landmarks MUST be {}.
@@ -1006,7 +1012,8 @@ function normalizeAnalysis(data, model) {
       analysis_method: "deterministic_geometry_v1",
       metric_source: "landmark_geometry",
       reference_note: "Приложение использует фиксированные продуктовые референсные диапазоны; это не медицинская или научная норма.",
-      view: normalizeView(data.view),
+      view: normalizeView(data.front_view || data.view || {}),
+      profile_view: normalizeView(data.profile_view || {}),
       frontal: { available: false, confidence: 0, harmony: null, landmarks: {}, metrics: {} },
       profile: { available: false, confidence: 0, harmony: null, landmarks: {}, metrics: {}, landmarks_count: 0 },
       landmarks: {},
@@ -1018,7 +1025,8 @@ function normalizeAnalysis(data, model) {
     };
   }
 
-  const view = normalizeView(data.view);
+  const view = normalizeView(data.front_view || data.view || {});
+  const profileView = normalizeView(data.profile_view || {});
   const frontalRaw = isPlainObject(data.frontal) ? data.frontal : {};
   const profileRaw = isPlainObject(data.profile) ? data.profile : {};
   const frontLandmarks = normalizeLandmarks(
@@ -1040,8 +1048,9 @@ function normalizeAnalysis(data, model) {
   const profileQuality = clamp01(
     averageNumbers([
       profileRaw.confidence,
-      view.profile_suitability,
-      profileRaw.image_quality
+      profileView.confidence,
+      profileView.profile_suitability,
+      profileView.image_quality
     ])
   );
 
@@ -1099,6 +1108,7 @@ function normalizeAnalysis(data, model) {
       metric_source: "landmark_geometry",
       reference_note: "Приложение использует фиксированные продуктовые референсные диапазоны; это не медицинская или научная норма.",
     view,
+    profile_view: profileView,
     frontal: {
       available: true,
       confidence: frontQuality,
@@ -1155,25 +1165,33 @@ function angle(a,b,c) {
   return Math.acos(cos)*180/Math.PI;
 }
 
-function scoreRange(value, min, max, tolerance) {
-  if (value === null || !Number.isFinite(value)) return metric(null,null,"uncertain",min,max,null,[]);
-  let score;
-  if (value >= min && value <= max) score = 9.2 - Math.min(1.0, Math.abs(value-(min+max)/2)/Math.max((max-min)/2,1e-6))*0.8;
-  else {
-    const d = value < min ? min-value : value-max;
-    score = 9.0 - (d/Math.max(tolerance,1e-6))*4.0;
+function scoreRange(value, min, max, tolerance, unit="ratio") {
+  if (value === null || !Number.isFinite(value)) {
+    return metric(null, null, "uncertain", min, max, unit, []);
   }
-  score = clampScore(Math.max(1, Math.min(10, score)));
-  const status = value >= min && value <= max ? "good" : Math.abs(value-(min+max)/2) <= ((max-min)/2+tolerance) ? "average" : "poor";
-  return metric(value,score,status,min,max,"ratio",[]);
+  const center = (min + max) / 2;
+  const half = Math.max((max - min) / 2, 1e-6);
+  const distance = Math.abs(value - center);
+  // Broad reference matching: 10 at center, ~8 at the reference boundary,
+  // then a gradual decline. Never punish a single measurement catastrophically.
+  const normalized = Math.min(1.75, distance / half);
+  const score = clampScore(10 - 2.0 * normalized - Math.max(0, normalized - 1) * 1.5);
+  const outside = value < min || value > max;
+  const far = distance > half + Math.max(tolerance, half * 0.75);
+  const status = far ? "outside_reference" : outside ? "near_reference" : "within_reference";
+  return metric(value, score, status, min, max, unit, []);
 }
 
 function scoreCentered(value, target, tolerance, unit="ratio") {
-  if (value === null || !Number.isFinite(value)) return metric(null,null,"uncertain",null,null,unit,[]);
-  const d=Math.abs(value-target);
-  const score=clampScore(Math.max(1,10-8*(d/Math.max(tolerance,1e-6))));
-  const status=d<=tolerance*0.45?"good":d<=tolerance?"average":"poor";
-  return metric(value,score,status,target-tolerance,target+tolerance,unit,[]);
+  if (value === null || !Number.isFinite(value)) {
+    return metric(null, null, "uncertain", null, null, unit, []);
+  }
+  const d = Math.abs(value - target);
+  const scale = Math.max(tolerance, 1e-6);
+  const normalized = Math.min(1.75, d / scale);
+  const score = clampScore(10 - 2.4 * normalized);
+  const status = normalized <= 0.55 ? "within_reference" : normalized <= 1 ? "near_reference" : "outside_reference";
+  return metric(value, score, status, target - tolerance, target + tolerance, unit, []);
 }
 
 function metric(value,score,status,idealMin,idealMax,unit,landmarks) {
@@ -1296,7 +1314,7 @@ function buildFrontalGeometry(lm, quality) {
     metrics.angularity={};
     if (lc&&lj&&rj&&rc) {
       const la=angle(lc,lj,chin), ra=angle(rc,rj,chin);
-      if (la!==null&&ra!==null) metrics.angularity.jaw_angle=metricWithPoints(scoreRange((la+ra)/2,110,140,35),["left_cheekbone","left_jaw","chin","right_jaw","right_cheekbone"]);
+      if (la!==null&&ra!==null) metrics.angularity.jaw_angle=metricWithPoints(scoreRange((la+ra)/2,110,140,20,"degrees"),["left_cheekbone","left_jaw","chin","right_jaw","right_cheekbone"]);
     }
   }
   const featureScores=metricScores(metrics);
@@ -1307,9 +1325,9 @@ function buildFrontalGeometry(lm, quality) {
 function buildProfileGeometry(lm, quality) {
   const gf=point(lm,"profile_glabella"), na=point(lm,"profile_nasion"), no=point(lm,"profile_pronasale"), sn=point(lm,"profile_subnasale"), ls=point(lm,"profile_labiale_superius"), li=point(lm,"profile_labiale_inferius"), po=point(lm,"profile_pogonion"), me=point(lm,"profile_menton"), go=point(lm,"profile_gonion"), ch=point(lm,"profile_chin_neck");
   const metrics={profile:{}};
-  if (gf&&na&&no) metrics.profile.nasofacial_angle=metricWithPoints(scoreRange(180-angle(gf,na,no),30,40,18),["profile_glabella","profile_nasion","profile_pronasale"]);
-  if (sn&&ls&&no) metrics.profile.nasolabial_angle=metricWithPoints(scoreRange(angle(no,sn,ls),90,110,35),["profile_pronasale","profile_subnasale","profile_labiale_superius"]);
-  if (go&&po&&ch) metrics.profile.gonial_angle=metricWithPoints(scoreRange(180-angle(po,go,ch),115,135,35),["profile_pogonion","profile_gonion","profile_chin_neck"]);
+  if (gf&&na&&no) metrics.profile.nasofacial_angle=metricWithPoints(scoreRange(180-angle(gf,na,no),30,40,10,"degrees"),["profile_glabella","profile_nasion","profile_pronasale"]);
+  if (sn&&ls&&no) metrics.profile.nasolabial_angle=metricWithPoints(scoreRange(angle(no,sn,ls),90,110,15,"degrees"),["profile_pronasale","profile_subnasale","profile_labiale_superius"]);
+  if (go&&po&&ch) metrics.profile.gonial_angle=metricWithPoints(scoreRange(180-angle(po,go,ch),115,135,15,"degrees"),["profile_pogonion","profile_gonion","profile_chin_neck"]);
   if (na&&no&&po) metrics.profile.nose_chin_projection=metricWithPoints(scoreCentered(Math.abs(no.x-po.x),0.16,0.12),["profile_nasion","profile_pronasale","profile_pogonion"]);
   if (no&&ls&&po) metrics.profile.profile_projection_balance=metricWithPoints(scoreCentered(Math.abs((no.x-ls.x)/(Math.abs(no.x-po.x)||1)),0.55,0.35),["profile_pronasale","profile_labiale_superius","profile_pogonion"]);
   const scores=metricScores(metrics); const harmony=weightedMean(scores,quality);
