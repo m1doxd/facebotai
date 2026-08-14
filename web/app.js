@@ -2,7 +2,7 @@
 // FACE METRIC APP - UNIFIED FRONTEND v2026.08.15-gender-modal-fix
 // ============================================================
 
-window.__FACEMETRIC_APP_VERSION__ = "2026-08-15-gender-modal-fix-v1";
+window.__FACEMETRIC_APP_VERSION__ = "2026-08-15-gender-clean-v2";
 
 
 // ============================================================
@@ -122,8 +122,6 @@ function initClassificationModal() {
   if (saved) {
     selectedGender = saved.gender;
     adultConfirmed = saved.adultConfirmed;
-    if (genderSelect) genderSelect.value = selectedGender;
-    if (adultConfirm) adultConfirm.checked = adultConfirmed;
     modal.hidden = true;
     modal.setAttribute("aria-hidden", "true");
   } else {
@@ -145,9 +143,6 @@ function initClassificationModal() {
 
     selectedGender = nextGender;
     adultConfirmed = true;
-    if (genderSelect) genderSelect.value = selectedGender;
-    if (adultConfirm) adultConfirm.checked = true;
-
     if (!saveClassificationSettings(selectedGender, adultConfirmed)) {
       if (error) {
         error.textContent = "Не удалось сохранить настройки в браузере.";
@@ -427,9 +422,6 @@ const profileFileInput = $("#profile-file-input");
 const profileUploadButton = $("#profile-upload-btn");
 const profileUploadName = $("#profile-upload-name");
 const startAnalysisButton = $("#start-analysis-btn");
-const genderSelect = $("#gender-select");
-const adultConfirm = $("#adult-confirm");
-
 const analysisImage = $("#analysis-image");
 const analysisFrame = $("#analysis-frame");
 const landmarkCanvas = $("#landmark-canvas");
@@ -1513,11 +1505,8 @@ async function analyzePhoto(file, signal, profileFile = null) {
 
   // Classification state is read only from the declared frontend state.
   // There is intentionally no standalone `gender` variable here.
-  const requestGender = selectedGender === "female" ? "female" : "male";
-  const requestAdultConfirmed = adultConfirmed === true;
-
-  formData.append("gender", requestGender);
-  formData.append("adult_confirmed", requestAdultConfirmed ? "true" : "false");
+  formData.append("gender", selectedGender === "female" ? "female" : "male");
+  formData.append("adult_confirmed", adultConfirmed === true ? "true" : "false");
 
   const userGeminiKey = getGeminiApiKey();
 
@@ -6201,21 +6190,7 @@ function initClassificationSettings() {
     selectedGender = saved.gender;
     adultConfirmed = saved.adultConfirmed;
   }
-
-  if (genderSelect) {
-    genderSelect.value = selectedGender;
-    genderSelect.addEventListener("change", () => {
-      selectedGender = genderSelect.value === "female" ? "female" : "male";
-    });
-  }
-
-  if (adultConfirm) {
-    adultConfirm.checked = adultConfirmed;
-    adultConfirm.addEventListener("change", () => {
-      adultConfirmed = Boolean(adultConfirm.checked);
-      updateAnalysisButtonState();
-    });
-  }
+  // Gender/age are managed exclusively by the classification modal.
 
   updateAnalysisButtonState();
 }
