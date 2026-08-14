@@ -10,8 +10,8 @@ const ALLOWED_TYPES = new Set([
 
 const DEFAULT_MODEL = "gemini-3.6-flash";
 
-// Deployment marker: 2026-08-15-scanner-alignment-v1
-const WORKER_BUILD = "2026-08-15-scanner-alignment-v1";
+// Deployment marker: 2026-08-15-landmark-ui-objective-v2
+const WORKER_BUILD = "2026-08-15-landmark-ui-objective-v2";
 
 const SCORE_MIN = 0;
 const SCORE_MAX = 10;
@@ -1157,21 +1157,30 @@ function angle(a,b,c) {
 
 function scoreRange(value, min, max, tolerance) {
   if (value === null || !Number.isFinite(value)) return metric(null,null,"uncertain",min,max,null,[]);
+  const center=(min+max)/2;
+  const half=Math.max((max-min)/2,1e-6);
+  const d=Math.abs(value-center);
   let score;
-  if (value >= min && value <= max) score = 9.2 - Math.min(1.0, Math.abs(value-(min+max)/2)/Math.max((max-min)/2,1e-6))*0.8;
-  else {
-    const d = value < min ? min-value : value-max;
-    score = 9.0 - (d/Math.max(tolerance,1e-6))*4.0;
+  let status;
+  if (value >= min && value <= max) {
+    const edge=Math.min(1,d/half);
+    score=8.6-(edge*1.8);
+    status="good";
+  } else {
+    const outside=value<min?min-value:value-max;
+    const normalized=outside/Math.max(tolerance,1e-6);
+    score=6.8-(normalized*3.2);
+    status=outside <= tolerance ? "average" : "poor";
   }
-  score = clampScore(Math.max(1, Math.min(10, score)));
-  const status = value >= min && value <= max ? "good" : Math.abs(value-(min+max)/2) <= ((max-min)/2+tolerance) ? "average" : "poor";
+  score=clampScore(Math.max(1,Math.min(9.4,score)));
   return metric(value,score,status,min,max,"ratio",[]);
 }
 
 function scoreCentered(value, target, tolerance, unit="ratio") {
   if (value === null || !Number.isFinite(value)) return metric(null,null,"uncertain",null,null,unit,[]);
   const d=Math.abs(value-target);
-  const score=clampScore(Math.max(1,10-8*(d/Math.max(tolerance,1e-6))));
+  const normalized=d/Math.max(tolerance,1e-6);
+  const score=clampScore(Math.max(1,9.4-(normalized*5.6)));
   const status=d<=tolerance*0.45?"good":d<=tolerance?"average":"poor";
   return metric(value,score,status,target-tolerance,target+tolerance,unit,[]);
 }
@@ -1332,7 +1341,8 @@ function weightedMean(items,quality=1){
   if(!normalized.length)return null;
   const sum=normalized.reduce((a,x)=>a+x.score*x.weight,0)/normalized.reduce((a,x)=>a+x.weight,0);
   const q=clamp01(quality);
-  return clampScore(4 + (sum-4)*(0.55+0.45*q));
+  const qualityPenalty=q>=0.85?1:0.72+(q*0.28);
+  return clampScore(sum*qualityPenalty);
 }
 function buildSections(front,profile,frontQ,profileQ,hasProfile){
   const sym=avgMetricGroup(front.symmetry);
