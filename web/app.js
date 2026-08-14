@@ -284,6 +284,10 @@ const featureCount = $("#feature-count");
 const resultFeatureCount = $("#result-feature-count");
 const analysisState = $("#analysis-state");
 const alignmentStatus = $("#alignment-status");
+const analysisScanHud = $("#analysis-scan-hud");
+const analysisScanTitle = $("#analysis-scan-title");
+const analysisScanDetail = $("#analysis-scan-detail");
+const analysisScanProgress = $("#analysis-scan-progress");
 const analysisScore = $("#analysis-score");
 const analysisScoreValue = analysisScore
   ? $("strong", analysisScore)
@@ -329,6 +333,8 @@ let activeAbortController = null;
 
 let toastTimer = null;
 let resultAnimationTimer = null;
+let analysisScanTimer = null;
+let analysisScanStartedAt = 0;
 
 let activeResultView = "front";
 let activeMetric = null;
@@ -724,6 +730,129 @@ function revokeSelectedProfileObjectUrl() {
 
 
 /* ============================================================
+   FACIAL SCANNER EXPERIENCE
+============================================================ */
+
+const ANALYSIS_SCAN_STAGES = [
+  ["Сканируем лицо", "Определяем контур и положение", 12],
+  ["Находим ось симметрии", "Проверяем глаза и центральную линию", 28],
+  ["Измеряем пропорции", "Сравниваем видимые расстояния", 46],
+  ["Проверяем черты", "Глаза · нос · губы · челюсть", 64],
+  ["Проверяем симметрию", "Сопоставляем левую и правую стороны", 79],
+  ["Выравниваем кадр", "Поворот · центр · масштаб", 92]
+];
+
+function setAnalysisScannerStage(index, force = false) {
+  const stage = ANALYSIS_SCAN_STAGES[
+    Math.max(0, Math.min(ANALYSIS_SCAN_STAGES.length - 1, index))
+  ];
+  if (!stage) return;
+
+  analysisFrame?.classList.add("scanner-active");
+  analysisScanHud?.classList.add("is-visible");
+  if (analysisScanTitle) analysisScanTitle.textContent = stage[0];
+  if (analysisScanDetail) analysisScanDetail.textContent = stage[1];
+  if (analysisScanProgress) analysisScanProgress.style.width = `${stage[2]}%`;
+
+  if (force && analysisScanHud) {
+    analysisScanHud.classList.remove("is-pulse");
+    void analysisScanHud.offsetWidth;
+    analysisScanHud.classList.add("is-pulse");
+  }
+}
+
+function startAnalysisScanner() {
+  stopAnalysisScanner();
+  analysisScanStartedAt = performance.now();
+  setAnalysisScannerStage(0, true);
+  let index = 0;
+  analysisScanTimer = window.setInterval(() => {
+    index = Math.min(index + 1, ANALYSIS_SCAN_STAGES.length - 1);
+    setAnalysisScannerStage(index, true);
+    if (index >= ANALYSIS_SCAN_STAGES.length - 1) {
+      clearInterval(analysisScanTimer);
+      analysisScanTimer = null;
+    }
+  }, 720);
+}
+
+function stopAnalysisScanner(done = false) {
+  if (analysisScanTimer) clearInterval(analysisScanTimer);
+  analysisScanTimer = null;
+  if (analysisScanProgress) analysisScanProgress.style.width = done ? "100%" : "0%";
+  if (analysisScanTitle) analysisScanTitle.textContent = done ? "Сканирование завершено" : "Готово к анализу";
+  if (analysisScanDetail) analysisScanDetail.textContent = done ? "Измерения получены · лицо выровнено" : "";
+  analysisScanHud?.classList.toggle("is-visible", done);
+  analysisFrame?.classList.toggle("scanner-active", !done);
+}
+
+function drawAnalysisNetwork(result) {
+  const canvas = landmarkCanvas;
+  if (!canvas || !analysisFrame) return;
+  const landmarks = result?.landmarks || result?.frontal?.landmarks || {};
+  const points = Object.fromEntries(
+    Object.entries(landmarks).filter(([, p]) =>
+      p && Number.isFinite(Number(p.x)) && Number.isFinite(Number(p.y))
+    )
+  );
+  const names = Object.keys(points);
+  if (!names.length) return;
+
+  resizeLandmarkCanvas();
+  const rect = analysisFrame.getBoundingClientRect();
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  ctx.clearRect(0, 0, rect.width, rect.height);
+
+  const xy = name => ({
+    x: Number(points[name].x) * rect.width,
+    y: Number(points[name].y) * rect.height
+  });
+  const pairs = [
+    ["left_eye_outer","left_eye_inner"],["left_eye_inner","right_eye_inner"],["right_eye_inner","right_eye_outer"],
+    ["left_eyebrow_inner","left_eyebrow_outer"],["right_eyebrow_inner","right_eyebrow_outer"],
+    ["nose_bridge","nose_tip"],["nose_left","nose_tip"],["nose_tip","nose_right"],
+    ["mouth_left","mouth_right"],["mouth_left","mouth_center"],["mouth_center","mouth_right"],
+    ["left_cheek","left_jaw"],["left_jaw","chin"],["chin","right_jaw"],["right_jaw","right_cheek"],
+    ["forehead_center","nose_bridge"],["nose_bridge","mouth_center"]
+  ];
+
+  ctx.lineWidth = 1.2;
+  ctx.strokeStyle = "rgba(255,255,255,.48)";
+  ctx.shadowColor = "rgba(255,255,255,.24)";
+  ctx.shadowBlur = 8;
+  for (const [a,b] of pairs) {
+    if (!points[a] || !points[b]) continue;
+    const A=xy(a), B=xy(b);
+    ctx.beginPath(); ctx.moveTo(A.x,A.y); ctx.lineTo(B.x,B.y); ctx.stroke();
+  }
+  ctx.shadowBlur = 0;
+  for (const name of names) {
+    const p=xy(name);
+    ctx.beginPath(); ctx.arc(p.x,p.y,2.2,0,Math.PI*2);
+    ctx.fillStyle="rgba(255,255,255,.92)"; ctx.fill();
+  }
+}
+
+function revealAnalysisScore(score) {
+  if (!analysisScoreValue || !analysisScore) return;
+  const target = clamp(Number(score), 0, 10);
+  if (!Number.isFinite(target)) return;
+  analysisScore.dataset.level = getMetricLevel(target);
+  analysisScore.classList.add("show");
+  const start = performance.now();
+  const duration = 780;
+  const tick = now => {
+    const p = Math.min(1, (now - start) / duration);
+    const eased = 1 - Math.pow(1 - p, 3);
+    analysisScoreValue.textContent = formatScore(target * eased);
+    if (p < 1) requestAnimationFrame(tick);
+    else analysisScore.classList.add("float", "is-final");
+  };
+  requestAnimationFrame(tick);
+}
+
+/* ============================================================
    ANALYSIS PREVIEW
 ============================================================ */
 
@@ -753,6 +882,8 @@ function resetAnalysisPreview() {
     alignmentStatus.textContent = "АВТОВЫРАВНИВАНИЕ · ОЖИДАНИЕ";
     alignmentStatus.dataset.state = "waiting";
   }
+
+  stopAnalysisScanner();
 
   if (featureCount) {
     featureCount.textContent = "—";
@@ -888,6 +1019,7 @@ async function startAnalysis(file, profileFile = null) {
     new AbortController();
 
   resetLoadingSteps();
+  startAnalysisScanner();
 
   setAnalysisState("АНАЛИЗ");
 
@@ -939,6 +1071,8 @@ async function startAnalysis(file, profileFile = null) {
 
     currentAnalysis = result;
     applyAnalysisAlignment(result);
+    requestAnimationFrame(() => drawAnalysisNetwork(result));
+    stopAnalysisScanner(true);
 
     const visibleFeatureCount =
       result.feature_count ||
@@ -959,9 +1093,7 @@ async function startAnalysis(file, profileFile = null) {
 
     setAnalysisState("ГОТОВО");
 
-    showAnalysisPreviewScore(
-      result.score
-    );
+    revealAnalysisScore(result.score);
 
     saveHistory(result);
 
@@ -1202,26 +1334,12 @@ async function runLoadingSequence(
   analysisPromise
 ) {
   const steps = [
-    [
-      "Обрабатываем фотографию",
-      "Подготавливаем изображение"
-    ],
-    [
-      "Определяем лицо",
-      "Проверяем наличие и положение лица"
-    ],
-    [
-      "Измеряем пропорции",
-      "Анализируем видимую геометрию и черты"
-    ],
-    [
-      "Проверяем симметрию",
-      "Сравниваем видимые стороны лица"
-    ],
-    [
-      "Формируем результат",
-      "Собираем фактически полученные показатели"
-    ]
+    ["Обрабатываем фотографию", "Подготавливаем изображение"],
+    ["Определяем лицо", "Проверяем наличие и положение лица"],
+    ["Измеряем пропорции", "Анализируем видимую геометрию и черты"],
+    ["Проверяем симметрию", "Сравниваем видимые стороны лица"],
+    ["Выравниваем кадр", "Поворот · центр · масштаб"],
+    ["Формируем результат", "Собираем фактически полученные показатели"]
   ];
 
   for (
@@ -1234,6 +1352,7 @@ async function runLoadingSequence(
       steps[i][0],
       steps[i][1]
     );
+    setAnalysisScannerStage(Math.min(i, ANALYSIS_SCAN_STAGES.length - 1), true);
 
     if (loadingProgressBar) {
       loadingProgressBar.style.width =
