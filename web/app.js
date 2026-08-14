@@ -276,6 +276,8 @@ const profileFileInput = $("#profile-file-input");
 const profileUploadButton = $("#profile-upload-btn");
 const profileUploadName = $("#profile-upload-name");
 const startAnalysisButton = $("#start-analysis-btn");
+const genderSelect = $("#gender-select");
+const adultConfirm = $("#adult-confirm");
 
 const analysisImage = $("#analysis-image");
 const analysisFrame = $("#analysis-frame");
@@ -324,6 +326,10 @@ let selectedFile = null;
 let selectedObjectUrl = null;
 let selectedProfileFile = null;
 let selectedProfileObjectUrl = null;
+
+// Classification settings. Geometric measurements remain independent.
+let selectedGender = "male";
+let adultConfirmed = false;
 
 let currentAnalysis = null;
 let currentScreen = "home";
@@ -678,7 +684,7 @@ function handleFileSelected(file) {
 
   setAnalysisState("ГОТОВО К АНАЛИЗУ");
   showProfileUploadControl();
-  startAnalysisButton?.removeAttribute("disabled");
+  updateAnalysisButtonState();
   showToast("Анфас загружен. При желании добавь профиль, затем нажми «Начать анализ».");
 }
 
@@ -710,7 +716,7 @@ function handleProfileFileSelected(file) {
   }
 
   showProfileUploadControl();
-  startAnalysisButton?.removeAttribute("disabled");
+  updateAnalysisButtonState();
   showToast("Фото профиля добавлено. Теперь профиль войдёт в общий рейтинг.");
 }
 
@@ -840,6 +846,41 @@ function getOverlayPoints(view) {
   );
 }
 
+function getMetricLinePairs(key, viewType, selectedNames) {
+  const k = String(key || "").split(".").pop();
+  if (viewType === "profile") {
+    const map = {
+      nasofacial_angle: [["profile_glabella","profile_nasion"],["profile_nasion","profile_pronasale"]],
+      nasolabial_angle: [["profile_pronasale","profile_subnasale"],["profile_subnasale","profile_labiale_superius"]],
+      gonial_angle: [["profile_pogonion","profile_gonion"],["profile_gonion","profile_chin_neck"]],
+      nose_chin_projection: [["profile_nasion","profile_pronasale"],["profile_pronasale","profile_pogonion"]],
+      profile_projection_balance: [["profile_pronasale","profile_labiale_superius"],["profile_labiale_superius","profile_pogonion"]]
+    };
+    return map[k] || selectedNames.slice(0, -1).map((name, i) => [name, selectedNames[i + 1]]);
+  }
+  const map = {
+    face_aspect_ratio: [["left_cheekbone","right_cheekbone"],["forehead_center","chin"]],
+    eye_alignment: [["left_eye_inner","right_eye_inner"]],
+    eye_spacing: [["left_eye_inner","right_eye_inner"]],
+    left_eye_width: [["left_eye_inner","left_eye_outer"]],
+    right_eye_width: [["right_eye_inner","right_eye_outer"]],
+    mouth_symmetry: [["mouth_left","mouth_right"]],
+    mouth_width: [["mouth_left","mouth_right"]],
+    jaw_symmetry: [["left_jaw","right_jaw"]],
+    jaw_width: [["left_jaw","right_jaw"]],
+    cheek_symmetry: [["left_cheekbone","right_cheekbone"]],
+    nose_width: [["nose_left","nose_right"]],
+    nose_length: [["nose_bridge","nose_tip"]],
+    chin_width: [["left_jaw","chin"],["chin","right_jaw"]],
+    upper_to_lower_third: [["forehead_center","left_eye_inner"],["left_eye_inner","right_eye_inner"],["right_eye_inner","chin"]],
+    mid_to_lower_face: [["left_eye_inner","right_eye_inner"],["right_eye_inner","upper_lip_center"],["upper_lip_center","chin"]],
+    jaw_angle: [["left_cheekbone","left_jaw"],["left_jaw","chin"],["chin","right_jaw"],["right_jaw","right_cheekbone"]],
+    overall_symmetry: [["left_eye_inner","right_eye_inner"],["mouth_left","mouth_right"],["left_jaw","right_jaw"]],
+    symmetry: [["left_eye_inner","right_eye_inner"],["mouth_left","mouth_right"],["left_jaw","right_jaw"]]
+  };
+  return map[k] || selectedNames.slice(0, -1).map((name, i) => [name, selectedNames[i + 1]]);
+}
+
 function drawFaceLandmarkNetwork(canvas, view, metric = null, progress = 1) {
   if (!canvas) return;
   const rect = canvas.getBoundingClientRect();
@@ -861,38 +902,66 @@ function drawFaceLandmarkNetwork(canvas, view, metric = null, progress = 1) {
   const names = Object.keys(points);
   if (!names.length) return;
   const xy = name => ({x:Number(points[name].x)*width, y:Number(points[name].y)*height});
+
+  const selectedNames = metric
+    ? (Array.isArray(metric.value?.landmarks) && metric.value.landmarks.length
+        ? metric.value.landmarks
+        : getMetricLandmarkNames(metric.key, viewType))
+    : names;
+
   const pairs = viewType === "profile"
     ? [["profile_forehead","profile_glabella"],["profile_glabella","profile_nasion"],["profile_nasion","profile_pronasale"],["profile_pronasale","profile_subnasale"],["profile_subnasale","profile_labiale_superius"],["profile_labiale_superius","profile_labiale_inferius"],["profile_labiale_inferius","profile_pogonion"],["profile_pogonion","profile_menton"],["profile_menton","profile_chin_neck"]]
     : [["left_eye_outer","left_eye_inner"],["left_eye_inner","right_eye_inner"],["right_eye_inner","right_eye_outer"],["left_brow_inner","left_brow_outer"],["right_brow_inner","right_brow_outer"],["nose_bridge","nose_tip"],["nose_left","nose_tip"],["nose_tip","nose_right"],["mouth_left","mouth_right"],["forehead_center","nose_bridge"],["nose_bridge","mouth_center"],["mouth_center","chin"],["left_cheekbone","left_jaw"],["left_jaw","chin"],["chin","right_jaw"],["right_jaw","right_cheekbone"]];
 
-  const visiblePairs = pairs.filter(([a,b]) => points[a] && points[b]);
+  const visiblePairs = (metric ? getMetricLinePairs(metric.key, viewType, selectedNames) : pairs)
+    .filter(([a,b]) => points[a] && points[b]);
   const count = Math.max(0, Math.floor(visiblePairs.length * Math.max(0, Math.min(1, progress))));
+  const color = metric ? metricOverlayColor(metric) : "rgba(255,255,255,.78)";
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
-  ctx.lineWidth = metric ? 2.6 : 1.15;
-  ctx.strokeStyle = metric ? metricOverlayColor(metric) : "rgba(255,255,255,.78)";
-  ctx.shadowColor = metric ? metricOverlayColor(metric) : "rgba(255,255,255,.28)";
-  ctx.shadowBlur = metric ? 14 : 7;
+  ctx.lineWidth = metric ? 2.8 : 1.15;
+  ctx.strokeStyle = color;
+  ctx.shadowColor = metric ? color : "rgba(255,255,255,.28)";
+  ctx.shadowBlur = metric ? 15 : 7;
   for (let i=0;i<count;i++) {
     const [a,b]=visiblePairs[i]; const A=xy(a), B=xy(b);
     ctx.beginPath(); ctx.moveTo(A.x,A.y); ctx.lineTo(B.x,B.y); ctx.stroke();
   }
   ctx.shadowBlur = 0;
 
-  const selectedNames = metric
-    ? (Array.isArray(metric.value?.landmarks) && metric.value.landmarks.length ? metric.value.landmarks : getMetricLandmarkNames(metric.key, viewType))
-    : names;
-  const radius = metric ? 3.2 : 2.1;
+  const radius = metric ? 3.4 : 2.1;
   for (const name of selectedNames) {
     if (!points[name]) continue;
     const p=xy(name);
     ctx.beginPath(); ctx.arc(p.x,p.y,radius,0,Math.PI*2);
-    ctx.fillStyle=metric ? metricOverlayColor(metric) : "rgba(255,255,255,.95)";
+    ctx.fillStyle=color;
     ctx.fill();
     if (metric) {
-      ctx.beginPath(); ctx.arc(p.x,p.y,radius+4,0,Math.PI*2);
-      ctx.strokeStyle="rgba(255,255,255,.55)"; ctx.lineWidth=1; ctx.stroke();
+      ctx.beginPath(); ctx.arc(p.x,p.y,radius+4.5,0,Math.PI*2);
+      ctx.strokeStyle="rgba(255,255,255,.58)"; ctx.lineWidth=1; ctx.stroke();
     }
+  }
+
+  if (metric && selectedNames.some(name => points[name])) {
+    const visible = selectedNames.filter(name => points[name]).map(xy);
+    const cx = visible.reduce((s,p)=>s+p.x,0)/visible.length;
+    const cy = visible.reduce((s,p)=>s+p.y,0)/visible.length;
+    const value = normalizeMetricValue(metric.value);
+    const label = `${getRussianLabel(metric.key)}${value !== null ? ` · ${formatMetricScore(value)}/10` : ""}`;
+    ctx.font = "700 10px Inter, Arial, sans-serif";
+    const padX = 9, padY = 6;
+    const textW = ctx.measureText(label).width;
+    const boxW = textW + padX*2, boxH = 23;
+    const bx = Math.max(6, Math.min(width-boxW-6, cx-boxW/2));
+    const by = Math.max(8, cy-boxH-18);
+    ctx.fillStyle = "rgba(5,6,8,.82)";
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.roundRect(bx,by,boxW,boxH,9);
+    ctx.fill(); ctx.stroke();
+    ctx.fillStyle = "#fff";
+    ctx.fillText(label, bx+padX, by+15);
   }
 }
 
@@ -1280,6 +1349,9 @@ async function analyzePhoto(file, signal, profileFile = null) {
       profileFile.name || "profile.jpg"
     );
   }
+
+  formData.append("gender", selectedGender);
+  formData.append("adult_confirmed", adultConfirmed ? "true" : "false");
 
   const userGeminiKey = getGeminiApiKey();
 
@@ -2231,6 +2303,20 @@ function calculateClientAlignment(landmarks, type) {
     if (a && b) roll = Math.atan2(b.x - a.x, b.y - a.y) * 180 / Math.PI;
   }
 
+  while (roll > 90) roll -= 180;
+  while (roll < -90) roll += 180;
+
+  const axisStart = type === "front"
+    ? (lm.forehead_center || lm.nose_bridge)
+    : (lm.profile_glabella || lm.profile_nasion || lm.profile_forehead);
+  const axisEnd = type === "front"
+    ? lm.chin
+    : (lm.profile_pogonion || lm.profile_menton || lm.profile_chin_neck);
+  const upsideDown = Boolean(axisStart && axisEnd && Number(axisEnd.y) < Number(axisStart.y));
+  let correction = -roll + (upsideDown ? 180 : 0);
+  while (correction > 180) correction -= 360;
+  while (correction < -180) correction += 360;
+
   const xs = entries.map(([, p]) => Number(p.x));
   const ys = entries.map(([, p]) => Number(p.y));
   const minX = Math.min(...xs), maxX = Math.max(...xs);
@@ -2246,7 +2332,7 @@ function calculateClientAlignment(landmarks, type) {
     available: true,
     type,
     roll_degrees: roll,
-    correction_degrees: -roll,
+    correction_degrees: correction,
     center_x: (minX + maxX) / 2,
     center_y: (minY + maxY) / 2,
     scale,
@@ -3992,13 +4078,21 @@ function selectMetric(
     drawMetricOverlay(activeMetric);
   }
 
-  const inspector =
-    $("#metric-inspector");
+  const inspector = $("#metric-inspector");
+  const visual = $("#result-visual");
+  visual?.classList.add("metric-focus");
+  window.setTimeout(() => visual?.classList.remove("metric-focus"), 900);
 
-  inspector?.scrollIntoView({
+  // Focus the actual face image so the selected measurement is immediately visible.
+  visual?.scrollIntoView({
     behavior: "smooth",
     block: "center"
   });
+
+  window.setTimeout(() => {
+    inspector?.classList.add("metric-inspector--focused");
+    window.setTimeout(() => inspector?.classList.remove("metric-inspector--focused"), 900);
+  }, 260);
 }
 
 
@@ -5933,6 +6027,34 @@ function injectStageTwoStyles() {
    EVENTS
 ============================================================ */
 
+function initClassificationSettings() {
+  if (genderSelect) {
+    selectedGender = genderSelect.value === "female" ? "female" : "male";
+    genderSelect.addEventListener("change", () => {
+      selectedGender = genderSelect.value === "female" ? "female" : "male";
+    });
+  }
+
+  if (adultConfirm) {
+    adultConfirmed = Boolean(adultConfirm.checked);
+    adultConfirm.addEventListener("change", () => {
+      adultConfirmed = Boolean(adultConfirm.checked);
+      updateAnalysisButtonState();
+    });
+  }
+
+  updateAnalysisButtonState();
+}
+
+function updateAnalysisButtonState() {
+  if (!startAnalysisButton) return;
+  const ready = Boolean(selectedFile) && adultConfirmed;
+  startAnalysisButton.disabled = !ready;
+  startAnalysisButton.title = !adultConfirmed
+    ? "Подтвердите, что вам 18 или больше"
+    : "";
+}
+
 function bindEvents() {
   uploadButton?.addEventListener(
     "click",
@@ -6090,6 +6212,7 @@ function init() {
   try { initGeminiKeyModal(); } catch (e) { console.warn("Gemini modal init failed", e); }
 
   initTelegram();
+  initClassificationSettings();
 
   bindEvents();
 
