@@ -11,7 +11,7 @@ const ALLOWED_TYPES = new Set([
 const DEFAULT_MODEL = "gemini-3.6-flash";
 
 // Deployment marker: 2026-08-13-byok-profile-v1
-const WORKER_BUILD = "2026-08-14-objective-metrics-v1";
+const WORKER_BUILD = "2026-08-14-auto-center-v1";
 
 const SCORE_MIN = 0;
 const SCORE_MAX = 10;
@@ -1045,10 +1045,14 @@ function normalizeAnalysis(data, model) {
     ])
   );
 
-  const front = buildFrontalGeometry(frontLandmarks, frontQuality);
+  const frontAlignment = calculateAlignment(frontLandmarks, "front");
+  const normalizedFrontLandmarks = applyAlignmentToLandmarks(frontLandmarks, frontAlignment);
+  const front = buildFrontalGeometry(normalizedFrontLandmarks, frontQuality);
+  const profileAlignment = calculateAlignment(profileLandmarks, "profile");
+  const normalizedProfileLandmarks = applyAlignmentToLandmarks(profileLandmarks, profileAlignment);
   const profile = profileAvailable
-    ? buildProfileGeometry(profileLandmarks, profileQuality)
-    : { available: false, confidence: profileQuality, harmony: null, landmarks: profileLandmarks, metrics: {}, landmarks_count: Object.keys(profileLandmarks).length || null };
+    ? buildProfileGeometry(normalizedProfileLandmarks, profileQuality)
+    : { available: false, confidence: profileQuality, harmony: null, landmarks: normalizedProfileLandmarks, metrics: {}, landmarks_count: Object.keys(normalizedProfileLandmarks).length || null };
 
   const frontScores = metricScores(front.metrics);
   const profileScores = metricScores(profile.metrics);
@@ -1080,7 +1084,7 @@ function normalizeAnalysis(data, model) {
   };
 
   const metrics = front.metrics;
-  const allLandmarks = frontLandmarks;
+  const allLandmarks = normalizedFrontLandmarks;
 
   return {
     success: true,
@@ -1099,7 +1103,7 @@ function normalizeAnalysis(data, model) {
       available: true,
       confidence: frontQuality,
       harmony: frontalHarmony,
-      landmarks: frontLandmarks,
+      landmarks: normalizedFrontLandmarks,
       metrics: front.metrics,
       landmarks_count: Object.keys(frontLandmarks).length || null
     },
@@ -1109,6 +1113,7 @@ function normalizeAnalysis(data, model) {
     sections,
     metrics,
     production_features: production,
+    alignment: { front: frontAlignment, profile: profileAlignment },
     generated_at: new Date().toISOString()
   };
 }
@@ -1177,6 +1182,83 @@ function metric(value,score,status,idealMin,idealMax,unit,landmarks) {
 
 function metricWithPoints(m,names) { return {...m, landmarks:names.filter(Boolean)}; }
 function round(v,n=4){ const p=10**n; return Math.round(v*p)/p; }
+
+
+function calculateAlignment(lm, type) {
+  const entries = Object.entries(lm || {}).filter(([, p]) => p && Number.isFinite(Number(p.x)) && Number.isFinite(Number(p.y)));
+  if (entries.length < 3) {
+    return { available: false, type, roll_degrees: 0, correction_degrees: 0, center_x: 0.5, center_y: 0.5, scale: 1, confidence: 0 };
+  }
+
+  const points = Object.fromEntries(entries);
+  let roll = 0;
+  let axisStart = null;
+  let axisEnd = null;
+
+  if (type === "front") {
+    const left = points.left_eye_inner || points.left_eye_outer;
+    const right = points.right_eye_inner || points.right_eye_outer;
+    if (left && right) {
+      roll = Math.atan2(right.y - left.y, right.x - left.x) * 180 / Math.PI;
+    }
+    axisStart = points.forehead_center || points.nose_bridge || null;
+    axisEnd = points.chin || null;
+  } else {
+    axisStart = points.profile_glabella || points.profile_nasion || points.profile_forehead || null;
+    axisEnd = points.profile_pogonion || points.profile_menton || points.profile_chin_neck || null;
+    if (axisStart && axisEnd) {
+      roll = Math.atan2(axisEnd.x - axisStart.x, axisEnd.y - axisStart.y) * 180 / Math.PI;
+    }
+  }
+
+  const correction = -roll;
+  const xs = entries.map(([, p]) => Number(p.x));
+  const ys = entries.map(([, p]) => Number(p.y));
+  const minX = Math.min(...xs), maxX = Math.max(...xs);
+  const minY = Math.min(...ys), maxY = Math.max(...ys);
+  const centerX = (minX + maxX) / 2;
+  const centerY = (minY + maxY) / 2;
+  const height = Math.max(maxY - minY, 0.01);
+  const width = Math.max(maxX - minX, 0.01);
+  const targetHeight = type === "front" ? 0.76 : 0.78;
+  const targetWidth = type === "front" ? 0.68 : 0.62;
+  const scale = Math.max(0.82, Math.min(1.45, Math.max(targetHeight / height, targetWidth / width)));
+  const avgConfidence = entries.reduce((sum, [, p]) => sum + (Number(p.confidence) || 0), 0) / entries.length;
+
+  return {
+    available: true,
+    type,
+    roll_degrees: round(roll, 2),
+    correction_degrees: round(correction, 2),
+    center_x: round(centerX, 4),
+    center_y: round(centerY, 4),
+    scale: round(scale, 3),
+    confidence: round(avgConfidence, 3)
+  };
+}
+
+
+function applyAlignmentToLandmarks(lm, alignment) {
+  if (!alignment?.available) return lm || {};
+  const cx = Number(alignment.center_x ?? 0.5);
+  const cy = Number(alignment.center_y ?? 0.5);
+  const scale = Number(alignment.scale ?? 1) || 1;
+  const angle = Number(alignment.correction_degrees ?? 0) * Math.PI / 180;
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  const out = {};
+  for (const [name, point] of Object.entries(lm || {})) {
+    if (!point || !Number.isFinite(Number(point.x)) || !Number.isFinite(Number(point.y))) continue;
+    const sx = (Number(point.x) - cx) * scale;
+    const sy = (Number(point.y) - cy) * scale;
+    out[name] = {
+      x: round(0.5 + sx * cos - sy * sin, 5),
+      y: round(0.5 + sx * sin + sy * cos, 5),
+      confidence: Number.isFinite(Number(point.confidence)) ? Number(point.confidence) : null
+    };
+  }
+  return out;
+}
 
 function buildFrontalGeometry(lm, quality) {
   const le=point(lm,"left_eye_inner"), leO=point(lm,"left_eye_outer"), re=point(lm,"right_eye_inner"), reO=point(lm,"right_eye_outer");
