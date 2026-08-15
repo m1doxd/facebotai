@@ -13,7 +13,7 @@ const DEFAULT_MODEL = "gemini-3.6-flash";
 // Deployment marker: 2026-08-13-cors-fix-v2
 // This intentionally changes the Worker source so Git/Cloudflare
 // detects a new deployment.
-const WORKER_BUILD = "2026-08-13-cors-fix-v2";
+const WORKER_BUILD = "2026-08-14-objective-v3-calibrated";
 
 const SCORE_MIN = 0;
 const SCORE_MAX = 10;
