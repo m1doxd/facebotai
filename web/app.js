@@ -1,8 +1,5 @@
-// ============================================================
-// FACE METRIC APP - UNIFIED FRONTEND v2026.08.15-gender-modal-fix
-// ============================================================
-
-window.__FACEMETRIC_APP_VERSION__ = "2026-08-15-final-ux-v1";
+// FACE METRIC APP - ALIGNMENT + GENDER MODAL + GEOMETRY v2026.08.15
+window.__FACEMETRIC_APP_VERSION__ = "2026-08-15-alignment-geometry-v2";
 
 
 // ============================================================
@@ -85,7 +82,7 @@ function openClassificationModal(options = {}) {
 
   const saved = getClassificationSettings();
   gender.value = selectedGender === "female" ? "female" : (saved?.gender || "male");
-  adult.checked = adultConfirmed === true;
+  adult.checked = adultConfirmed || saved?.adultConfirmed === true;
   if (error) { error.hidden = true; error.textContent = ""; }
 
   modal.hidden = false;
@@ -118,72 +115,39 @@ function initClassificationModal() {
     return;
   }
 
-  // Make the wording explicit: the answer is about the person in the photo.
-  const title = modal.querySelector("[data-classification-title], h2, h3, .modal-title");
-  if (title) {
-    title.textContent = "Параметры человека на фото";
-  }
-
-  const genderLabel = modal.querySelector('label[for="classificationGender"]');
-  if (genderLabel) {
-    genderLabel.textContent = "Кто на фото?";
-  }
-
-  const adultLabel = modal.querySelector('label[for="classificationAdult"]');
-  if (adultLabel) {
-    adultLabel.textContent = "Человеку на фото 18 лет или больше";
-  }
-
-  const submitButton =
-    form.querySelector('button[type="submit"], input[type="submit"]');
-  if (submitButton) {
-    submitButton.textContent = "Продолжить анализ";
-  }
-
   const saved = getClassificationSettings();
-
-  // The modal is hidden until a photo is uploaded. Saved values are
-  // only convenient defaults; they never count as a fresh confirmation.
-  selectedGender =
-    saved?.gender === "female"
-      ? "female"
-      : "male";
-  adultConfirmed = false;
-
-  if (genderSelect) {
-    genderSelect.value = selectedGender;
+  if (saved) {
+    selectedGender = saved.gender;
+    adultConfirmed = saved.adultConfirmed;
+    if (genderSelect) genderSelect.value = selectedGender;
+    if (adultConfirm) adultConfirm.checked = adultConfirmed;
+    modal.hidden = true;
+    modal.setAttribute("aria-hidden", "true");
+  } else {
+    modal.hidden = true;
+    modal.setAttribute("aria-hidden", "true");
   }
-
-  if (adultConfirm) {
-    adultConfirm.checked = false;
-  }
-
-  modal.hidden = true;
-  modal.setAttribute("aria-hidden", "true");
 
   form.addEventListener("submit", event => {
     event.preventDefault();
-
-    const nextGender =
-      gender.value === "female"
-        ? "female"
-        : "male";
+    const nextGender = gender.value === "female" ? "female" : "male";
+    if (!adult.checked) {
+      if (error) {
+        error.textContent = "Для классификационного результата нужно подтвердить, что вам 18 лет или больше.";
+        error.hidden = false;
+      }
+      adult.focus();
+      return;
+    }
 
     selectedGender = nextGender;
-    adultConfirmed = Boolean(adult.checked);
-
-    if (genderSelect) {
-      genderSelect.value = selectedGender;
-    }
-
-    if (adultConfirm) {
-      adultConfirm.checked = adultConfirmed;
-    }
+    adultConfirmed = true;
+    if (genderSelect) genderSelect.value = selectedGender;
+    if (adultConfirm) adultConfirm.checked = true;
 
     if (!saveClassificationSettings(selectedGender, adultConfirmed)) {
       if (error) {
-        error.textContent =
-          "Не удалось сохранить настройки в браузере.";
+        error.textContent = "Не удалось сохранить настройки в браузере.";
         error.hidden = false;
       }
       return;
@@ -192,11 +156,16 @@ function initClassificationModal() {
     closeClassificationModal();
     updateAnalysisButtonState();
 
+    // The classification dialog is intentionally shown only after a photo
+    // has been selected. Once the user confirms it, analysis starts
+    // automatically so the flow is: photo -> gender/18+ -> scan.
     if (selectedFile) {
-      showToast(
-        "Параметры фото подтверждены. Начинаем анализ…"
-      );
-      startAnalysis(selectedFile, selectedProfileFile);
+      startAnalysisButton?.setAttribute("disabled", "disabled");
+      window.setTimeout(() => {
+        startAnalysis(selectedFile, selectedProfileFile);
+      }, 160);
+    } else {
+      showToast("Фотография сохранена. Теперь добавь фотографию для анализа.");
     }
   });
 
@@ -206,7 +175,7 @@ function initClassificationModal() {
 }
 
 function maybeOpenClassificationModal() {
-  // Classification is intentionally requested only after a photo is uploaded.
+  // Intentionally no-op: classification is requested after photo upload.
   return false;
 }
 
@@ -376,15 +345,7 @@ function initGeminiKeyModal() {
       }
 
       closeGeminiKeyModal();
-
-      // If the user selected a photo before entering the key, resume the
-      // same upload flow instead of making them pick the file again.
-      const pendingFile = fileInput?.files?.[0];
-      if (pendingFile) {
-        handleFileSelected(pendingFile);
-      } else {
-        showToast("Gemini API ключ проверен и сохранён.");
-      }
+      showToast("Gemini API ключ проверен и сохранён.");
     } catch (validationError) {
       console.error("FaceMetric Gemini key validation:", validationError);
 
@@ -523,12 +484,6 @@ let selectedProfileObjectUrl = null;
 // Classification settings. Geometric measurements remain independent.
 let selectedGender = "male";
 let adultConfirmed = false;
-
-// Expose read-only diagnostics for debugging the deployed frontend.
-window.FaceMetricClassification = {
-  get gender() { return selectedGender === "female" ? "female" : "male"; },
-  get adultConfirmed() { return adultConfirmed === true; }
-};
 
 let currentAnalysis = null;
 let currentScreen = "home";
@@ -879,26 +834,15 @@ function handleFileSelected(file) {
 
   clearAnalysisError();
   resetAnalysisPreview();
-
-  // Classification is asked for the newly uploaded photo, every time.
-  // Keep the last gender as a convenient default, but never silently
-  // reuse the previous 18+ confirmation.
-  const savedClassification = getClassificationSettings();
-  selectedGender =
-    savedClassification?.gender === "female"
-      ? "female"
-      : "male";
-  adultConfirmed = false;
-
   showScreen("analysis");
 
-  setAnalysisState("ОЖИДАЕМ КЛАССИФИКАЦИЮ ФОТО");
+  setAnalysisState("ГОТОВО К АНАЛИЗУ");
   showProfileUploadControl();
   updateAnalysisButtonState();
 
-  // Let the uploaded image render first, then open the modal above it.
+  // Ask for gender and 18+ only after the image exists.
   window.setTimeout(() => {
-    openClassificationModal({ focus: true, forPhoto: true });
+    openClassificationModal({ focus: true });
   }, 120);
 }
 
@@ -1043,8 +987,8 @@ function getMetricLandmarkNames(key, viewType = "front") {
 }
 
 function metricOverlayColor(metric) {
-  const status = getMetricStatus(metric?.value);
-  const score = getMetricScore(metric?.value);
+  const status = String(metric?.value?.status || "").toLowerCase();
+  const score = normalizeMetricValue(metric?.value);
   if (status === "poor" || (score !== null && score < 5)) return "#ff5368";
   if (status === "average" || (score !== null && score < 7)) return "#f2c75c";
   if (status === "good" || (score !== null && score >= 7)) return "#55d98b";
@@ -1160,7 +1104,7 @@ function drawFaceLandmarkNetwork(canvas, view, metric = null, progress = 1) {
     const visible = selectedNames.filter(name => points[name]).map(xy);
     const cx = visible.reduce((s,p)=>s+p.x,0)/visible.length;
     const cy = visible.reduce((s,p)=>s+p.y,0)/visible.length;
-    const value = getMetricScore(metric.value);
+    const value = normalizeMetricValue(metric.value);
     const label = `${getRussianLabel(metric.key)}${value !== null ? ` · ${formatMetricScore(value)}/10` : ""}`;
     ctx.font = "700 10px Inter, Arial, sans-serif";
     const padX = 9, padY = 6;
@@ -1379,8 +1323,8 @@ async function startAnalysis(file, profileFile = null) {
     return;
   }
 
-  if (!adultConfirmed && !selectedFile) {
-    openClassificationModal({ focus: true, forPhoto: true });
+  if (!adultConfirmed) {
+    openClassificationModal({ focus: true });
     return;
   }
 
@@ -1444,18 +1388,12 @@ async function startAnalysis(file, profileFile = null) {
     }
 
     currentAnalysis = result;
-
     applyAnalysisAlignment(result);
-
     requestAnimationFrame(() => animateAnalysisNetwork(result));
-
-    // Keep the alignment HUD visible long enough to show what was corrected.
-    window.setTimeout(() => {
-      if (currentAnalysis === result) {
-        setAlignmentStatus(result?.alignment?.front, "done");
-      }
-    }, 720);
-
+    if (alignmentStatus) {
+      alignmentStatus.textContent = "ЛИЦО ВЫРОВНЕНО ✓";
+      alignmentStatus.dataset.state = "done";
+    }
     stopAnalysisScanner(true);
 
     const visibleFeatureCount =
@@ -1580,13 +1518,8 @@ async function analyzePhoto(file, signal, profileFile = null) {
     );
   }
 
-  // Classification state is read only from the declared frontend state.
-  // There is intentionally no standalone `gender` variable here.
-  const requestGender = selectedGender === "female" ? "female" : "male";
-  const requestAdultConfirmed = adultConfirmed === true;
-
-  formData.append("gender", requestGender);
-  formData.append("adult_confirmed", requestAdultConfirmed ? "true" : "false");
+  formData.append("gender", selectedGender === "female" ? "female" : "male");
+  formData.append("adult_confirmed", adultConfirmed ? "true" : "false");
 
   const userGeminiKey = getGeminiApiKey();
 
@@ -2521,57 +2454,115 @@ function normalizeAlignmentSet(raw, frontLandmarks = {}, profileLandmarks = {}) 
 }
 
 function calculateClientAlignment(landmarks, type) {
-  const entries = Object.entries(landmarks || {}).filter(([, p]) => p && Number.isFinite(Number(p.x)) && Number.isFinite(Number(p.y)));
+  const entries = Object.entries(landmarks || {}).filter(([, p]) =>
+    p && Number.isFinite(Number(p.x)) && Number.isFinite(Number(p.y))
+  );
+
   if (entries.length < 3) {
-    return { available: false, type, roll_degrees: 0, correction_degrees: 0, center_x: 0.5, center_y: 0.5, scale: 1, confidence: 0 };
+    return {
+      available: false,
+      type,
+      roll_degrees: 0,
+      correction_degrees: 0,
+      center_x: 0.5,
+      center_y: 0.5,
+      scale: 1,
+      confidence: 0
+    };
   }
 
   const lm = Object.fromEntries(entries);
+  let correction = 0;
   let roll = 0;
+
   if (type === "front") {
     const left = lm.left_eye_inner || lm.left_eye_outer;
     const right = lm.right_eye_inner || lm.right_eye_outer;
-    if (left && right) roll = Math.atan2(right.y - left.y, right.x - left.x) * 180 / Math.PI;
+    const eyeMid = left && right
+      ? { x: (left.x + right.x) / 2, y: (left.y + right.y) / 2 }
+      : null;
+
+    // Use the eye line for roll. This is stable and does not depend on a
+    // potentially noisy forehead/chin point.
+    if (left && right) {
+      roll = Math.atan2(right.y - left.y, right.x - left.x) * 180 / Math.PI;
+    }
+
+    // Detect a truly upside-down observation from the semantic ordering of
+    // landmarks, but only when the evidence is strong. Never infer 180° from
+    // the forehead/chin pair alone.
+    const nose = lm.nose_tip || lm.nose_bridge;
+    const mouth = lm.lower_lip_center || lm.upper_lip_center;
+    const chin = lm.chin;
+    const verticalEvidence = [
+      eyeMid && nose && nose.y > eyeMid.y,
+      nose && mouth && mouth.y > nose.y,
+      mouth && chin && chin.y > mouth.y
+    ].filter(v => typeof v === "boolean");
+    const normalOrder = verticalEvidence.filter(Boolean).length;
+    const reversedOrder = verticalEvidence.length - normalOrder;
+    const upsideDown = verticalEvidence.length >= 2 && reversedOrder > normalOrder;
+
+    while (roll > 90) roll -= 180;
+    while (roll < -90) roll += 180;
+    correction = -roll + (upsideDown ? 180 : 0);
   } else {
     const a = lm.profile_glabella || lm.profile_nasion || lm.profile_forehead;
     const b = lm.profile_pogonion || lm.profile_menton || lm.profile_chin_neck;
-    if (a && b) roll = Math.atan2(b.x - a.x, b.y - a.y) * 180 / Math.PI;
+    if (a && b) {
+      roll = Math.atan2(b.x - a.x, b.y - a.y) * 180 / Math.PI;
+    }
+    while (roll > 90) roll -= 180;
+    while (roll < -90) roll += 180;
+    correction = -roll;
   }
 
-  while (roll > 90) roll -= 180;
-  while (roll < -90) roll += 180;
-
-  const axisStart = type === "front"
-    ? (lm.forehead_center || lm.nose_bridge)
-    : (lm.profile_glabella || lm.profile_nasion || lm.profile_forehead);
-  const axisEnd = type === "front"
-    ? lm.chin
-    : (lm.profile_pogonion || lm.profile_menton || lm.profile_chin_neck);
-  const upsideDown = Boolean(axisStart && axisEnd && Number(axisEnd.y) < Number(axisStart.y));
-  let correction = -roll + (upsideDown ? 180 : 0);
   while (correction > 180) correction -= 360;
   while (correction < -180) correction += 360;
 
-  const xs = entries.map(([, p]) => Number(p.x));
-  const ys = entries.map(([, p]) => Number(p.y));
-  const minX = Math.min(...xs), maxX = Math.max(...xs);
-  const minY = Math.min(...ys), maxY = Math.max(...ys);
-  const width = Math.max(maxX - minX, 0.01);
-  const height = Math.max(maxY - minY, 0.01);
-  const targetHeight = type === "front" ? 0.76 : 0.78;
-  const targetWidth = type === "front" ? 0.68 : 0.62;
-  const scale = Math.max(0.82, Math.min(1.45, Math.max(targetHeight / height, targetWidth / width)));
-  const confidence = entries.reduce((sum, [, p]) => sum + (Number(p.confidence) || 0), 0) / entries.length;
+  // Face center is based on robust facial anchors instead of the raw landmark
+  // bounding box. This prevents hair/background points from pulling the image.
+  const anchors = type === "front"
+    ? [
+        lm.left_cheekbone, lm.right_cheekbone,
+        lm.left_jaw, lm.right_jaw,
+        lm.nose_tip, lm.chin, lm.forehead_center
+      ].filter(Boolean)
+    : [
+        lm.profile_forehead, lm.profile_nasion,
+        lm.profile_pronasale, lm.profile_pogonion,
+        lm.profile_menton
+      ].filter(Boolean);
+
+  const used = anchors.length >= 3 ? anchors : entries.map(([, p]) => p);
+  const xs = used.map(p => Number(p.x));
+  const ys = used.map(p => Number(p.y));
+  const centerX = (Math.min(...xs) + Math.max(...xs)) / 2;
+  const centerY = (Math.min(...ys) + Math.max(...ys)) / 2;
+
+  const width = Math.max(Math.max(...xs) - Math.min(...xs), 0.01);
+  const height = Math.max(Math.max(...ys) - Math.min(...ys), 0.01);
+  const targetHeight = type === "front" ? 0.70 : 0.76;
+  const targetWidth = type === "front" ? 0.58 : 0.60;
+  const scale = Math.max(
+    0.82,
+    Math.min(1.30, Math.max(targetHeight / height, targetWidth / width))
+  );
+
+  const confidence = used.reduce(
+    (sum, p) => sum + (Number(p.confidence) || 0),
+    0
+  ) / Math.max(used.length, 1);
 
   return {
     available: true,
     type,
-    roll_degrees: roll,
-    correction_degrees: correction,
-    center_x: (minX + maxX) / 2,
-    center_y: (minY + maxY) / 2,
-    scale,
-    confidence
+    roll_degrees: Number(roll.toFixed(2)),
+    correction_degrees: Number(correction.toFixed(2)),
+    center_x: Number(centerX.toFixed(4)),
+    center_y: Number(centerY.toFixed(4)),
+    scale: Number(scale.toFixed(3)),
+    confidence: Number(confidence.toFixed(3))
   };
 }
 
@@ -2591,53 +2582,23 @@ function setAlignmentStatus(alignment, state = "done") {
   alignmentStatus.dataset.state = state;
 }
 
-function normalizeAlignmentRotation(value) {
-  let angle = Number(value);
-  if (!Number.isFinite(angle)) return 0;
-
-  // Roll correction is a small tilt correction. Never allow a noisy
-  // landmark estimate to flip the entire photo upside down.
-  angle = ((angle + 180) % 360) - 180;
-
-  if (Math.abs(angle) > 90) {
-    angle = 0;
-  }
-
-  return clamp(angle, -45, 45);
-}
-
 function applyImageAlignment(image, alignment, frameElement = null) {
   if (!image || !alignment?.available) return;
 
-  const rect =
-    (frameElement || image.parentElement || image).getBoundingClientRect();
+  const rect = (frameElement || image.parentElement || image).getBoundingClientRect();
+  const cx = Number(alignment.center_x ?? 0.5);
+  const cy = Number(alignment.center_y ?? 0.5);
+  const rotate = Number(alignment.correction_degrees) || 0;
+  const scale = Number(alignment.scale) || 1;
 
-  const centerX = Number(alignment.center_x);
-  const centerY = Number(alignment.center_y);
-  const scaleValue = Number(alignment.scale);
+  // Keep the exact same transform convention as applyAlignmentToLandmarks:
+  // translate the detected facial center to the frame center, then rotate and scale.
+  const tx = (0.5 - cx) * rect.width;
+  const ty = (0.5 - cy) * rect.height;
 
-  const tx =
-    (0.5 - (Number.isFinite(centerX) ? centerX : 0.5)) *
-    rect.width;
-
-  const ty =
-    (0.5 - (Number.isFinite(centerY) ? centerY : 0.5)) *
-    rect.height;
-
-  const rotate = normalizeAlignmentRotation(alignment.correction_degrees);
-  const scale =
-    Number.isFinite(scaleValue)
-      ? clamp(scaleValue, 1, 2.2)
-      : 1;
-
-  image.style.transformOrigin = "50% 50%";
-  image.style.transition =
-    "transform 620ms cubic-bezier(.2,.8,.2,1)";
-
-  image.style.transform =
-    `translate(${tx.toFixed(1)}px, ${ty.toFixed(1)}px) ` +
-    `rotate(${rotate.toFixed(2)}deg) ` +
-    `scale(${scale.toFixed(3)})`;
+  image.style.transformOrigin = `${(cx * 100).toFixed(2)}% ${(cy * 100).toFixed(2)}%`;
+  image.style.transform = `translate(${tx.toFixed(1)}px, ${ty.toFixed(1)}px) rotate(${rotate.toFixed(2)}deg) scale(${scale.toFixed(3)})`;
+  image.dataset.aligned = "true";
 }
 
 function applyAnalysisAlignment(result) {
@@ -3927,7 +3888,9 @@ function createMetricCard(
   // otherwise JavaScript hits the temporal-dead-zone and aborts the
   // whole result renderer with:
   // "Cannot access lexical declaration 'metricObject' before initialization".
-  const metricObject = getMetricObject(value);
+  const metricObject = isObject(value) && Object.prototype.hasOwnProperty.call(value, "score")
+    ? value
+    : null;
 
   if (metricObject?.status) card.dataset.status = metricObject.status;
 
@@ -3958,7 +3921,7 @@ function createMetricCard(
   score.className =
     "scale-card__score";
 
-  const numeric = getMetricScore(value);
+  const numeric = normalizeMetricValue(metricObject ? metricObject.score : value);
   const isScore = numeric !== null;
 
   score.textContent =
@@ -4165,10 +4128,7 @@ function renderMetricInspector(
     activeMetric.value;
 
   const numeric =
-    getMetricScore(value);
-
-  const metricObject =
-    getMetricObject(value);
+    normalizeMetricValue(value);
 
   const zone =
     getMetricZone(key);
@@ -4216,7 +4176,40 @@ function renderMetricInspector(
     badge
   );
 
+  const visual =
+    document.createElement(
+      "div"
+    );
 
+  visual.className =
+    "metric-inspector__visual";
+
+  const face =
+    document.createElement(
+      "div"
+    );
+
+  face.className =
+    "metric-inspector__face";
+
+  const zoneElement =
+    document.createElement(
+      "div"
+    );
+
+  zoneElement.className =
+    "metric-inspector__zone";
+
+  zoneElement.dataset.zone =
+    zone.key;
+
+  face.appendChild(
+    zoneElement
+  );
+
+  visual.appendChild(
+    face
+  );
 
   const description =
     document.createElement(
@@ -4273,6 +4266,7 @@ function renderMetricInspector(
 
   inspector.append(
     header,
+    visual,
     description
   );
 }
@@ -4320,22 +4314,19 @@ function selectMetric(
 
   const inspector = $("#metric-inspector");
   const visual = $("#result-visual");
-
   visual?.classList.add("metric-focus");
-  window.setTimeout(
-    () => visual?.classList.remove("metric-focus"),
-    900
-  );
+  window.setTimeout(() => visual?.classList.remove("metric-focus"), 900);
 
-  // The selected metric is shown directly on the real face image.
+  // Focus the actual face image so the selected measurement is immediately visible.
   visual?.scrollIntoView({
     behavior: "smooth",
     block: "center"
   });
 
-  // Hide the textual inspector focus state; the photo overlay is the
-  // source of truth for the selected measurement.
-  inspector?.classList.remove("metric-inspector--focused");
+  window.setTimeout(() => {
+    inspector?.classList.add("metric-inspector--focused");
+    window.setTimeout(() => inspector?.classList.remove("metric-inspector--focused"), 900);
+  }, 260);
 }
 
 
@@ -5337,17 +5328,16 @@ function formatValue(value) {
       : "Нет";
   }
 
-  if (typeof value === "object") {
-    const metric = getMetricObject(value);
-
-    if (metric) {
-      const score = getMetricScore(value);
-      return score !== null
-        ? `${formatMetricScore(score)}/10`
-        : "—";
+  if (
+    typeof value === "object"
+  ) {
+    try {
+      return JSON.stringify(
+        value
+      );
+    } catch {
+      return "—";
     }
-
-    return "—";
   }
 
   return String(value);
@@ -5438,27 +5428,6 @@ function isObject(value) {
       "object" &&
     !Array.isArray(value)
   );
-}
-
-function getMetricObject(value) {
-  return isObject(value) &&
-    Object.prototype.hasOwnProperty.call(value, "score")
-    ? value
-    : null;
-}
-
-function getMetricScore(value) {
-  const metric = getMetricObject(value);
-  return metric
-    ? normalizeMetricValue(metric.score)
-    : normalizeMetricValue(value);
-}
-
-function getMetricStatus(value) {
-  const metric = getMetricObject(value);
-  return metric?.status
-    ? String(metric.status).toLowerCase()
-    : "";
 }
 
 
@@ -5895,7 +5864,6 @@ function escapeHtml(value) {
 ============================================================ */
 
 function injectStageTwoStyles() {
-
   if (
     document.getElementById(
       "facemetric-stage2-styles"
@@ -6281,44 +6249,6 @@ function injectStageTwoStyles() {
       border-color: rgba(255,80,80,.85);
       background: rgba(255,80,80,.08);
     }
-
-
-    /* Final UX: the real result photo is the metric inspector. */
-    .metric-inspector__visual,
-    .face-map,
-    #face-map,
-    [data-face-map],
-    .face-map-card,
-    [data-component="face-map"] {
-      display: none !important;
-    }
-
-    .metric-inspector {
-      transition: opacity .25s ease, transform .35s ease;
-    }
-
-    #result-visual {
-      transition:
-        transform 650ms cubic-bezier(.2,.8,.2,1),
-        box-shadow 650ms ease,
-        border-color 650ms ease;
-      transform-origin: 50% 45%;
-    }
-
-    #result-visual.metric-focus {
-      transform: scale(1.035);
-      box-shadow:
-        0 0 0 1px rgba(255,255,255,.12),
-        0 24px 80px rgba(0,0,0,.38);
-    }
-
-    #result-landmark-canvas {
-      pointer-events: none;
-    }
-
-    .metric-inspector__description {
-      margin-top: 4px;
-    }
   `;
 
   document.head.appendChild(
@@ -6334,26 +6264,20 @@ function injectStageTwoStyles() {
 function initClassificationSettings() {
   const saved = getClassificationSettings();
 
-  // Keep the last gender as a default, but ask again for every photo.
-  selectedGender =
-    saved?.gender === "female"
-      ? "female"
-      : "male";
-
-  adultConfirmed = false;
+  if (saved) {
+    selectedGender = saved.gender;
+    adultConfirmed = saved.adultConfirmed;
+  }
 
   if (genderSelect) {
     genderSelect.value = selectedGender;
     genderSelect.addEventListener("change", () => {
-      selectedGender =
-        genderSelect.value === "female"
-          ? "female"
-          : "male";
+      selectedGender = genderSelect.value === "female" ? "female" : "male";
     });
   }
 
   if (adultConfirm) {
-    adultConfirm.checked = false;
+    adultConfirm.checked = adultConfirmed;
     adultConfirm.addEventListener("change", () => {
       adultConfirmed = Boolean(adultConfirm.checked);
       updateAnalysisButtonState();
@@ -6365,14 +6289,10 @@ function initClassificationSettings() {
 
 function updateAnalysisButtonState() {
   if (!startAnalysisButton) return;
-
-  const ready =
-    Boolean(selectedFile) &&
-    adultConfirmed;
-
+  const ready = Boolean(selectedFile) && adultConfirmed && Boolean(getClassificationSettings());
   startAnalysisButton.disabled = !ready;
   startAnalysisButton.title = !adultConfirmed
-    ? "Сначала ответьте на вопрос о возрасте человека на фото."
+    ? "Настройте профиль анализа и подтвердите 18+"
     : "";
 }
 
