@@ -2,7 +2,7 @@
 // FACE METRIC APP - UNIFIED FRONTEND v2026.08.15-gender-modal-fix
 // ============================================================
 
-window.__FACEMETRIC_APP_VERSION__ = "2026-08-15-gender-modal-fix-v1";
+window.__FACEMETRIC_APP_VERSION__ = "2026-08-15-final-ux-buttons-fix-v2";
 
 
 // ============================================================
@@ -89,6 +89,8 @@ function openClassificationModal(options = {}) {
   if (error) { error.hidden = true; error.textContent = ""; }
 
   modal.hidden = false;
+  modal.style.display = "flex";
+  modal.style.pointerEvents = "auto";
   modal.classList.add("show");
   modal.setAttribute("aria-hidden", "false");
 
@@ -103,6 +105,8 @@ function closeClassificationModal() {
   if (!modal) return;
   modal.classList.remove("show");
   modal.hidden = true;
+  modal.style.display = "none";
+  modal.style.pointerEvents = "none";
   modal.setAttribute("aria-hidden", "true");
 }
 
@@ -124,12 +128,12 @@ function initClassificationModal() {
     adultConfirmed = saved.adultConfirmed;
     if (genderSelect) genderSelect.value = selectedGender;
     if (adultConfirm) adultConfirm.checked = adultConfirmed;
-    modal.hidden = true;
-    modal.setAttribute("aria-hidden", "true");
-  } else {
-    modal.hidden = true;
-    modal.setAttribute("aria-hidden", "true");
   }
+
+  modal.hidden = true;
+  modal.style.display = "none";
+  modal.style.pointerEvents = "none";
+  modal.setAttribute("aria-hidden", "true");
 
   form.addEventListener("submit", event => {
     event.preventDefault();
@@ -168,10 +172,8 @@ function initClassificationModal() {
 }
 
 function maybeOpenClassificationModal() {
-  if (!getGeminiApiKey()) return;
-  if (!getClassificationSettings()) {
-    window.setTimeout(() => openClassificationModal(), 120);
-  }
+  // Classification is requested only after a photo has been selected.
+  return false;
 }
 
 function getGeminiApiKey() {
@@ -245,8 +247,9 @@ function closeGeminiKeyModal() {
 
   modal.classList.remove("show");
   modal.hidden = true;
+  modal.style.display = "none";
+  modal.style.pointerEvents = "none";
   modal.setAttribute("aria-hidden", "true");
-  maybeOpenClassificationModal();
 }
 
 function initGeminiKeyModal() {
