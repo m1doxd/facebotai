@@ -1,9 +1,3 @@
-// ============================================================
-// FACE METRIC APP - UNIFIED FRONTEND v2026.08.15-gender-modal-fix
-// ============================================================
-
-window.__FACEMETRIC_APP_VERSION__ = "2026-08-15-alignment-geometry-gender-v3";
-
 
 // ============================================================
 // GEMINI BYOK
@@ -89,8 +83,6 @@ function openClassificationModal(options = {}) {
   if (error) { error.hidden = true; error.textContent = ""; }
 
   modal.hidden = false;
-  modal.style.display = "flex";
-  modal.style.pointerEvents = "auto";
   modal.classList.add("show");
   modal.setAttribute("aria-hidden", "false");
 
@@ -105,8 +97,6 @@ function closeClassificationModal() {
   if (!modal) return;
   modal.classList.remove("show");
   modal.hidden = true;
-  modal.style.display = "none";
-  modal.style.pointerEvents = "none";
   modal.setAttribute("aria-hidden", "true");
 }
 
@@ -128,12 +118,12 @@ function initClassificationModal() {
     adultConfirmed = saved.adultConfirmed;
     if (genderSelect) genderSelect.value = selectedGender;
     if (adultConfirm) adultConfirm.checked = adultConfirmed;
+    modal.hidden = true;
+    modal.setAttribute("aria-hidden", "true");
+  } else {
+    modal.hidden = true;
+    modal.setAttribute("aria-hidden", "true");
   }
-
-  modal.hidden = true;
-  modal.style.display = "none";
-  modal.style.pointerEvents = "none";
-  modal.setAttribute("aria-hidden", "true");
 
   form.addEventListener("submit", event => {
     event.preventDefault();
@@ -149,7 +139,6 @@ function initClassificationModal() {
 
     selectedGender = nextGender;
     adultConfirmed = true;
-    classificationConfirmedForCurrentUpload = true;
     if (genderSelect) genderSelect.value = selectedGender;
     if (adultConfirm) adultConfirm.checked = true;
 
@@ -172,8 +161,10 @@ function initClassificationModal() {
 }
 
 function maybeOpenClassificationModal() {
-  // Classification is requested only after a photo has been selected.
-  return false;
+  if (!getGeminiApiKey()) return;
+  if (!getClassificationSettings()) {
+    window.setTimeout(() => openClassificationModal(), 120);
+  }
 }
 
 function getGeminiApiKey() {
@@ -247,9 +238,8 @@ function closeGeminiKeyModal() {
 
   modal.classList.remove("show");
   modal.hidden = true;
-  modal.style.display = "none";
-  modal.style.pointerEvents = "none";
   modal.setAttribute("aria-hidden", "true");
+  maybeOpenClassificationModal();
 }
 
 function initGeminiKeyModal() {
@@ -390,6 +380,8 @@ function initGeminiKeyModal() {
 
   if (!savedKey) {
     window.setTimeout(() => openGeminiKeyModal(), 0);
+  } else {
+    window.setTimeout(() => maybeOpenClassificationModal(), 120);
   }
 }
 
@@ -419,110 +411,61 @@ const tg = window.Telegram?.WebApp || null;
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 
-let screens = [];
-let fileInput = null;
-let uploadButton = null;
-let uploadZone = null;
-let uploadName = null;
-let profileFileInput = null;
-let profileUploadButton = null;
-let profileUploadName = null;
-let startAnalysisButton = null;
-let genderSelect = null;
-let adultConfirm = null;
+const screens = $$(".screen");
 
-let analysisImage = null;
-let analysisFrame = null;
-let landmarkCanvas = null;
-let featureCount = null;
-let resultFeatureCount = null;
-let analysisState = null;
-let alignmentStatus = null;
-let analysisScanHud = null;
-let analysisScanTitle = null;
-let analysisScanDetail = null;
-let analysisScanProgress = null;
-let analysisScore = null;
-let analysisScoreValue = null;
+const fileInput = $("#file-input");
+const uploadButton = $("#upload-btn");
+const uploadZone = $("#upload-zone");
+const uploadName = $("#upload-name");
+const profileFileInput = $("#profile-file-input");
+const profileUploadButton = $("#profile-upload-btn");
+const profileUploadName = $("#profile-upload-name");
+const startAnalysisButton = $("#start-analysis-btn");
+const genderSelect = $("#gender-select");
+const adultConfirm = $("#adult-confirm");
 
-let loadingContent = null;
-let loadingTitle = null;
-let loadingText = null;
-let loadingProgressBar = null;
-let loadingSteps = [];
+const analysisImage = $("#analysis-image");
+const analysisFrame = $("#analysis-frame");
+const landmarkCanvas = $("#landmark-canvas");
+const featureCount = $("#feature-count");
+const resultFeatureCount = $("#result-feature-count");
+const analysisState = $("#analysis-state");
+const alignmentStatus = $("#alignment-status");
+const analysisScanHud = $("#analysis-scan-hud");
+const analysisScanTitle = $("#analysis-scan-title");
+const analysisScanDetail = $("#analysis-scan-detail");
+const analysisScanProgress = $("#analysis-scan-progress");
+const analysisScore = $("#analysis-score");
+const analysisScoreValue = analysisScore
+  ? $("strong", analysisScore)
+  : null;
 
-let resultScore = null;
-let scoreProgress = null;
-let scoreStatus = null;
+const loadingContent = $("#loading-content");
+const loadingTitle = $("#loading-title");
+const loadingText = $("#loading-text");
+const loadingProgressBar = $("#loading-progress-bar");
+const loadingSteps = $$(".loading-step");
 
-let statsGrid = null;
-let overviewGrid = null;
+const resultScore = $("#result-score");
+const scoreProgress = $("#score-progress");
+const scoreStatus = $("#score-status");
 
-let harmonyContent = null;
-let metricsContent = null;
-let angularityContent = null;
-let symmetryContent = null;
-let dimorphismContent = null;
-let healthContent = null;
+const statsGrid = $("#stats-grid");
+const overviewGrid = $("#overview-grid");
 
-let reportTabs = null;
-let historyCount = null;
-let historyList = null;
+const harmonyContent = $("#harmony-content");
+const metricsContent = $("#metrics-content");
+const angularityContent = $("#angularity-content");
+const symmetryContent = $("#symmetry-content");
+const dimorphismContent = $("#dimorphism-content");
+const healthContent = $("#health-content");
 
-let newAnalysisButton = null;
-let toast = null;
+const reportTabs = $("#report-tabs");
+const historyCount = $("#history-count");
+const historyList = $("#history-list");
 
-function refreshDomReferences() {
-  screens = $$(".screen");
-  fileInput = $("#file-input");
-  uploadButton = $("#upload-btn");
-  uploadZone = $("#upload-zone");
-  uploadName = $("#upload-name");
-  profileFileInput = $("#profile-file-input");
-  profileUploadButton = $("#profile-upload-btn");
-  profileUploadName = $("#profile-upload-name");
-  startAnalysisButton = $("#start-analysis-btn");
-  genderSelect = $("#gender-select");
-  adultConfirm = $("#adult-confirm");
-
-  analysisImage = $("#analysis-image");
-  analysisFrame = $("#analysis-frame");
-  landmarkCanvas = $("#landmark-canvas");
-  featureCount = $("#feature-count");
-  resultFeatureCount = $("#result-feature-count");
-  analysisState = $("#analysis-state");
-  alignmentStatus = $("#alignment-status");
-  analysisScanHud = $("#analysis-scan-hud");
-  analysisScanTitle = $("#analysis-scan-title");
-  analysisScanDetail = $("#analysis-scan-detail");
-  analysisScanProgress = $("#analysis-scan-progress");
-  analysisScore = $("#analysis-score");
-  analysisScoreValue = analysisScore ? $("strong", analysisScore) : null;
-
-  loadingContent = $("#loading-content");
-  loadingTitle = $("#loading-title");
-  loadingText = $("#loading-text");
-  loadingProgressBar = $("#loading-progress-bar");
-  loadingSteps = $$(".loading-step");
-
-  resultScore = $("#result-score");
-  scoreProgress = $("#score-progress");
-  scoreStatus = $("#score-status");
-  statsGrid = $("#stats-grid");
-  overviewGrid = $("#overview-grid");
-  harmonyContent = $("#harmony-content");
-  metricsContent = $("#metrics-content");
-  angularityContent = $("#angularity-content");
-  symmetryContent = $("#symmetry-content");
-  dimorphismContent = $("#dimorphism-content");
-  healthContent = $("#health-content");
-  reportTabs = $("#report-tabs");
-  historyCount = $("#history-count");
-  historyList = $("#history-list");
-  newAnalysisButton = $("#new-analysis");
-  toast = $("#toast");
-}
-
+const newAnalysisButton = $("#new-analysis");
+const toast = $("#toast");
 
 let selectedFile = null;
 let selectedObjectUrl = null;
@@ -532,12 +475,6 @@ let selectedProfileObjectUrl = null;
 // Classification settings. Geometric measurements remain independent.
 let selectedGender = "male";
 let adultConfirmed = false;
-
-// Expose read-only diagnostics for debugging the deployed frontend.
-window.FaceMetricClassification = {
-  get gender() { return selectedGender === "female" ? "female" : "male"; },
-  get adultConfirmed() { return adultConfirmed === true; }
-};
 
 let currentAnalysis = null;
 let currentScreen = "home";
@@ -873,7 +810,6 @@ function handleFileSelected(file) {
   cancelActiveAnalysis();
   analysisRequestId++;
   selectedFile = file;
-  classificationConfirmedForCurrentUpload = false;
 
   revokeSelectedObjectUrl();
   selectedObjectUrl = URL.createObjectURL(file);
@@ -891,11 +827,17 @@ function handleFileSelected(file) {
   resetAnalysisPreview();
   showScreen("analysis");
 
-  setAnalysisState("ГОТОВО К НАСТРОЙКЕ");
+  setAnalysisState("ГОТОВО К АНАЛИЗУ");
   showProfileUploadControl();
+
+  // Classification is requested only after the frontal photo is selected.
+  // It must not start the analysis; the user can add a profile first.
   updateAnalysisButtonState();
-  showToast("Фото загружено. Сначала укажи пол и подтверди 18+, затем при желании добавь профиль.");
-  window.setTimeout(() => openClassificationModal({ focus: true }), 120);
+  if (!getClassificationSettings()) {
+    window.setTimeout(() => openClassificationModal({ focus: true }), 120);
+  }
+
+  showToast("Анфас загружен. При желании добавь профиль, затем подтверди пол/18+ и нажми «Начать анализ».");
 }
 
 function handleProfileFileSelected(file) {
@@ -1093,10 +1035,9 @@ function getMetricLinePairs(key, viewType, selectedNames) {
 
 function drawFaceLandmarkNetwork(canvas, view, metric = null, progress = 1) {
   if (!canvas) return;
-  // Use layout dimensions, not getBoundingClientRect(), because the canvas
-  // receives the exact same CSS alignment transform as the image.
-  const width = canvas.clientWidth || canvas.offsetWidth;
-  const height = canvas.clientHeight || canvas.offsetHeight;
+  const rect = canvas.getBoundingClientRect();
+  const width = rect.width || canvas.clientWidth;
+  const height = rect.height || canvas.clientHeight;
   if (!width || !height) return;
   const ratio = window.devicePixelRatio || 1;
   if (canvas.width !== Math.round(width * ratio) || canvas.height !== Math.round(height * ratio)) {
@@ -1112,26 +1053,7 @@ function drawFaceLandmarkNetwork(canvas, view, metric = null, progress = 1) {
   const points = getOverlayPoints(view);
   const names = Object.keys(points);
   if (!names.length) return;
-
-  // Gemini landmarks are normalized against the SOURCE IMAGE. The UI frame
-  // may use object-fit: cover, so mapping x*frame/y*frame is wrong whenever
-  // the source aspect ratio differs from the frame. Project through the
-  // actual rendered image geometry first, then apply the shared alignment
-  // transform to both image and canvas.
-  const image = canvas.id === "landmark-canvas"
-    ? analysisImage
-    : canvas.closest(".result-visual__media")?.querySelector(".result-visual__image");
-  const sourceWidth = Number(image?.naturalWidth) || width;
-  const sourceHeight = Number(image?.naturalHeight) || height;
-  const coverScale = Math.max(width / sourceWidth, height / sourceHeight);
-  const renderedWidth = sourceWidth * coverScale;
-  const renderedHeight = sourceHeight * coverScale;
-  const cropX = (renderedWidth - width) / 2;
-  const cropY = (renderedHeight - height) / 2;
-  const xy = name => ({
-    x: Number(points[name].x) * renderedWidth - cropX,
-    y: Number(points[name].y) * renderedHeight - cropY
-  });
+  const xy = name => ({x:Number(points[name].x)*width, y:Number(points[name].y)*height});
 
   const selectedNames = metric
     ? (Array.isArray(metric.value?.landmarks) && metric.value.landmarks.length
@@ -1347,8 +1269,8 @@ function resizeLandmarkCanvas() {
     return;
   }
 
-  const width = analysisFrame.clientWidth || analysisFrame.offsetWidth;
-  const height = analysisFrame.clientHeight || analysisFrame.offsetHeight;
+  const rect =
+    analysisFrame.getBoundingClientRect();
 
   const ratio =
     window.devicePixelRatio || 1;
@@ -1356,20 +1278,20 @@ function resizeLandmarkCanvas() {
   landmarkCanvas.width =
     Math.max(
       1,
-      Math.round(width * ratio)
+      Math.round(rect.width * ratio)
     );
 
   landmarkCanvas.height =
     Math.max(
       1,
-      Math.round(height * ratio)
+      Math.round(rect.height * ratio)
     );
 
   landmarkCanvas.style.width =
-    `${width}px`;
+    `${rect.width}px`;
 
   landmarkCanvas.style.height =
-    `${height}px`;
+    `${rect.height}px`;
 
   const ctx =
     landmarkCanvas.getContext("2d");
@@ -1390,8 +1312,8 @@ function resizeLandmarkCanvas() {
 ============================================================ */
 
 async function startAnalysis(file, profileFile = null) {
-  if (!getClassificationSettings() || !adultConfirmed || !classificationConfirmedForCurrentUpload) {
-    openClassificationModal({ focus: true });
+  if (!getClassificationSettings() || !adultConfirmed) {
+    openClassificationModal();
     return;
   }
   cancelActiveAnalysis();
@@ -1584,13 +1506,8 @@ async function analyzePhoto(file, signal, profileFile = null) {
     );
   }
 
-  // Classification state is read only from the declared frontend state.
-  // There is intentionally no standalone `gender` variable here.
-  const requestGender = selectedGender === "female" ? "female" : "male";
-  const requestAdultConfirmed = adultConfirmed === true;
-
-  formData.append("gender", requestGender);
-  formData.append("adult_confirmed", requestAdultConfirmed ? "true" : "false");
+  formData.append("gender", selectedGender === "female" ? "female" : "male");
+  formData.append("adult_confirmed", adultConfirmed ? "true" : "false");
 
   const userGeminiKey = getGeminiApiKey();
 
@@ -2525,78 +2442,47 @@ function normalizeAlignmentSet(raw, frontLandmarks = {}, profileLandmarks = {}) 
 }
 
 function calculateClientAlignment(landmarks, type) {
-  const entries = Object.entries(landmarks || {}).filter(([, p]) =>
-    p && Number.isFinite(Number(p.x)) && Number.isFinite(Number(p.y))
-  );
+  const entries = Object.entries(landmarks || {}).filter(([, p]) => p && Number.isFinite(Number(p.x)) && Number.isFinite(Number(p.y)));
   if (entries.length < 3) {
     return { available: false, type, roll_degrees: 0, correction_degrees: 0, center_x: 0.5, center_y: 0.5, scale: 1, confidence: 0 };
   }
 
   const lm = Object.fromEntries(entries);
   let roll = 0;
-  let axisStart = null;
-  let axisEnd = null;
-
   if (type === "front") {
     const left = lm.left_eye_inner || lm.left_eye_outer;
     const right = lm.right_eye_inner || lm.right_eye_outer;
-    if (left && right) {
-      roll = Math.atan2(Number(right.y) - Number(left.y), Number(right.x) - Number(left.x)) * 180 / Math.PI;
-    }
-    axisStart = lm.forehead_center || lm.nose_bridge || lm.left_brow_inner || null;
-    axisEnd = lm.chin || lm.lower_lip_center || null;
+    if (left && right) roll = Math.atan2(right.y - left.y, right.x - left.x) * 180 / Math.PI;
   } else {
     const a = lm.profile_glabella || lm.profile_nasion || lm.profile_forehead;
     const b = lm.profile_pogonion || lm.profile_menton || lm.profile_chin_neck;
-    axisStart = a;
-    axisEnd = b;
-    if (a && b) {
-      roll = Math.atan2(Number(b.x) - Number(a.x), Number(b.y) - Number(a.y)) * 180 / Math.PI;
-    }
+    if (a && b) roll = Math.atan2(b.x - a.x, b.y - a.y) * 180 / Math.PI;
   }
 
   while (roll > 90) roll -= 180;
   while (roll < -90) roll += 180;
 
-  const upsideDown = Boolean(
-    axisStart && axisEnd && Number(axisEnd.y) < Number(axisStart.y)
-  );
-
+  const axisStart = type === "front"
+    ? (lm.forehead_center || lm.nose_bridge)
+    : (lm.profile_glabella || lm.profile_nasion || lm.profile_forehead);
+  const axisEnd = type === "front"
+    ? lm.chin
+    : (lm.profile_pogonion || lm.profile_menton || lm.profile_chin_neck);
+  const upsideDown = Boolean(axisStart && axisEnd && Number(axisEnd.y) < Number(axisStart.y));
   let correction = -roll + (upsideDown ? 180 : 0);
   while (correction > 180) correction -= 360;
   while (correction < -180) correction += 360;
 
-  const preferredNames = type === "front"
-    ? [
-        "left_eye_outer", "right_eye_outer",
-        "left_cheekbone", "right_cheekbone",
-        "left_jaw", "right_jaw",
-        "forehead_center", "nose_bridge", "nose_tip",
-        "mouth_left", "mouth_right", "chin"
-      ]
-    : [
-        "profile_forehead", "profile_glabella", "profile_nasion",
-        "profile_pronasale", "profile_labiale_superius",
-        "profile_labiale_inferius", "profile_pogonion",
-        "profile_menton", "profile_gonion", "profile_chin_neck"
-      ];
-
-  const boxEntries = preferredNames
-    .filter(name => lm[name])
-    .map(name => [name, lm[name]]);
-  const sourceEntries = boxEntries.length >= 4 ? boxEntries : entries;
-
-  const xs = sourceEntries.map(([, p]) => Number(p.x));
-  const ys = sourceEntries.map(([, p]) => Number(p.y));
+  const xs = entries.map(([, p]) => Number(p.x));
+  const ys = entries.map(([, p]) => Number(p.y));
   const minX = Math.min(...xs), maxX = Math.max(...xs);
   const minY = Math.min(...ys), maxY = Math.max(...ys);
   const width = Math.max(maxX - minX, 0.01);
   const height = Math.max(maxY - minY, 0.01);
   const targetHeight = type === "front" ? 0.76 : 0.78;
   const targetWidth = type === "front" ? 0.68 : 0.62;
-  const fitScale = Math.min(targetHeight / height, targetWidth / width);
-  const scale = Math.max(0.82, Math.min(1.30, fitScale));
-  const confidence = sourceEntries.reduce((sum, [, p]) => sum + (Number(p.confidence) || 0), 0) / sourceEntries.length;
+  const scale = Math.max(0.82, Math.min(1.45, Math.max(targetHeight / height, targetWidth / width)));
+  const confidence = entries.reduce((sum, [, p]) => sum + (Number(p.confidence) || 0), 0) / entries.length;
 
   return {
     available: true,
@@ -2626,41 +2512,15 @@ function setAlignmentStatus(alignment, state = "done") {
   alignmentStatus.dataset.state = state;
 }
 
-function getAlignmentTransform(alignment, frameElement) {
-  const frame = frameElement || null;
-  const rect = frame?.getBoundingClientRect?.() || { width: 0, height: 0 };
-  const image = frame?.querySelector?.(".result-visual__image, #analysis-image") || null;
-  const sourceWidth = Number(image?.naturalWidth) || rect.width || 1;
-  const sourceHeight = Number(image?.naturalHeight) || rect.height || 1;
-  const coverScale = Math.max(rect.width / sourceWidth, rect.height / sourceHeight) || 1;
-  const renderedWidth = sourceWidth * coverScale;
-  const renderedHeight = sourceHeight * coverScale;
-  const cropX = (renderedWidth - rect.width) / 2;
-  const cropY = (renderedHeight - rect.height) / 2;
-
-  const faceX = Number(alignment?.center_x ?? 0.5) * renderedWidth - cropX;
-  const faceY = Number(alignment?.center_y ?? 0.5) * renderedHeight - cropY;
-  const tx = rect.width / 2 - faceX;
-  const ty = rect.height / 2 - faceY;
-  const rotate = Number(alignment?.correction_degrees) || 0;
-  const scale = Number(alignment?.scale) || 1;
-  return `translate(${tx.toFixed(1)}px, ${ty.toFixed(1)}px) rotate(${rotate.toFixed(2)}deg) scale(${scale.toFixed(3)})`;
-}
-
 function applyImageAlignment(image, alignment, frameElement = null) {
   if (!image || !alignment?.available) return;
-  const frame = frameElement || image.parentElement || image;
-  const transform = getAlignmentTransform(alignment, frame);
+  const rect = (frameElement || image.parentElement || image).getBoundingClientRect();
+  const tx = (0.5 - Number(alignment.center_x || 0.5)) * rect.width;
+  const ty = (0.5 - Number(alignment.center_y || 0.5)) * rect.height;
+  const rotate = Number(alignment.correction_degrees) || 0;
+  const scale = Number(alignment.scale) || 1;
   image.style.transformOrigin = "50% 50%";
-  image.style.transform = transform;
-
-  // Critical: landmarks live in the same source-image coordinate system.
-  // The overlay must receive the exact same transform as the image.
-  const canvas = frame?.querySelector?.("#landmark-canvas, .result-landmark-canvas");
-  if (canvas) {
-    canvas.style.transformOrigin = "50% 50%";
-    canvas.style.transform = transform;
-  }
+  image.style.transform = `translate(${tx.toFixed(1)}px, ${ty.toFixed(1)}px) rotate(${rotate.toFixed(2)}deg) scale(${scale.toFixed(3)})`;
 }
 
 function applyAnalysisAlignment(result) {
@@ -2678,13 +2538,10 @@ function applyAnalysisAlignment(result) {
     alignmentStatus.dataset.state = "active";
   }
 
-  const apply = () => {
+  requestAnimationFrame(() => {
     applyImageAlignment(analysisImage, alignment, analysisFrame);
-    resizeLandmarkCanvas();
     setTimeout(() => setAlignmentStatus(alignment, "done"), 450);
-  };
-  if (analysisImage?.complete) requestAnimationFrame(apply);
-  else analysisImage?.addEventListener("load", apply, { once: true });
+  });
 }
 
 
@@ -2735,9 +2592,7 @@ function renderResult(result) {
 
   renderClassification(result);
 
-  // Metric selection is rendered directly on the analyzed photo.
-  // The old standalone Face Map / metric inspector is intentionally disabled.
-  $("#metric-inspector")?.remove();
+  renderMetricInspector(result);
   requestAnimationFrame(() => drawResultMetricOverlay(activeMetric));
 
   injectStageTwoStyles();
@@ -2855,9 +2710,7 @@ function ensureResultFace(result) {
     image.src = source;
     const alignment = result?.alignment?.[view?.type === "profile" ? "profile" : "front"];
     if (alignment?.available) {
-      const apply = () => applyImageAlignment(image, alignment, visual);
-      if (image.complete) requestAnimationFrame(apply);
-      else image.addEventListener("load", apply, { once: true });
+      requestAnimationFrame(() => applyImageAlignment(image, alignment, visual));
     }
   }
 
@@ -3087,6 +2940,7 @@ function switchResultView(view) {
         : currentAnalysis.metrics;
 
     renderMetrics(viewMetrics);
+    renderMetricInspector(currentAnalysis);
     requestAnimationFrame(() => drawResultMetricOverlay(activeMetric));
     drawMetricOverlay(activeMetric);
   }
@@ -4130,10 +3984,6 @@ function createMetricCard(
 function renderMetricInspector(
   result
 ) {
-  // Deprecated: metric visualization now stays on the real photo.
-  $("#metric-inspector")?.remove();
-  return;
-/* legacy inspector disabled
   const resultScreen =
     $("#screen-result");
 
@@ -4341,7 +4191,6 @@ function renderMetricInspector(
     visual,
     description
   );
-*/
 }
 
 
@@ -4358,12 +4207,6 @@ function drawResultMetricOverlay(metric = null) {
   if (!canvas || !visual || !currentAnalysis) return;
   const view = getActiveView(currentAnalysis) || {};
   drawFaceLandmarkNetwork(canvas, view, metric, 1);
-
-  const alignment = currentAnalysis?.alignment?.[view?.type === "profile" ? "profile" : "front"];
-  const image = visual.querySelector(".result-visual__image");
-  if (alignment?.available && image) {
-    applyImageAlignment(image, alignment, visual);
-  }
 }
 
 function selectMetric(
@@ -4385,7 +4228,9 @@ function selectMetric(
   );
 
   if (currentAnalysis) {
-    $("#metric-inspector")?.remove();
+    renderMetricInspector(
+      currentAnalysis
+    );
     drawMetricOverlay(activeMetric);
   }
 
@@ -5941,10 +5786,6 @@ function escapeHtml(value) {
 ============================================================ */
 
 function injectStageTwoStyles() {
-  const legacyInspectorStyle = document.createElement("style");
-  legacyInspectorStyle.dataset.facemetricLegacyInspector = "disabled";
-  legacyInspectorStyle.textContent = "#metric-inspector{display:none!important}";
-  document.head.appendChild(legacyInspectorStyle);
   if (
     document.getElementById(
       "facemetric-stage2-styles"
@@ -6343,7 +6184,6 @@ function injectStageTwoStyles() {
 ============================================================ */
 
 function initClassificationSettings() {
-  // Restore saved classification settings once, after all lexical declarations exist.
   const saved = getClassificationSettings();
 
   if (saved) {
@@ -6371,13 +6211,10 @@ function initClassificationSettings() {
 
 function updateAnalysisButtonState() {
   if (!startAnalysisButton) return;
-  const ready = Boolean(selectedFile) &&
-    adultConfirmed &&
-    classificationConfirmedForCurrentUpload &&
-    Boolean(getClassificationSettings());
+  const ready = Boolean(selectedFile) && adultConfirmed && Boolean(getClassificationSettings());
   startAnalysisButton.disabled = !ready;
-  startAnalysisButton.title = !classificationConfirmedForCurrentUpload
-    ? "Сначала укажите пол и подтвердите 18+"
+  startAnalysisButton.title = !adultConfirmed
+    ? "Настройте профиль анализа и подтвердите 18+"
     : "";
 }
 
@@ -6535,8 +6372,6 @@ function bindEvents() {
 ============================================================ */
 
 function init() {
-  refreshDomReferences();
-
   try { initGeminiKeyModal(); } catch (e) { console.warn("Gemini modal init failed", e); }
   try { initClassificationModal(); } catch (e) { console.warn("Classification modal init failed", e); }
 
