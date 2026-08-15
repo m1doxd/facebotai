@@ -1,5 +1,8 @@
-// FACE METRIC APP - ALIGNMENT + GENDER MODAL + GEOMETRY v2026.08.15
-window.__FACEMETRIC_APP_VERSION__ = "2026-08-15-alignment-geometry-v2";
+// ============================================================
+// FACE METRIC APP - UNIFIED FRONTEND v2026.08.15-gender-modal-fix
+// ============================================================
+
+window.__FACEMETRIC_APP_VERSION__ = "2026-08-15-gender-modal-fix-v1";
 
 
 // ============================================================
@@ -142,6 +145,7 @@ function initClassificationModal() {
 
     selectedGender = nextGender;
     adultConfirmed = true;
+    classificationConfirmedForCurrentUpload = true;
     if (genderSelect) genderSelect.value = selectedGender;
     if (adultConfirm) adultConfirm.checked = true;
 
@@ -155,18 +159,7 @@ function initClassificationModal() {
 
     closeClassificationModal();
     updateAnalysisButtonState();
-
-    // The classification dialog is intentionally shown only after a photo
-    // has been selected. Once the user confirms it, analysis starts
-    // automatically so the flow is: photo -> gender/18+ -> scan.
-    if (selectedFile) {
-      startAnalysisButton?.setAttribute("disabled", "disabled");
-      window.setTimeout(() => {
-        startAnalysis(selectedFile, selectedProfileFile);
-      }, 160);
-    } else {
-      showToast("Фотография сохранена. Теперь добавь фотографию для анализа.");
-    }
+    showToast("Настройки анализа сохранены.");
   });
 
   modal.addEventListener("keydown", event => {
@@ -175,8 +168,10 @@ function initClassificationModal() {
 }
 
 function maybeOpenClassificationModal() {
-  // Intentionally no-op: classification is requested after photo upload.
-  return false;
+  if (!getGeminiApiKey()) return;
+  if (!getClassificationSettings()) {
+    window.setTimeout(() => openClassificationModal(), 120);
+  }
 }
 
 function getGeminiApiKey() {
@@ -251,6 +246,7 @@ function closeGeminiKeyModal() {
   modal.classList.remove("show");
   modal.hidden = true;
   modal.setAttribute("aria-hidden", "true");
+  maybeOpenClassificationModal();
 }
 
 function initGeminiKeyModal() {
@@ -391,6 +387,8 @@ function initGeminiKeyModal() {
 
   if (!savedKey) {
     window.setTimeout(() => openGeminiKeyModal(), 0);
+  } else {
+    window.setTimeout(() => maybeOpenClassificationModal(), 120);
   }
 }
 
@@ -484,6 +482,12 @@ let selectedProfileObjectUrl = null;
 // Classification settings. Geometric measurements remain independent.
 let selectedGender = "male";
 let adultConfirmed = false;
+
+// Expose read-only diagnostics for debugging the deployed frontend.
+window.FaceMetricClassification = {
+  get gender() { return selectedGender === "female" ? "female" : "male"; },
+  get adultConfirmed() { return adultConfirmed === true; }
+};
 
 let currentAnalysis = null;
 let currentScreen = "home";
@@ -819,6 +823,7 @@ function handleFileSelected(file) {
   cancelActiveAnalysis();
   analysisRequestId++;
   selectedFile = file;
+  classificationConfirmedForCurrentUpload = false;
 
   revokeSelectedObjectUrl();
   selectedObjectUrl = URL.createObjectURL(file);
@@ -836,14 +841,11 @@ function handleFileSelected(file) {
   resetAnalysisPreview();
   showScreen("analysis");
 
-  setAnalysisState("ГОТОВО К АНАЛИЗУ");
+  setAnalysisState("ГОТОВО К НАСТРОЙКЕ");
   showProfileUploadControl();
   updateAnalysisButtonState();
-
-  // Ask for gender and 18+ only after the image exists.
-  window.setTimeout(() => {
-    openClassificationModal({ focus: true });
-  }, 120);
+  showToast("Фото загружено. Сначала укажи пол и подтверди 18+, затем при желании добавь профиль.");
+  window.setTimeout(() => openClassificationModal({ focus: true }), 120);
 }
 
 function handleProfileFileSelected(file) {
@@ -1041,9 +1043,10 @@ function getMetricLinePairs(key, viewType, selectedNames) {
 
 function drawFaceLandmarkNetwork(canvas, view, metric = null, progress = 1) {
   if (!canvas) return;
-  const rect = canvas.getBoundingClientRect();
-  const width = rect.width || canvas.clientWidth;
-  const height = rect.height || canvas.clientHeight;
+  // Use layout dimensions, not getBoundingClientRect(), because the canvas
+  // receives the exact same CSS alignment transform as the image.
+  const width = canvas.clientWidth || canvas.offsetWidth;
+  const height = canvas.clientHeight || canvas.offsetHeight;
   if (!width || !height) return;
   const ratio = window.devicePixelRatio || 1;
   if (canvas.width !== Math.round(width * ratio) || canvas.height !== Math.round(height * ratio)) {
@@ -1059,7 +1062,26 @@ function drawFaceLandmarkNetwork(canvas, view, metric = null, progress = 1) {
   const points = getOverlayPoints(view);
   const names = Object.keys(points);
   if (!names.length) return;
-  const xy = name => ({x:Number(points[name].x)*width, y:Number(points[name].y)*height});
+
+  // Gemini landmarks are normalized against the SOURCE IMAGE. The UI frame
+  // may use object-fit: cover, so mapping x*frame/y*frame is wrong whenever
+  // the source aspect ratio differs from the frame. Project through the
+  // actual rendered image geometry first, then apply the shared alignment
+  // transform to both image and canvas.
+  const image = canvas.id === "landmark-canvas"
+    ? analysisImage
+    : canvas.closest(".result-visual__media")?.querySelector(".result-visual__image");
+  const sourceWidth = Number(image?.naturalWidth) || width;
+  const sourceHeight = Number(image?.naturalHeight) || height;
+  const coverScale = Math.max(width / sourceWidth, height / sourceHeight);
+  const renderedWidth = sourceWidth * coverScale;
+  const renderedHeight = sourceHeight * coverScale;
+  const cropX = (renderedWidth - width) / 2;
+  const cropY = (renderedHeight - height) / 2;
+  const xy = name => ({
+    x: Number(points[name].x) * renderedWidth - cropX,
+    y: Number(points[name].y) * renderedHeight - cropY
+  });
 
   const selectedNames = metric
     ? (Array.isArray(metric.value?.landmarks) && metric.value.landmarks.length
@@ -1275,8 +1297,8 @@ function resizeLandmarkCanvas() {
     return;
   }
 
-  const rect =
-    analysisFrame.getBoundingClientRect();
+  const width = analysisFrame.clientWidth || analysisFrame.offsetWidth;
+  const height = analysisFrame.clientHeight || analysisFrame.offsetHeight;
 
   const ratio =
     window.devicePixelRatio || 1;
@@ -1284,20 +1306,20 @@ function resizeLandmarkCanvas() {
   landmarkCanvas.width =
     Math.max(
       1,
-      Math.round(rect.width * ratio)
+      Math.round(width * ratio)
     );
 
   landmarkCanvas.height =
     Math.max(
       1,
-      Math.round(rect.height * ratio)
+      Math.round(height * ratio)
     );
 
   landmarkCanvas.style.width =
-    `${rect.width}px`;
+    `${width}px`;
 
   landmarkCanvas.style.height =
-    `${rect.height}px`;
+    `${height}px`;
 
   const ctx =
     landmarkCanvas.getContext("2d");
@@ -1318,16 +1340,10 @@ function resizeLandmarkCanvas() {
 ============================================================ */
 
 async function startAnalysis(file, profileFile = null) {
-  if (!file) {
-    showToast("Сначала добавь фотографию анфас.");
-    return;
-  }
-
-  if (!adultConfirmed) {
+  if (!getClassificationSettings() || !adultConfirmed || !classificationConfirmedForCurrentUpload) {
     openClassificationModal({ focus: true });
     return;
   }
-
   cancelActiveAnalysis();
 
   const requestId =
@@ -1518,8 +1534,13 @@ async function analyzePhoto(file, signal, profileFile = null) {
     );
   }
 
-  formData.append("gender", selectedGender === "female" ? "female" : "male");
-  formData.append("adult_confirmed", adultConfirmed ? "true" : "false");
+  // Classification state is read only from the declared frontend state.
+  // There is intentionally no standalone `gender` variable here.
+  const requestGender = selectedGender === "female" ? "female" : "male";
+  const requestAdultConfirmed = adultConfirmed === true;
+
+  formData.append("gender", requestGender);
+  formData.append("adult_confirmed", requestAdultConfirmed ? "true" : "false");
 
   const userGeminiKey = getGeminiApiKey();
 
@@ -2454,115 +2475,57 @@ function normalizeAlignmentSet(raw, frontLandmarks = {}, profileLandmarks = {}) 
 }
 
 function calculateClientAlignment(landmarks, type) {
-  const entries = Object.entries(landmarks || {}).filter(([, p]) =>
-    p && Number.isFinite(Number(p.x)) && Number.isFinite(Number(p.y))
-  );
-
+  const entries = Object.entries(landmarks || {}).filter(([, p]) => p && Number.isFinite(Number(p.x)) && Number.isFinite(Number(p.y)));
   if (entries.length < 3) {
-    return {
-      available: false,
-      type,
-      roll_degrees: 0,
-      correction_degrees: 0,
-      center_x: 0.5,
-      center_y: 0.5,
-      scale: 1,
-      confidence: 0
-    };
+    return { available: false, type, roll_degrees: 0, correction_degrees: 0, center_x: 0.5, center_y: 0.5, scale: 1, confidence: 0 };
   }
 
   const lm = Object.fromEntries(entries);
-  let correction = 0;
   let roll = 0;
-
   if (type === "front") {
     const left = lm.left_eye_inner || lm.left_eye_outer;
     const right = lm.right_eye_inner || lm.right_eye_outer;
-    const eyeMid = left && right
-      ? { x: (left.x + right.x) / 2, y: (left.y + right.y) / 2 }
-      : null;
-
-    // Use the eye line for roll. This is stable and does not depend on a
-    // potentially noisy forehead/chin point.
-    if (left && right) {
-      roll = Math.atan2(right.y - left.y, right.x - left.x) * 180 / Math.PI;
-    }
-
-    // Detect a truly upside-down observation from the semantic ordering of
-    // landmarks, but only when the evidence is strong. Never infer 180° from
-    // the forehead/chin pair alone.
-    const nose = lm.nose_tip || lm.nose_bridge;
-    const mouth = lm.lower_lip_center || lm.upper_lip_center;
-    const chin = lm.chin;
-    const verticalEvidence = [
-      eyeMid && nose && nose.y > eyeMid.y,
-      nose && mouth && mouth.y > nose.y,
-      mouth && chin && chin.y > mouth.y
-    ].filter(v => typeof v === "boolean");
-    const normalOrder = verticalEvidence.filter(Boolean).length;
-    const reversedOrder = verticalEvidence.length - normalOrder;
-    const upsideDown = verticalEvidence.length >= 2 && reversedOrder > normalOrder;
-
-    while (roll > 90) roll -= 180;
-    while (roll < -90) roll += 180;
-    correction = -roll + (upsideDown ? 180 : 0);
+    if (left && right) roll = Math.atan2(right.y - left.y, right.x - left.x) * 180 / Math.PI;
   } else {
     const a = lm.profile_glabella || lm.profile_nasion || lm.profile_forehead;
     const b = lm.profile_pogonion || lm.profile_menton || lm.profile_chin_neck;
-    if (a && b) {
-      roll = Math.atan2(b.x - a.x, b.y - a.y) * 180 / Math.PI;
-    }
-    while (roll > 90) roll -= 180;
-    while (roll < -90) roll += 180;
-    correction = -roll;
+    if (a && b) roll = Math.atan2(b.x - a.x, b.y - a.y) * 180 / Math.PI;
   }
 
+  while (roll > 90) roll -= 180;
+  while (roll < -90) roll += 180;
+
+  const axisStart = type === "front"
+    ? (lm.forehead_center || lm.nose_bridge)
+    : (lm.profile_glabella || lm.profile_nasion || lm.profile_forehead);
+  const axisEnd = type === "front"
+    ? lm.chin
+    : (lm.profile_pogonion || lm.profile_menton || lm.profile_chin_neck);
+  const upsideDown = Boolean(axisStart && axisEnd && Number(axisEnd.y) < Number(axisStart.y));
+  let correction = -roll + (upsideDown ? 180 : 0);
   while (correction > 180) correction -= 360;
   while (correction < -180) correction += 360;
 
-  // Face center is based on robust facial anchors instead of the raw landmark
-  // bounding box. This prevents hair/background points from pulling the image.
-  const anchors = type === "front"
-    ? [
-        lm.left_cheekbone, lm.right_cheekbone,
-        lm.left_jaw, lm.right_jaw,
-        lm.nose_tip, lm.chin, lm.forehead_center
-      ].filter(Boolean)
-    : [
-        lm.profile_forehead, lm.profile_nasion,
-        lm.profile_pronasale, lm.profile_pogonion,
-        lm.profile_menton
-      ].filter(Boolean);
-
-  const used = anchors.length >= 3 ? anchors : entries.map(([, p]) => p);
-  const xs = used.map(p => Number(p.x));
-  const ys = used.map(p => Number(p.y));
-  const centerX = (Math.min(...xs) + Math.max(...xs)) / 2;
-  const centerY = (Math.min(...ys) + Math.max(...ys)) / 2;
-
-  const width = Math.max(Math.max(...xs) - Math.min(...xs), 0.01);
-  const height = Math.max(Math.max(...ys) - Math.min(...ys), 0.01);
-  const targetHeight = type === "front" ? 0.70 : 0.76;
-  const targetWidth = type === "front" ? 0.58 : 0.60;
-  const scale = Math.max(
-    0.82,
-    Math.min(1.30, Math.max(targetHeight / height, targetWidth / width))
-  );
-
-  const confidence = used.reduce(
-    (sum, p) => sum + (Number(p.confidence) || 0),
-    0
-  ) / Math.max(used.length, 1);
+  const xs = entries.map(([, p]) => Number(p.x));
+  const ys = entries.map(([, p]) => Number(p.y));
+  const minX = Math.min(...xs), maxX = Math.max(...xs);
+  const minY = Math.min(...ys), maxY = Math.max(...ys);
+  const width = Math.max(maxX - minX, 0.01);
+  const height = Math.max(maxY - minY, 0.01);
+  const targetHeight = type === "front" ? 0.76 : 0.78;
+  const targetWidth = type === "front" ? 0.68 : 0.62;
+  const scale = Math.max(0.82, Math.min(1.45, Math.max(targetHeight / height, targetWidth / width)));
+  const confidence = entries.reduce((sum, [, p]) => sum + (Number(p.confidence) || 0), 0) / entries.length;
 
   return {
     available: true,
     type,
-    roll_degrees: Number(roll.toFixed(2)),
-    correction_degrees: Number(correction.toFixed(2)),
-    center_x: Number(centerX.toFixed(4)),
-    center_y: Number(centerY.toFixed(4)),
-    scale: Number(scale.toFixed(3)),
-    confidence: Number(confidence.toFixed(3))
+    roll_degrees: roll,
+    correction_degrees: correction,
+    center_x: (minX + maxX) / 2,
+    center_y: (minY + maxY) / 2,
+    scale,
+    confidence
   };
 }
 
@@ -2582,23 +2545,29 @@ function setAlignmentStatus(alignment, state = "done") {
   alignmentStatus.dataset.state = state;
 }
 
+function getAlignmentTransform(alignment, frameElement) {
+  const rect = frameElement?.getBoundingClientRect?.() || { width: 0, height: 0 };
+  const tx = (0.5 - Number(alignment?.center_x ?? 0.5)) * rect.width;
+  const ty = (0.5 - Number(alignment?.center_y ?? 0.5)) * rect.height;
+  const rotate = Number(alignment?.correction_degrees) || 0;
+  const scale = Number(alignment?.scale) || 1;
+  return `translate(${tx.toFixed(1)}px, ${ty.toFixed(1)}px) rotate(${rotate.toFixed(2)}deg) scale(${scale.toFixed(3)})`;
+}
+
 function applyImageAlignment(image, alignment, frameElement = null) {
   if (!image || !alignment?.available) return;
+  const frame = frameElement || image.parentElement || image;
+  const transform = getAlignmentTransform(alignment, frame);
+  image.style.transformOrigin = "50% 50%";
+  image.style.transform = transform;
 
-  const rect = (frameElement || image.parentElement || image).getBoundingClientRect();
-  const cx = Number(alignment.center_x ?? 0.5);
-  const cy = Number(alignment.center_y ?? 0.5);
-  const rotate = Number(alignment.correction_degrees) || 0;
-  const scale = Number(alignment.scale) || 1;
-
-  // Keep the exact same transform convention as applyAlignmentToLandmarks:
-  // translate the detected facial center to the frame center, then rotate and scale.
-  const tx = (0.5 - cx) * rect.width;
-  const ty = (0.5 - cy) * rect.height;
-
-  image.style.transformOrigin = `${(cx * 100).toFixed(2)}% ${(cy * 100).toFixed(2)}%`;
-  image.style.transform = `translate(${tx.toFixed(1)}px, ${ty.toFixed(1)}px) rotate(${rotate.toFixed(2)}deg) scale(${scale.toFixed(3)})`;
-  image.dataset.aligned = "true";
+  // Critical: landmarks live in the same source-image coordinate system.
+  // The overlay must receive the exact same transform as the image.
+  const canvas = frame?.querySelector?.("#landmark-canvas, .result-landmark-canvas");
+  if (canvas) {
+    canvas.style.transformOrigin = "50% 50%";
+    canvas.style.transform = transform;
+  }
 }
 
 function applyAnalysisAlignment(result) {
@@ -2616,10 +2585,13 @@ function applyAnalysisAlignment(result) {
     alignmentStatus.dataset.state = "active";
   }
 
-  requestAnimationFrame(() => {
+  const apply = () => {
     applyImageAlignment(analysisImage, alignment, analysisFrame);
+    resizeLandmarkCanvas();
     setTimeout(() => setAlignmentStatus(alignment, "done"), 450);
-  });
+  };
+  if (analysisImage?.complete) requestAnimationFrame(apply);
+  else analysisImage?.addEventListener("load", apply, { once: true });
 }
 
 
@@ -2788,7 +2760,9 @@ function ensureResultFace(result) {
     image.src = source;
     const alignment = result?.alignment?.[view?.type === "profile" ? "profile" : "front"];
     if (alignment?.available) {
-      requestAnimationFrame(() => applyImageAlignment(image, alignment, visual));
+      const apply = () => applyImageAlignment(image, alignment, visual);
+      if (image.complete) requestAnimationFrame(apply);
+      else image.addEventListener("load", apply, { once: true });
     }
   }
 
@@ -4285,6 +4259,12 @@ function drawResultMetricOverlay(metric = null) {
   if (!canvas || !visual || !currentAnalysis) return;
   const view = getActiveView(currentAnalysis) || {};
   drawFaceLandmarkNetwork(canvas, view, metric, 1);
+
+  const alignment = currentAnalysis?.alignment?.[view?.type === "profile" ? "profile" : "front"];
+  const image = visual.querySelector(".result-visual__image");
+  if (alignment?.available && image) {
+    applyImageAlignment(image, alignment, visual);
+  }
 }
 
 function selectMetric(
@@ -6262,6 +6242,7 @@ function injectStageTwoStyles() {
 ============================================================ */
 
 function initClassificationSettings() {
+  // Restore saved classification settings once, after all lexical declarations exist.
   const saved = getClassificationSettings();
 
   if (saved) {
@@ -6289,10 +6270,13 @@ function initClassificationSettings() {
 
 function updateAnalysisButtonState() {
   if (!startAnalysisButton) return;
-  const ready = Boolean(selectedFile) && adultConfirmed && Boolean(getClassificationSettings());
+  const ready = Boolean(selectedFile) &&
+    adultConfirmed &&
+    classificationConfirmedForCurrentUpload &&
+    Boolean(getClassificationSettings());
   startAnalysisButton.disabled = !ready;
-  startAnalysisButton.title = !adultConfirmed
-    ? "Настройте профиль анализа и подтвердите 18+"
+  startAnalysisButton.title = !classificationConfirmedForCurrentUpload
+    ? "Сначала укажите пол и подтвердите 18+"
     : "";
 }
 
