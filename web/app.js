@@ -294,19 +294,19 @@ function initGeminiKeyModal() {
 
     try {
       const response = await fetchWithTimeout(
-        VALIDATE_KEY_ENDPOINT,
-        {
-        method: "POST",
-        headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-        "X-Gemini-Key": key
-      },
-      body: JSON.stringify({})
-          cache: "no-store"
-        },
-        HEALTH_TIMEOUT
-      );
+    VALIDATE_KEY_ENDPOINT,
+    {
+      method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+      "X-Gemini-Key": key
+    },
+    body: JSON.stringify({}),
+    cache: "no-store"
+  },
+    HEALTH_TIMEOUT
+  );
 
       const text = await response.text();
       let data = null;
