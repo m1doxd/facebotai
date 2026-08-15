@@ -11,7 +11,7 @@ const ALLOWED_TYPES = new Set([
 const DEFAULT_MODEL = "gemini-3.6-flash";
 
 // Deployment marker: 2026-08-13-byok-profile-v1
-const WORKER_BUILD = "2026-08-15-alignment-geometry-v3";
+const WORKER_BUILD = "2026-08-14-objective-v3-calibrated";
 
 const SCORE_MIN = 0;
 const SCORE_MAX = 10;
@@ -463,20 +463,7 @@ For each image return:
 QUALITY RULES
 A point hidden by hair, hand, glasses glare, heavy shadow, cropping, or extreme
 pose should be omitted or have low confidence.
-For a usable frontal face, make a best-effort pass over ALL visible landmarks
-listed above. Prefer complete geometry over sparse output when the point is
-actually visible. Do not omit obvious points merely because they are approximate.
-If a landmark is uncertain, keep it with an honest confidence value instead of
-removing it when its location is still visually identifiable.
 If no usable face exists, return face_count=0.
-
-ORIENTATION RULES
-The returned coordinates are always coordinates in the ORIGINAL uploaded image.
-If the uploaded image is upside down or rotated by approximately 180 degrees,
-still return the landmarks exactly where they appear in the source image and
-set roll.correction_degrees so the application can rotate the image upright.
-Use the forehead/glabella -> chin/menton axis as the primary upside-down check.
-For a normal upright frontal face, forehead must be above chin in image space.
 
 OUTPUT ONLY VALID JSON. Treat IMAGE 1 and IMAGE 2 as completely independent observations.
 Return exactly this structure:
@@ -1219,9 +1206,7 @@ function round(v,n=4){ const p=10**n; return Math.round(v*p)/p; }
 
 
 function calculateAlignment(lm, type) {
-  const entries = Object.entries(lm || {}).filter(([, p]) =>
-    p && Number.isFinite(Number(p.x)) && Number.isFinite(Number(p.y))
-  );
+  const entries = Object.entries(lm || {}).filter(([, p]) => p && Number.isFinite(Number(p.x)) && Number.isFinite(Number(p.y)));
   if (entries.length < 3) {
     return { available: false, type, roll_degrees: 0, correction_degrees: 0, center_x: 0.5, center_y: 0.5, scale: 1, confidence: 0 };
   }
@@ -1235,74 +1220,31 @@ function calculateAlignment(lm, type) {
     const left = points.left_eye_inner || points.left_eye_outer;
     const right = points.right_eye_inner || points.right_eye_outer;
     if (left && right) {
-      roll = Math.atan2(Number(right.y) - Number(left.y), Number(right.x) - Number(left.x)) * 180 / Math.PI;
+      roll = Math.atan2(right.y - left.y, right.x - left.x) * 180 / Math.PI;
     }
-    axisStart = points.forehead_center || points.nose_bridge || points.left_brow_inner || null;
-    axisEnd = points.chin || points.lower_lip_center || null;
+    axisStart = points.forehead_center || points.nose_bridge || null;
+    axisEnd = points.chin || null;
   } else {
     axisStart = points.profile_glabella || points.profile_nasion || points.profile_forehead || null;
     axisEnd = points.profile_pogonion || points.profile_menton || points.profile_chin_neck || null;
     if (axisStart && axisEnd) {
-      roll = Math.atan2(Number(axisEnd.x) - Number(axisStart.x), Number(axisEnd.y) - Number(axisStart.y)) * 180 / Math.PI;
+      roll = Math.atan2(axisEnd.x - axisStart.x, axisEnd.y - axisStart.y) * 180 / Math.PI;
     }
   }
 
-  while (roll > 90) roll -= 180;
-  while (roll < -90) roll += 180;
-
-  // A 180-degree image has a nearly horizontal eye line too, so roll alone
-  // cannot detect it. The facial vertical axis is the decisive signal.
-  const upsideDown = Boolean(
-    axisStart && axisEnd && Number(axisEnd.y) < Number(axisStart.y)
-  );
-
-  let correction = -roll + (upsideDown ? 180 : 0);
-  while (correction > 180) correction -= 360;
-  while (correction < -180) correction += 360;
-
-  // Use stable facial landmarks for the alignment box. Avoid letting a stray
-  // landmark near the image edge move the entire face.
-  const preferredNames = type === "front"
-    ? [
-        "left_eye_outer", "right_eye_outer",
-        "left_cheekbone", "right_cheekbone",
-        "left_jaw", "right_jaw",
-        "forehead_center", "nose_bridge", "nose_tip",
-        "mouth_left", "mouth_right", "chin"
-      ]
-    : [
-        "profile_forehead", "profile_glabella", "profile_nasion",
-        "profile_pronasale", "profile_labiale_superius",
-        "profile_labiale_inferius", "profile_pogonion",
-        "profile_menton", "profile_gonion", "profile_chin_neck"
-      ];
-
-  const boxEntries = preferredNames
-    .filter(name => points[name])
-    .map(name => [name, points[name]]);
-
-  const sourceEntries = boxEntries.length >= 4 ? boxEntries : entries;
-  const xs = sourceEntries.map(([, p]) => Number(p.x));
-  const ys = sourceEntries.map(([, p]) => Number(p.y));
+  const correction = -roll;
+  const xs = entries.map(([, p]) => Number(p.x));
+  const ys = entries.map(([, p]) => Number(p.y));
   const minX = Math.min(...xs), maxX = Math.max(...xs);
   const minY = Math.min(...ys), maxY = Math.max(...ys);
   const centerX = (minX + maxX) / 2;
   const centerY = (minY + maxY) / 2;
   const height = Math.max(maxY - minY, 0.01);
   const width = Math.max(maxX - minX, 0.01);
-
-  // Fit the face into the frame without over-zooming. Using MIN here is
-  // intentional: both dimensions must fit after alignment, otherwise the
-  // forehead/chin or jaw gets cropped and the geometry becomes misleading.
   const targetHeight = type === "front" ? 0.76 : 0.78;
   const targetWidth = type === "front" ? 0.68 : 0.62;
-  const fitScale = Math.min(targetHeight / height, targetWidth / width);
-  const scale = Math.max(0.82, Math.min(1.30, fitScale));
-
-  const avgConfidence = sourceEntries.reduce(
-    (sum, [, p]) => sum + (Number(p.confidence) || 0),
-    0
-  ) / sourceEntries.length;
+  const scale = Math.max(0.82, Math.min(1.45, Math.max(targetHeight / height, targetWidth / width)));
+  const avgConfidence = entries.reduce((sum, [, p]) => sum + (Number(p.confidence) || 0), 0) / entries.length;
 
   return {
     available: true,
@@ -1344,36 +1286,31 @@ function buildFrontalGeometry(lm, quality) {
   const nb=point(lm,"nose_bridge"), nt=point(lm,"nose_tip"), nl=point(lm,"nose_left"), nr=point(lm,"nose_right");
   const ml=point(lm,"mouth_left"), mr=point(lm,"mouth_right"), chin=point(lm,"chin"), lc=point(lm,"left_cheekbone"), rc=point(lm,"right_cheekbone"), lj=point(lm,"left_jaw"), rj=point(lm,"right_jaw"), fc=point(lm,"forehead_center"), ul=point(lm,"upper_lip_center"), ll=point(lm,"lower_lip_center");
   const eyeMid = le&&re ? {x:(le.x+re.x)/2,y:(le.y+re.y)/2} : null;
-  const faceW = dist(lc,rc) ?? dist(lj,rj);
-  const eyeSpan = dist(leO,reO) ?? dist(le,re);
-  const referenceW = faceW ?? eyeSpan;
-  const faceH = fc&&chin ? Math.abs(chin.y - fc.y) : (eyeMid&&chin ? Math.abs(chin.y - eyeMid.y) : null);
+  const faceW=dist(lc,rc) ?? dist(lj,rj);
+  const faceH=fc&&chin ? dist(fc,chin) : null;
   const metrics={};
-  if (referenceW && faceH) {
-    metrics.face_geometry={face_aspect_ratio:metricWithPoints(scoreRange(referenceW/faceH,0.62,0.82,0.18),["left_cheekbone","right_cheekbone","forehead_center","chin"])};
-  } else {
-    metrics.face_geometry={};
-  }
-  if (referenceW) {
+  if (faceW && faceH) metrics.face_geometry={face_aspect_ratio:metricWithPoints(scoreRange(faceW/faceH,0.62,0.82,0.18),["left_cheekbone","right_cheekbone","forehead_center","chin"])};
+  else metrics.face_geometry={};
+  if (faceW) {
     metrics.symmetry={};
-    if (le&&re&&eyeMid) metrics.symmetry.eye_alignment=metricWithPoints(scoreCentered(Math.abs(le.y-re.y)/referenceW,0,0.035),["left_eye_inner","right_eye_inner"]);
-    if (ml&&mr) metrics.symmetry.mouth_symmetry=metricWithPoints(scoreCentered(Math.abs(ml.y-mr.y)/referenceW,0,0.035),["mouth_left","mouth_right"]);
-    if (lj&&rj&&eyeMid) metrics.symmetry.jaw_symmetry=metricWithPoints(scoreCentered(Math.abs(lj.y-rj.y)/referenceW,0,0.05),["left_jaw","right_jaw"]);
-    if (lc&&rc) metrics.symmetry.cheek_symmetry=metricWithPoints(scoreCentered(Math.abs(lc.y-rc.y)/referenceW,0,0.05),["left_cheekbone","right_cheekbone"]);
+    if (le&&re&&eyeMid) metrics.symmetry.eye_alignment=metricWithPoints(scoreCentered(Math.abs(le.y-re.y)/faceW,0,0.035),["left_eye_inner","right_eye_inner"]);
+    if (ml&&mr) metrics.symmetry.mouth_symmetry=metricWithPoints(scoreCentered(Math.abs(ml.y-mr.y)/faceW,0,0.035),["mouth_left","mouth_right"]);
+    if (lj&&rj&&eyeMid) metrics.symmetry.jaw_symmetry=metricWithPoints(scoreCentered(Math.abs(lj.y-rj.y)/faceW,0,0.05),["left_jaw","right_jaw"]);
+    if (lc&&rc) metrics.symmetry.cheek_symmetry=metricWithPoints(scoreCentered(Math.abs(lc.y-rc.y)/faceW,0,0.05),["left_cheekbone","right_cheekbone"]);
     const symVals=metricScores(metrics.symmetry); metrics.symmetry.overall_symmetry=metricWithPoints({value:symVals.length?round(symVals.reduce((a,x)=>a+x.score,0)/symVals.length/10,3):null,score:symVals.length?round(symVals.reduce((a,x)=>a+x.score,0)/symVals.length,1):null,status:symVals.length?"good":"uncertain",ideal_min:0.9,ideal_max:1,unit:"index",landmarks:["left_eye_inner","right_eye_inner","mouth_left","mouth_right","left_jaw","right_jaw"]},["left_eye_inner","right_eye_inner","mouth_left","mouth_right","left_jaw","right_jaw"]);
     metrics.eyes={};
-    if (le&&re) metrics.eyes.eye_spacing=metricWithPoints(scoreRange(dist(le,re)/referenceW,0.20,0.38,0.12),["left_eye_inner","right_eye_inner"]);
-    if (le&&leO) metrics.eyes.left_eye_width=metricWithPoints(scoreRange(dist(le,leO)/referenceW,0.10,0.20,0.10),["left_eye_inner","left_eye_outer"]);
-    if (re&&reO) metrics.eyes.right_eye_width=metricWithPoints(scoreRange(dist(re,reO)/referenceW,0.10,0.20,0.10),["right_eye_inner","right_eye_outer"]);
-    if (nl&&nr) metrics.nose={nose_width:metricWithPoints(scoreRange(dist(nl,nr)/referenceW,0.15,0.30,0.14),["nose_left","nose_right"])};
+    if (le&&re) metrics.eyes.eye_spacing=metricWithPoints(scoreRange(dist(le,re)/faceW,0.20,0.38,0.12),["left_eye_inner","right_eye_inner"]);
+    if (le&&leO) metrics.eyes.left_eye_width=metricWithPoints(scoreRange(dist(le,leO)/faceW,0.10,0.20,0.10),["left_eye_inner","left_eye_outer"]);
+    if (re&&reO) metrics.eyes.right_eye_width=metricWithPoints(scoreRange(dist(re,reO)/faceW,0.10,0.20,0.10),["right_eye_inner","right_eye_outer"]);
+    if (nl&&nr) metrics.nose={nose_width:metricWithPoints(scoreRange(dist(nl,nr)/faceW,0.15,0.30,0.14),["nose_left","nose_right"])};
     else metrics.nose={};
     if (nb&&nt&&faceH) metrics.nose.nose_length=metricWithPoints(scoreRange(dist(nb,nt)/faceH,0.16,0.34,0.16),["nose_bridge","nose_tip"]);
-    if (ml&&mr) metrics.lips_mouth={mouth_width:metricWithPoints(scoreRange(dist(ml,mr)/referenceW,0.28,0.52,0.20),["mouth_left","mouth_right"])};
+    if (ml&&mr) metrics.lips_mouth={mouth_width:metricWithPoints(scoreRange(dist(ml,mr)/faceW,0.28,0.52,0.20),["mouth_left","mouth_right"])};
     else metrics.lips_mouth={};
-    if (lj&&rj) metrics.jaw={jaw_width:metricWithPoints(scoreRange(dist(lj,rj)/referenceW,0.62,1.02,0.30),["left_jaw","right_jaw"])};
+    if (lj&&rj) metrics.jaw={jaw_width:metricWithPoints(scoreRange(dist(lj,rj)/faceW,0.62,1.02,0.30),["left_jaw","right_jaw"])};
     else metrics.jaw={};
     metrics.chin={};
-    if (lm.chin_left&&lm.chin_right&&referenceW) metrics.chin.chin_width=metricWithPoints(scoreRange(dist(point(lm,"chin_left"),point(lm,"chin_right"))/referenceW,0.16,0.34,0.14),["chin_left","chin_right"]); else metrics.chin.chin_width=metricWithPoints(metric(null,null,"uncertain",null,null,"ratio",[]),["chin"]);
+    if (lm.chin_left&&lm.chin_right&&faceW) metrics.chin.chin_width=metricWithPoints(scoreRange(dist(point(lm,"chin_left"),point(lm,"chin_right"))/faceW,0.16,0.34,0.14),["chin_left","chin_right"]); else metrics.chin.chin_width=metricWithPoints(metric(null,null,"uncertain",null,null,"ratio",[]),["chin"]);
     metrics.proportions={};
     if (fc&&eyeMid&&chin&&faceH) metrics.proportions.upper_to_lower_third=metricWithPoints(scoreRange(dist(fc,eyeMid)/dist(eyeMid,chin),0.60,1.10,0.30),["forehead_center","left_eye_inner","right_eye_inner","chin"]);
     if (eyeMid&&ul&&chin&&faceH) metrics.proportions.mid_to_lower_face=metricWithPoints(scoreRange(dist(eyeMid,ul)/dist(ul,chin),0.70,1.35,0.35),["left_eye_inner","right_eye_inner","upper_lip_center","chin"]);
