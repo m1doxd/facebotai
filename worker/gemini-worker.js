@@ -10,10 +10,10 @@ const ALLOWED_TYPES = new Set([
 
 const DEFAULT_MODEL = "gemini-3.6-flash";
 
-// Deployment marker: 2026-08-15-merged-landmark-geometry-motion-v1
+// Deployment marker: 2026-08-15-landmark-geometry-fix-v3
 // This intentionally changes the Worker source so Git/Cloudflare
 // detects a new deployment.
-const WORKER_BUILD = "2026-08-15-merged-landmark-geometry-motion-v1";
+const WORKER_BUILD = "2026-08-15-landmark-geometry-fix-v3";
 
 const SCORE_MIN = 0;
 const SCORE_MAX = 10;
@@ -524,7 +524,7 @@ LANDMARK ACCURACY RULES:
 AUTHORITATIVE GEOMETRIC LANDMARKS
 ============================================================
 
-The browser may provide a "client_landmarks" object detected by a dedicated
+The browser may provide a `client_landmarks` object detected by a dedicated
 face-landmark model. When present, these coordinates are authoritative for
 landmark placement and geometric calculations. Do not move them to another
 anatomical feature. You may still use the photograph to assess visibility and
@@ -534,7 +534,7 @@ CLIENT LANDMARKS:
 ${JSON.stringify(clientLandmarks)}
 
 When client landmarks are present, preserve their coordinates in the returned
-"landmarks" object and base geometry-related metric reasoning on those points.
+`landmarks` object and base geometry-related metric reasoning on those points.
 Do not replace a supplied point with an approximate Gemini estimate.
 
 ============================================================
