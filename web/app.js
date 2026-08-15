@@ -2,7 +2,7 @@
 // FACE METRIC APP - UNIFIED FRONTEND v2026.08.15-gender-modal-fix
 // ============================================================
 
-window.__FACEMETRIC_APP_VERSION__ = "2026-08-15-merged-landmark-geometry-motion-v1";
+window.__FACEMETRIC_APP_VERSION__ = "2026-08-16-landmark-geometry-metric-focus-v2";
 
 
 // ============================================================
@@ -900,6 +900,20 @@ function buildDenseFrontLandmarks(mesh) {
   // referenced by the canvas even though the Worker did not return it.
   put("mouth_center", 13);
 
+  const faceOval = [
+    10,338,297,332,284,251,389,356,454,323,361,288,
+    397,365,379,378,400,377,152,148,176,149,150,136,
+    172,58,132,93,234,127,162,21,54,103,67,109
+  ];
+  faceOval.forEach((index, i) => put(`face_contour_${i}`, index, 0.98));
+  const contourPoints = faceOval.map(index => pointFromLm(mesh,index)).filter(Boolean);
+  if (contourPoints.length >= 8) {
+    raw.face_left_edge = contourPoints.reduce((a,b)=>a.x <= b.x ? a : b);
+    raw.face_right_edge = contourPoints.reduce((a,b)=>a.x >= b.x ? a : b);
+    raw.face_top_edge = contourPoints.reduce((a,b)=>a.y <= b.y ? a : b);
+    raw.face_bottom_edge = contourPoints.reduce((a,b)=>a.y >= b.y ? a : b);
+  }
+
   return Object.keys(raw).length >= 10 ? raw : null;
 }
 
@@ -1131,24 +1145,40 @@ function getMetricLandmarkNames(key, viewType = "front") {
     return profileMap[k] || ["profile_glabella","profile_nasion","profile_pronasale","profile_pogonion","profile_menton"];
   }
   const map = {
-    face_aspect_ratio: ["left_cheekbone","right_cheekbone","forehead_center","chin"],
-    eye_alignment: ["left_eye_inner","right_eye_inner"],
-    eye_spacing: ["left_eye_inner","right_eye_inner"],
-    left_eye_width: ["left_eye_inner","left_eye_outer"],
-    right_eye_width: ["right_eye_inner","right_eye_outer"],
-    mouth_symmetry: ["mouth_left","mouth_right"],
-    mouth_width: ["mouth_left","mouth_right"],
-    jaw_symmetry: ["left_jaw","right_jaw"],
-    jaw_width: ["left_jaw","right_jaw"],
-    cheek_symmetry: ["left_cheekbone","right_cheekbone"],
-    nose_width: ["nose_left","nose_right"],
-    nose_length: ["nose_bridge","nose_tip"],
-    chin_width: ["left_jaw","chin","right_jaw"],
-    upper_to_lower_third: ["forehead_center","left_eye_inner","right_eye_inner","chin"],
-    mid_to_lower_face: ["left_eye_inner","right_eye_inner","upper_lip_center","chin"],
-    jaw_angle: ["left_cheekbone","left_jaw","chin","right_jaw","right_cheekbone"],
-    overall_symmetry: ["left_eye_inner","right_eye_inner","mouth_left","mouth_right","left_jaw","right_jaw"],
-    symmetry: ["left_eye_inner","right_eye_inner","mouth_left","mouth_right","left_jaw","right_jaw"]
+    face_aspect_ratio:["face_left_edge","face_right_edge","face_top_edge","face_bottom_edge"],
+    facial_width_height_balance:["face_left_edge","face_right_edge","face_top_edge","face_bottom_edge"],
+    midface_proportion:["left_eye_inner","right_eye_inner","upper_lip_center"],
+    lower_face_proportion:["upper_lip_center","chin","left_jaw","right_jaw"],
+    upper_face_proportion:["face_top_edge","left_eye_inner","right_eye_inner"],
+    facial_thirds_balance:["face_top_edge","left_eye_inner","right_eye_inner","upper_lip_center","chin"],
+    eye_alignment:["left_eye_inner","right_eye_inner"], eye_spacing:["left_eye_inner","right_eye_inner"],
+    eye_aspect_ratio:["left_eye_inner","left_eye_outer","right_eye_inner","right_eye_outer"],
+    left_eye_width:["left_eye_inner","left_eye_outer"], right_eye_width:["right_eye_inner","right_eye_outer"],
+    eye_area_balance:["left_eye_inner","left_eye_outer","right_eye_inner","right_eye_outer"],
+    eye_shape_harmony:["left_eye_inner","left_eye_outer","right_eye_inner","right_eye_outer"],
+    brow_position:["left_brow_inner","left_brow_outer","right_brow_inner","right_brow_outer"],
+    brow_shape:["left_brow_inner","left_brow_outer","right_brow_inner","right_brow_outer"],
+    brow_length:["left_brow_inner","left_brow_outer","right_brow_inner","right_brow_outer"],
+    brow_symmetry:["left_brow_inner","left_brow_outer","right_brow_inner","right_brow_outer"],
+    brow_eye_relationship:["left_brow_inner","left_eye_inner","right_brow_inner","right_eye_inner"],
+    mouth_symmetry:["mouth_left","mouth_right","upper_lip_center","lower_lip_center"],
+    mouth_width:["mouth_left","mouth_right"], lip_width:["mouth_left","mouth_right"],
+    lip_height:["upper_lip_center","lower_lip_center"], lip_symmetry:["mouth_left","mouth_right","upper_lip_center","lower_lip_center"],
+    nose_width:["nose_left","nose_right"], nose_length:["nose_bridge","nose_tip"],
+    nose_proportion:["nose_left","nose_right","nose_bridge","nose_tip"],
+    nose_face_relationship:["nose_left","nose_right","nose_bridge","nose_tip","left_eye_inner","right_eye_inner"],
+    nose_symmetry:["nose_left","nose_right","nose_bridge","nose_tip"],
+    jaw_symmetry:["left_jaw","right_jaw","chin"], jaw_width:["left_jaw","right_jaw"],
+    jaw_definition:["left_jaw","right_jaw","chin"], jaw_shape:["left_cheekbone","left_jaw","chin","right_jaw","right_cheekbone"],
+    lower_face_definition:["left_jaw","right_jaw","chin"],
+    chin_width:["left_jaw","chin","right_jaw"], chin_projection:["left_jaw","chin"], chin_shape:["left_jaw","chin","right_jaw"],
+    cheek_symmetry:["left_cheekbone","right_cheekbone"], cheekbone_width:["left_cheekbone","right_cheekbone"],
+    upper_to_lower_third:["face_top_edge","left_eye_inner","right_eye_inner","upper_lip_center","chin"],
+    mid_to_lower_face:["left_eye_inner","right_eye_inner","upper_lip_center","chin"],
+    jaw_angle:["left_cheekbone","left_jaw","chin","right_jaw","right_cheekbone"],
+    overall_symmetry:["left_eye_inner","right_eye_inner","mouth_left","mouth_right","left_jaw","right_jaw","chin"],
+    left_right_balance:["left_eye_inner","right_eye_inner","mouth_left","mouth_right","left_jaw","right_jaw"],
+    symmetry:["face_left_edge","face_right_edge","left_eye_inner","right_eye_inner","mouth_left","mouth_right","left_jaw","right_jaw","chin"]
   };
   return map[k] || [];
 }
@@ -1174,34 +1204,50 @@ function getOverlayPoints(view) {
 function getMetricLinePairs(key, viewType, selectedNames) {
   const k = String(key || "").split(".").pop();
   if (viewType === "profile") {
-    const map = {
+    const profileMap = {
       nasofacial_angle: [["profile_glabella","profile_nasion"],["profile_nasion","profile_pronasale"]],
       nasolabial_angle: [["profile_pronasale","profile_subnasale"],["profile_subnasale","profile_labiale_superius"]],
       gonial_angle: [["profile_pogonion","profile_gonion"],["profile_gonion","profile_chin_neck"]],
       nose_chin_projection: [["profile_nasion","profile_pronasale"],["profile_pronasale","profile_pogonion"]],
       profile_projection_balance: [["profile_pronasale","profile_labiale_superius"],["profile_labiale_superius","profile_pogonion"]]
     };
-    return map[k] || selectedNames.slice(0, -1).map((name, i) => [name, selectedNames[i + 1]]);
+    return profileMap[k] || selectedNames.slice(0, -1).map((name, i) => [name, selectedNames[i + 1]]);
   }
   const map = {
-    face_aspect_ratio: [["left_cheekbone","right_cheekbone"],["forehead_center","chin"]],
-    eye_alignment: [["left_eye_inner","right_eye_inner"]],
-    eye_spacing: [["left_eye_inner","right_eye_inner"]],
-    left_eye_width: [["left_eye_inner","left_eye_outer"]],
-    right_eye_width: [["right_eye_inner","right_eye_outer"]],
-    mouth_symmetry: [["mouth_left","mouth_right"]],
-    mouth_width: [["mouth_left","mouth_right"]],
-    jaw_symmetry: [["left_jaw","right_jaw"]],
-    jaw_width: [["left_jaw","right_jaw"]],
-    cheek_symmetry: [["left_cheekbone","right_cheekbone"]],
-    nose_width: [["nose_left","nose_right"]],
-    nose_length: [["nose_bridge","nose_tip"]],
-    chin_width: [["left_jaw","chin"],["chin","right_jaw"]],
-    upper_to_lower_third: [["forehead_center","left_eye_inner"],["left_eye_inner","right_eye_inner"],["right_eye_inner","chin"]],
-    mid_to_lower_face: [["left_eye_inner","right_eye_inner"],["right_eye_inner","upper_lip_center"],["upper_lip_center","chin"]],
-    jaw_angle: [["left_cheekbone","left_jaw"],["left_jaw","chin"],["chin","right_jaw"],["right_jaw","right_cheekbone"]],
-    overall_symmetry: [["left_eye_inner","right_eye_inner"],["mouth_left","mouth_right"],["left_jaw","right_jaw"]],
-    symmetry: [["left_eye_inner","right_eye_inner"],["mouth_left","mouth_right"],["left_jaw","right_jaw"]]
+    face_aspect_ratio:[["face_left_edge","face_right_edge"],["face_top_edge","face_bottom_edge"]],
+    facial_width_height_balance:[["face_left_edge","face_right_edge"],["face_top_edge","face_bottom_edge"]],
+    midface_proportion:[["left_eye_inner","right_eye_inner"],["right_eye_inner","upper_lip_center"]],
+    lower_face_proportion:[["upper_lip_center","chin"],["left_jaw","right_jaw"]],
+    upper_face_proportion:[["face_top_edge","left_eye_inner"],["right_eye_inner","face_top_edge"]],
+    facial_thirds_balance:[["face_top_edge","left_eye_inner"],["left_eye_inner","upper_lip_center"],["upper_lip_center","chin"]],
+    eye_alignment:[["left_eye_inner","right_eye_inner"]], eye_spacing:[["left_eye_inner","right_eye_inner"]],
+    eye_aspect_ratio:[["left_eye_inner","left_eye_outer"],["right_eye_inner","right_eye_outer"]],
+    left_eye_width:[["left_eye_inner","left_eye_outer"]], right_eye_width:[["right_eye_inner","right_eye_outer"]],
+    brow_position:[["left_brow_inner","left_brow_outer"],["right_brow_inner","right_brow_outer"]],
+    brow_shape:[["left_brow_inner","left_brow_outer"],["right_brow_inner","right_brow_outer"]],
+    brow_length:[["left_brow_inner","left_brow_outer"],["right_brow_inner","right_brow_outer"]],
+    brow_symmetry:[["left_brow_inner","right_brow_inner"],["left_brow_outer","right_brow_outer"]],
+    brow_eye_relationship:[["left_brow_inner","left_eye_inner"],["right_brow_inner","right_eye_inner"]],
+    mouth_symmetry:[["mouth_left","mouth_right"],["upper_lip_center","lower_lip_center"]],
+    mouth_width:[["mouth_left","mouth_right"]], lip_width:[["mouth_left","mouth_right"]],
+    lip_height:[["upper_lip_center","lower_lip_center"]], lip_symmetry:[["mouth_left","mouth_right"],["upper_lip_center","lower_lip_center"]],
+    nose_width:[["nose_left","nose_right"]], nose_length:[["nose_bridge","nose_tip"]],
+    nose_proportion:[["nose_left","nose_right"],["nose_bridge","nose_tip"]],
+    nose_face_relationship:[["nose_left","nose_right"],["nose_bridge","nose_tip"]],
+    nose_symmetry:[["nose_left","nose_tip"],["nose_tip","nose_right"]],
+    jaw_symmetry:[["left_jaw","right_jaw"],["left_jaw","chin"],["chin","right_jaw"]],
+    jaw_width:[["left_jaw","right_jaw"]], jaw_definition:[["left_jaw","chin"],["chin","right_jaw"]],
+    jaw_shape:[["left_cheekbone","left_jaw"],["left_jaw","chin"],["chin","right_jaw"],["right_jaw","right_cheekbone"]],
+    lower_face_definition:[["left_jaw","chin"],["chin","right_jaw"]],
+    chin_width:[["left_jaw","chin"],["chin","right_jaw"]], chin_projection:[["left_jaw","chin"]],
+    chin_shape:[["left_jaw","chin"],["chin","right_jaw"]],
+    cheek_symmetry:[["left_cheekbone","right_cheekbone"]], cheekbone_width:[["left_cheekbone","right_cheekbone"]],
+    upper_to_lower_third:[["face_top_edge","left_eye_inner"],["left_eye_inner","right_eye_inner"],["right_eye_inner","chin"]],
+    mid_to_lower_face:[["left_eye_inner","right_eye_inner"],["right_eye_inner","upper_lip_center"],["upper_lip_center","chin"]],
+    jaw_angle:[["left_cheekbone","left_jaw"],["left_jaw","chin"],["chin","right_jaw"],["right_jaw","right_cheekbone"]],
+    overall_symmetry:[["left_eye_inner","right_eye_inner"],["mouth_left","mouth_right"],["left_jaw","right_jaw"]],
+    left_right_balance:[["left_eye_inner","right_eye_inner"],["mouth_left","mouth_right"],["left_jaw","right_jaw"]],
+    symmetry:[["face_left_edge","face_right_edge"],["left_eye_inner","right_eye_inner"],["mouth_left","mouth_right"],["left_jaw","right_jaw"]]
   };
   return map[k] || selectedNames.slice(0, -1).map((name, i) => [name, selectedNames[i + 1]]);
 }
@@ -1337,6 +1383,37 @@ function animateAnalysisNetwork(result) {
   requestAnimationFrame(tick);
 }
 
+
+/* ============================================================
+   DYNAMIC METRIC FOCUS CAMERA
+============================================================ */
+function getMetricFocusLandmarkNames(metric, view) {
+  if (!metric) return [];
+  const explicit = Array.isArray(metric.value?.landmarks) ? metric.value.landmarks.filter(Boolean) : [];
+  if (explicit.length) return explicit;
+  const names = getMetricLandmarkNames(metric.key, view?.type === "profile" ? "profile" : "front");
+  if (names.length) return names;
+  const zone = getMetricZone(metric.key).key;
+  return ({eyes:["left_eye_inner","left_eye_outer","right_eye_inner","right_eye_outer"],eyebrows:["left_brow_inner","left_brow_outer","right_brow_inner","right_brow_outer"],nose:["nose_left","nose_right","nose_bridge","nose_tip"],lips_mouth:["mouth_left","mouth_right","upper_lip_center","lower_lip_center"],jaw:["left_jaw","right_jaw","chin"],chin:["left_jaw","right_jaw","chin"],cheeks:["left_cheekbone","right_cheekbone"],midface:["left_eye_inner","right_eye_inner","nose_bridge","upper_lip_center"],face_geometry:["face_left_edge","face_right_edge","face_top_edge","face_bottom_edge"],symmetry:["face_left_edge","face_right_edge","left_eye_inner","right_eye_inner","mouth_left","mouth_right","left_jaw","right_jaw"],overall_harmony:["face_left_edge","face_right_edge","face_top_edge","face_bottom_edge"]})[zone] || [];
+}
+function rotateNormalizedPoint(x,y,degrees){const r=Number(degrees||0)*Math.PI/180,c=Math.cos(r),s=Math.sin(r),dx=x-.5,dy=y-.5;return{x:.5+dx*c-dy*s,y:.5+dx*s+dy*c};}
+function getAlignedNormalizedPoint(p,a){if(!p)return null;const q=rotateNormalizedPoint(Number(p.x),Number(p.y),Number(a?.correction_degrees||0)),sc=Number(a?.scale||1),cx=Number(a?.center_x??.5),cy=Number(a?.center_y??.5);return{x:.5+(q.x-.5)*sc+(.5-cx),y:.5+(q.y-.5)*sc+(.5-cy)};}
+function getMetricCameraTarget(container,view,metric){
+  if(!container||!view||!metric)return{scale:1,x:0,y:0};
+  const lm=view.landmarks||{},names=getMetricFocusLandmarkNames(metric,view);let pts=names.map(n=>lm[n]).filter(p=>p&&Number.isFinite(+p.x)&&Number.isFinite(+p.y));if(!pts.length)return{scale:1,x:0,y:0};
+  const al=currentAnalysis?.alignment?.[view?.type==="profile"?"profile":"front"];pts=pts.map(p=>getAlignedNormalizedPoint(p,al)).filter(Boolean);
+  const key=String(metric.key||"").split(".").pop(),zone=getMetricZone(metric.key).key;
+  const full=["face_aspect_ratio","facial_width_height_balance","upper_to_lower_third","overall_symmetry","left_right_balance","symmetry"].includes(key)||["face_geometry","symmetry","overall_harmony","frontal_harmony","profile_harmony"].includes(zone);
+  if(full){const all=Object.values(lm).filter(p=>p&&Number.isFinite(+p.x)&&Number.isFinite(+p.y)).map(p=>getAlignedNormalizedPoint(p,al)).filter(Boolean);if(all.length>=4)pts=all;}
+  const minX=Math.min(...pts.map(p=>p.x)),maxX=Math.max(...pts.map(p=>p.x)),minY=Math.min(...pts.map(p=>p.y)),maxY=Math.max(...pts.map(p=>p.y)),bw=Math.max(.02,maxX-minX),bh=Math.max(.02,maxY-minY),px=full?.08:Math.max(.035,bw*.38),py=full?.06:Math.max(.04,bh*.42),tw=Math.min(.98,bw+px*2),th=Math.min(.92,bh+py*2),scale=clamp(Math.min(.92/tw,.86/th),1,full?1.18:2.65);
+  return{scale,x:(.5-(minX+maxX)/2)*scale,y:(.5-(minY+maxY)/2)*scale};
+}
+function getMetricCameraElement(container){return container?.querySelector(".result-visual__camera")||null;}
+function resetMetricCamera(container){const c=getMetricCameraElement(container);if(!c)return;c.style.setProperty("--fm-camera-scale","1");c.style.setProperty("--fm-camera-x","0%");c.style.setProperty("--fm-camera-y","0%");}
+function animateMetricCamera(container,target,duration,token,done){
+  const c=getMetricCameraElement(container);if(!c){done?.();return;}const cs=getComputedStyle(c),ss=Number(cs.getPropertyValue("--fm-camera-scale"))||1,sx=parseFloat(cs.getPropertyValue("--fm-camera-x"))||0,sy=parseFloat(cs.getPropertyValue("--fm-camera-y"))||0,st=performance.now();
+  const tick=now=>{if(token!==metricMotionToken)return;const p=Math.min(1,(now-st)/duration),e=p<.5?4*p*p*p:1-Math.pow(-2*p+2,3)/2;c.style.setProperty("--fm-camera-scale",(ss+(target.scale-ss)*e).toFixed(4));c.style.setProperty("--fm-camera-x",(sx+(target.x*100-sx)*e).toFixed(3)+"%");c.style.setProperty("--fm-camera-y",(sy+(target.y*100-sy)*e).toFixed(3)+"%");if(p<1)requestAnimationFrame(tick);else done?.();};requestAnimationFrame(tick);
+}
 
 /* ============================================================
    METRIC MOTION SYSTEM
@@ -1483,19 +1560,24 @@ function animateFixmetry(container, view, metric, token) {
 
 function animateMetricSelection(metric, options = {}) {
   if (!currentAnalysis || !metric) return;
-
   const token = ++metricMotionToken;
   const container = options.container || document.getElementById("result-visual");
   if (!container) return;
-
   const view = getActiveView(currentAnalysis) || {};
+  const target = getMetricCameraTarget(container, view, metric);
+
   container.dataset.motionPhase = METRIC_MOTION_PHASE.PHASE;
   container.classList.remove("fm-motion-active", "fm-motion-fixmetry");
   void container.offsetWidth;
   container.classList.add("fm-motion-active");
 
-  // Reduced motion: skip decorative animation and show the real geometry immediately.
   if (prefersReducedMotion()) {
+    const camera = getMetricCameraElement(container);
+    if (camera) {
+      camera.style.setProperty("--fm-camera-scale", String(target.scale));
+      camera.style.setProperty("--fm-camera-x", `${target.x * 100}%`);
+      camera.style.setProperty("--fm-camera-y", `${target.y * 100}%`);
+    }
     drawMetricGeometry(container, view, metric, 1);
     clearMotionCanvas(container);
     container.dataset.motionPhase = "";
@@ -1503,59 +1585,28 @@ function animateMetricSelection(metric, options = {}) {
     return;
   }
 
-  // phase: brief visual reset/focus.
-  const phaseStart = performance.now();
-  const phaseDuration = 220;
-  const phaseTick = now => {
+  window.setTimeout(() => {
     if (token !== metricMotionToken) return;
-    const p = Math.min(1, (now - phaseStart) / phaseDuration);
-    container.style.setProperty("--fm-motion-phase", p.toFixed(3));
-    if (p < 1) {
-      requestAnimationFrame(phaseTick);
-      return;
-    }
-
-    // metric: draw the real selected measurement using the real MediaPipe landmarks.
     container.dataset.motionPhase = METRIC_MOTION_PHASE.METRIC;
-    const lineStart = performance.now();
-    const lineDuration = 620;
-
-    const lineTick = now2 => {
+    animateMetricCamera(container, target, 720, token, () => {
       if (token !== metricMotionToken) return;
-      const q = Math.min(1, (now2 - lineStart) / lineDuration);
-      const eased = 1 - Math.pow(1 - q, 2);
-      drawMetricGeometry(container, view, metric, eased);
-      if (q < 1) {
-        requestAnimationFrame(lineTick);
-        return;
-      }
 
-      // random geometry: decorative transition only.
-      container.dataset.motionPhase = METRIC_MOTION_PHASE.RANDOM_GEOMETRY;
-      const seed = String(metric.key || "")
-        .split("")
-        .reduce((n, c) => n + c.charCodeAt(0), 17);
-      const randomStart = performance.now();
-      const randomDuration = 360;
-
-      const randomTick = now3 => {
+      const start = performance.now();
+      const duration = 420;
+      const tick = now => {
         if (token !== metricMotionToken) return;
-        const r = Math.min(1, (now3 - randomStart) / randomDuration);
-        drawRandomGeometryPhase(container, r, seed);
-        if (r < 1) {
-          requestAnimationFrame(randomTick);
-          return;
+        const q = Math.min(1, (now - start) / duration);
+        const eased = 1 - Math.pow(1 - q, 3);
+        drawMetricGeometry(container, view, metric, eased);
+        if (q < 1) {
+          requestAnimationFrame(tick);
+        } else {
+          finishMetricMotion(container, view, metric, token);
         }
-
-        // fixmetry: return to the actual, fixed geometry.
-        animateFixmetry(container, view, metric, token);
       };
-      requestAnimationFrame(randomTick);
-    };
-    requestAnimationFrame(lineTick);
-  };
-
-  requestAnimationFrame(phaseTick);
+      requestAnimationFrame(tick);
+    });
+  }, 180);
 }
 
 function animateMetricCards() {
@@ -3150,16 +3201,18 @@ function ensureResultFace(result) {
     visual.innerHTML = `
       <div class="result-visual__media">
 
-        <img
-          class="result-visual__image"
-          alt="Результат анализа"
-        >
+        <div class="result-visual__camera">
+          <img
+            class="result-visual__image"
+            alt="Результат анализа"
+          >
 
-        <canvas
-          id="result-landmark-canvas"
-          class="result-landmark-canvas"
-          aria-hidden="true"
-        ></canvas>
+          <canvas
+            id="result-landmark-canvas"
+            class="result-landmark-canvas"
+            aria-hidden="true"
+          ></canvas>
+        </div>
 
         <div class="result-visual__shade"></div>
 
@@ -3274,6 +3327,8 @@ function ensureResultFace(result) {
 
   visual.dataset.view =
     activeResultView;
+
+  resetMetricCamera(visual);
 
   visual.classList.remove(
     "is-complete"
@@ -4763,8 +4818,7 @@ function selectMetric(
 
   const inspector = $("#metric-inspector");
   const visual = $("#result-visual");
-  visual?.classList.add("metric-focus");
-  window.setTimeout(() => visual?.classList.remove("metric-focus"), 900);
+  visual?.classList.remove("metric-focus");
 
   // Focus the actual face image so the selected measurement is immediately visible.
   visual?.scrollIntoView({
