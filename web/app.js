@@ -2,7 +2,7 @@
 // FACE METRIC APP - UNIFIED FRONTEND v2026.08.15-gender-modal-fix
 // ============================================================
 
-window.__FACEMETRIC_APP_VERSION__ = "2026-08-15-final-ux-buttons-fix-v2";
+window.__FACEMETRIC_APP_VERSION__ = "2026-08-15-final-buttons-classification-fix-v1";
 
 
 // ============================================================
@@ -224,6 +224,8 @@ function openGeminiKeyModal(options = {}) {
   }
 
   modal.hidden = false;
+  modal.style.display = "flex";
+  modal.style.pointerEvents = "auto";
   modal.classList.add("show");
   modal.setAttribute("aria-hidden", "false");
 
@@ -268,9 +270,13 @@ function initGeminiKeyModal() {
 
   const savedKey = getGeminiApiKey();
 
-  modal.hidden = Boolean(savedKey);
-  modal.classList.toggle("show", !savedKey);
-  modal.setAttribute("aria-hidden", savedKey ? "true" : "false");
+  const hasSavedKey = Boolean(savedKey);
+
+  modal.hidden = hasSavedKey;
+  modal.classList.toggle("show", !hasSavedKey);
+  modal.style.display = hasSavedKey ? "none" : "flex";
+  modal.style.pointerEvents = hasSavedKey ? "none" : "auto";
+  modal.setAttribute("aria-hidden", hasSavedKey ? "true" : "false");
 
   const showKeyError = message => {
     if (!error) {
