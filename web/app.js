@@ -1,6 +1,9 @@
+// ============================================================
+// FACE METRIC APP - UNIFIED FRONTEND v2026.08.15-gender-modal-fix
+// ============================================================
 
-// FaceMetric build: 2026-08-15-geometry-landmark-classification-v1
-// Classification modal opens after each new photo; analysis remains manual.
+window.__FACEMETRIC_APP_VERSION__ = "2026-08-15-merged-landmark-geometry-motion-v1";
+
 
 // ============================================================
 // GEMINI BYOK
@@ -407,6 +410,16 @@ const ALLOWED_TYPES = new Set([
 const API_ENDPOINT = "https://facebot-gemini.snow4lyt.workers.dev/api/analyze";
 const HEALTH_ENDPOINT = "https://facebot-gemini.snow4lyt.workers.dev/api/health";
 const VALIDATE_KEY_ENDPOINT = "https://facebot-gemini.snow4lyt.workers.dev/api/validate-key";
+
+// Dense client-side face landmarks. Gemini remains the semantic/analysis
+// engine, while MediaPipe Face Landmarker supplies stable geometric points
+// for alignment and measurement overlays. If the model cannot be loaded,
+// the app safely falls back to the Worker landmarks.
+const FACE_LANDMARKER_VERSION = "0.10.22";
+const FACE_LANDMARKER_WASM_URL = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${FACE_LANDMARKER_VERSION}/wasm`;
+const FACE_LANDMARKER_MODEL_URL = "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task";
+let faceLandmarkerPromise = null;
+let lastClientLandmarks = null;
 const HISTORY_KEY = "facemetric_history_v2";
 
 const tg = window.Telegram?.WebApp || null;
@@ -478,6 +491,12 @@ let selectedProfileObjectUrl = null;
 // Classification settings. Geometric measurements remain independent.
 let selectedGender = "male";
 let adultConfirmed = false;
+
+// Expose read-only diagnostics for debugging the deployed frontend.
+window.FaceMetricClassification = {
+  get gender() { return selectedGender === "female" ? "female" : "male"; },
+  get adultConfirmed() { return adultConfirmed === true; }
+};
 
 let currentAnalysis = null;
 let currentScreen = "home";
@@ -796,6 +815,145 @@ function validateFile(file) {
 }
 
 
+async function getFaceLandmarker() {
+  if (faceLandmarkerPromise) return faceLandmarkerPromise;
+  faceLandmarkerPromise = (async () => {
+    try {
+      const vision = await import(`https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${FACE_LANDMARKER_VERSION}`);
+      const fileset = await vision.FilesetResolver.forVisionTasks(FACE_LANDMARKER_WASM_URL);
+      return await vision.FaceLandmarker.createFromOptions(fileset, {
+        baseOptions: {
+          modelAssetPath: FACE_LANDMARKER_MODEL_URL,
+          delegate: "GPU"
+        },
+        runningMode: "IMAGE",
+        numFaces: 1,
+        minFaceDetectionConfidence: 0.55,
+        minFacePresenceConfidence: 0.55,
+        minTrackingConfidence: 0.55
+      });
+    } catch (error) {
+      console.warn("FaceMetric: dense landmark detector unavailable; using Worker landmarks.", error);
+      faceLandmarkerPromise = null;
+      return null;
+    }
+  })();
+  return faceLandmarkerPromise;
+}
+
+function pointFromLm(landmarks, index, confidence = 0.98) {
+  const p = landmarks?.[index];
+  if (!p || !Number.isFinite(p.x) || !Number.isFinite(p.y)) return null;
+  return { x: Math.min(1, Math.max(0, p.x)), y: Math.min(1, Math.max(0, p.y)), confidence };
+}
+
+function sortedPair(a, b) {
+  if (!a || !b) return [a, b];
+  return a.x <= b.x ? [a, b] : [b, a];
+}
+
+function buildDenseFrontLandmarks(mesh) {
+  if (!Array.isArray(mesh) || mesh.length < 400) return null;
+  const raw = {};
+  const put = (name, index, confidence = 0.98) => {
+    const p = pointFromLm(mesh, index, confidence);
+    if (p) raw[name] = p;
+  };
+
+  // MediaPipe Face Mesh stable anchors. Left/right are assigned by image X,
+  // not by anatomical naming, so mirrored photos remain consistent.
+  const eyeA = sortedPair(pointFromLm(mesh, 33), pointFromLm(mesh, 263));
+  const eyeInner = sortedPair(pointFromLm(mesh, 133), pointFromLm(mesh, 362));
+  const browA = sortedPair(pointFromLm(mesh, 70), pointFromLm(mesh, 300));
+  const browOuter = sortedPair(pointFromLm(mesh, 46), pointFromLm(mesh, 276));
+  const mouth = sortedPair(pointFromLm(mesh, 61), pointFromLm(mesh, 291));
+  const noseW = sortedPair(pointFromLm(mesh, 98), pointFromLm(mesh, 327));
+  const jaw = sortedPair(pointFromLm(mesh, 172), pointFromLm(mesh, 397));
+  const cheek = sortedPair(pointFromLm(mesh, 234), pointFromLm(mesh, 454));
+
+  if (eyeA[0]) raw.left_eye_outer = eyeA[0];
+  if (eyeA[1]) raw.right_eye_outer = eyeA[1];
+  if (eyeInner[0]) raw.left_eye_inner = eyeInner[0];
+  if (eyeInner[1]) raw.right_eye_inner = eyeInner[1];
+  if (browA[0]) raw.left_brow_inner = browA[0];
+  if (browA[1]) raw.right_brow_inner = browA[1];
+  if (browOuter[0]) raw.left_brow_outer = browOuter[0];
+  if (browOuter[1]) raw.right_brow_outer = browOuter[1];
+  if (mouth[0]) raw.mouth_left = mouth[0];
+  if (mouth[1]) raw.mouth_right = mouth[1];
+  if (noseW[0]) raw.nose_left = noseW[0];
+  if (noseW[1]) raw.nose_right = noseW[1];
+  if (jaw[0]) raw.left_jaw = jaw[0];
+  if (jaw[1]) raw.right_jaw = jaw[1];
+  if (cheek[0]) raw.left_cheekbone = cheek[0];
+  if (cheek[1]) raw.right_cheekbone = cheek[1];
+
+  put("forehead_center", 10);
+  put("nose_bridge", 168);
+  put("nose_tip", 1);
+  put("upper_lip_center", 13);
+  put("lower_lip_center", 14);
+  put("chin", 152);
+
+  // Canonical internal point used by the visual network. It was previously
+  // referenced by the canvas even though the Worker did not return it.
+  put("mouth_center", 13);
+
+  return Object.keys(raw).length >= 10 ? raw : null;
+}
+
+async function detectDenseFrontLandmarks() {
+  if (!analysisImage) return null;
+  if (!analysisImage.complete || !analysisImage.naturalWidth) {
+    await new Promise(resolve => {
+      const done = () => { analysisImage.removeEventListener("load", done); resolve(); };
+      analysisImage.addEventListener("load", done, { once: true });
+    });
+  }
+  const detector = await getFaceLandmarker();
+  if (!detector) return null;
+  try {
+    const result = detector.detect(analysisImage);
+    const mesh = result?.faceLandmarks?.[0];
+    const landmarks = buildDenseFrontLandmarks(mesh);
+    if (landmarks) {
+      lastClientLandmarks = landmarks;
+      return landmarks;
+    }
+  } catch (error) {
+    console.warn("FaceMetric: dense landmark detection failed.", error);
+  }
+  return null;
+}
+
+function mergeClientFrontLandmarks(result, dense) {
+  if (!result || !dense) return result;
+  const front = result.views?.front;
+  if (!front) return result;
+  front.landmarks = { ...(front.landmarks || {}), ...dense };
+  front.landmarks_count = Object.keys(front.landmarks).length;
+  result.landmarks = { ...(result.landmarks || {}), ...dense };
+  result.landmarks_count = Object.keys(result.landmarks).length;
+  result.landmark_source = "mediapipe-face-landmarker";
+  result.landmark_detector = {
+    name: "MediaPipe Face Landmarker",
+    version: FACE_LANDMARKER_VERSION,
+    geometric_points: Object.keys(dense).length
+  };
+  return result;
+}
+
+function applySameAlignmentTransform(element, alignment, frameElement = null) {
+  if (!element || !alignment?.available) return;
+  const rect = (frameElement || element.parentElement || element).getBoundingClientRect();
+  const tx = (0.5 - Number(alignment.center_x || 0.5)) * rect.width;
+  const ty = (0.5 - Number(alignment.center_y || 0.5)) * rect.height;
+  const rotate = Number(alignment.correction_degrees) || 0;
+  const scale = Number(alignment.scale) || 1;
+  element.style.transformOrigin = "50% 50%";
+  element.style.transform = `translate(${tx.toFixed(1)}px, ${ty.toFixed(1)}px) rotate(${rotate.toFixed(2)}deg) scale(${scale.toFixed(3)})`;
+}
+
 function handleFileSelected(file) {
   if (!getGeminiApiKey()) {
     openGeminiKeyModal();
@@ -813,15 +971,17 @@ function handleFileSelected(file) {
   cancelActiveAnalysis();
   analysisRequestId++;
 
-  // A newly uploaded photo always requires fresh classification.
-  // Do not reuse the previous photo's gender / 18+ confirmation.
+  // Every newly uploaded face photo gets a fresh classification confirmation.
+  // Do not reuse gender/18+ from a previous photo. The modal must appear before
+  // the user can start analysis, but confirming it must NOT start analysis.
   clearClassificationSettings();
   selectedGender = "male";
   adultConfirmed = false;
-  if (genderSelect) genderSelect.value = "male";
+  if (genderSelect) genderSelect.value = selectedGender;
   if (adultConfirm) adultConfirm.checked = false;
 
   selectedFile = file;
+  lastClientLandmarks = null;
 
   revokeSelectedObjectUrl();
   selectedObjectUrl = URL.createObjectURL(file);
@@ -843,10 +1003,10 @@ function handleFileSelected(file) {
   showProfileUploadControl();
   updateAnalysisButtonState();
 
-  // Ask for gender and 18+ only after the photo is loaded.
-  // Confirmation closes the modal but NEVER starts analysis.
+  // Open classification only after the face photo is actually loaded.
+  // This is intentionally not tied to the Gemini-key modal.
   window.setTimeout(() => {
-    openClassificationModal({ focus: true });
+    if (selectedFile === file) openClassificationModal();
   }, 120);
 
   showToast("Анфас загружен. Укажи пол и подтверди 18+, затем при желании добавь профиль.");
@@ -1045,6 +1205,29 @@ function getMetricLinePairs(key, viewType, selectedNames) {
   return map[k] || selectedNames.slice(0, -1).map((name, i) => [name, selectedNames[i + 1]]);
 }
 
+function getOverlayImageForCanvas(canvas) {
+  if (!canvas) return null;
+  if (canvas.id === "result-landmark-canvas") return $(".result-visual__image", canvas.parentElement || document);
+  return analysisImage;
+}
+
+function getImageContentBox(image, frameWidth, frameHeight) {
+  if (!image || !image.naturalWidth || !image.naturalHeight) {
+    return { x: 0, y: 0, width: frameWidth, height: frameHeight };
+  }
+  const style = getComputedStyle(image);
+  const fit = style.objectFit || "fill";
+  const iw = image.naturalWidth;
+  const ih = image.naturalHeight;
+  if (fit === "fill") return { x: 0, y: 0, width: frameWidth, height: frameHeight };
+  const containScale = Math.min(frameWidth / iw, frameHeight / ih);
+  const coverScale = Math.max(frameWidth / iw, frameHeight / ih);
+  const scale = fit === "cover" ? coverScale : containScale;
+  const width = iw * scale;
+  const height = ih * scale;
+  return { x: (frameWidth - width) / 2, y: (frameHeight - height) / 2, width, height };
+}
+
 function drawFaceLandmarkNetwork(canvas, view, metric = null, progress = 1) {
   if (!canvas) return;
   const rect = canvas.getBoundingClientRect();
@@ -1065,7 +1248,12 @@ function drawFaceLandmarkNetwork(canvas, view, metric = null, progress = 1) {
   const points = getOverlayPoints(view);
   const names = Object.keys(points);
   if (!names.length) return;
-  const xy = name => ({x:Number(points[name].x)*width, y:Number(points[name].y)*height});
+  const overlayImage = getOverlayImageForCanvas(canvas);
+  const contentBox = getImageContentBox(overlayImage, width, height);
+  const xy = name => ({
+    x: contentBox.x + Number(points[name].x) * contentBox.width,
+    y: contentBox.y + Number(points[name].y) * contentBox.height
+  });
 
   const selectedNames = metric
     ? (Array.isArray(metric.value?.landmarks) && metric.value.landmarks.length
@@ -1144,6 +1332,282 @@ function animateAnalysisNetwork(result) {
     const eased = 1 - Math.pow(1-p, 2);
     drawAnalysisNetwork(result, null, eased);
     if (p < 1) requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}
+
+
+/* ============================================================
+   METRIC MOTION SYSTEM
+   phase -> metric -> random geometry -> fixmetry.
+   Presentation-only: never changes metric values, MediaPipe
+   landmarks, geometry inputs, or analysis results.
+============================================================ */
+
+const METRIC_MOTION_PHASE = Object.freeze({
+  PHASE: "phase",
+  METRIC: "metric",
+  RANDOM_GEOMETRY: "random-geometry",
+  FIXMETRY: "fixmetry"
+});
+
+let metricMotionToken = 0;
+
+function prefersReducedMotion() {
+  return !!window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
+}
+
+function ensureMotionCanvas(container) {
+  if (!container) return null;
+  let canvas = container.querySelector(".facemetric-motion-canvas");
+  if (!canvas) {
+    canvas = document.createElement("canvas");
+    canvas.className = "facemetric-motion-canvas";
+    canvas.setAttribute("aria-hidden", "true");
+    container.appendChild(canvas);
+  }
+  const rect = container.getBoundingClientRect();
+  const ratio = window.devicePixelRatio || 1;
+  const w = Math.max(1, Math.round(rect.width * ratio));
+  const h = Math.max(1, Math.round(rect.height * ratio));
+  if (canvas.width !== w || canvas.height !== h) {
+    canvas.width = w;
+    canvas.height = h;
+    canvas.style.width = `${rect.width}px`;
+    canvas.style.height = `${rect.height}px`;
+  }
+  return canvas;
+}
+
+function motionContext(container) {
+  const canvas = ensureMotionCanvas(container);
+  if (!canvas) return null;
+  const rect = container.getBoundingClientRect();
+  const ratio = window.devicePixelRatio || 1;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+  return { canvas, ctx, width: rect.width, height: rect.height };
+}
+
+function clearMotionCanvas(container) {
+  const data = motionContext(container);
+  if (!data) return;
+  data.ctx.clearRect(0, 0, data.width, data.height);
+}
+
+function drawRandomGeometryPhase(container, progress, seed = 7) {
+  const data = motionContext(container);
+  if (!data) return;
+  const {ctx, width, height} = data;
+  ctx.clearRect(0, 0, width, height);
+
+  // Deterministic decorative field. These points are NEVER fed into geometry.
+  let s = (seed * 9301 + 49297) % 233280;
+  const rnd = () => {
+    s = (s * 9301 + 49297) % 233280;
+    return s / 233280;
+  };
+
+  const points = [];
+  for (let i = 0; i < 18; i++) {
+    points.push({
+      x: width * (0.18 + rnd() * 0.64),
+      y: height * (0.14 + rnd() * 0.72)
+    });
+  }
+
+  const alpha = Math.sin(Math.PI * Math.min(1, progress)) * 0.38;
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = `rgba(117,169,255,${alpha})`;
+  ctx.fillStyle = `rgba(117,169,255,${Math.min(.8, alpha + .12)})`;
+
+  for (let i = 0; i < points.length; i++) {
+    const a = points[i];
+    const b = points[(i * 7 + 3) % points.length];
+    if (Math.hypot(a.x - b.x, a.y - b.y) < width * .38) {
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.stroke();
+    }
+    ctx.beginPath();
+    ctx.arc(a.x, a.y, 1.7 + progress * 2.2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+function drawMetricGeometry(container, view, metric, progress) {
+  const canvas = container === analysisFrame
+    ? landmarkCanvas
+    : document.getElementById("result-landmark-canvas");
+  if (!canvas) return;
+  drawFaceLandmarkNetwork(canvas, view, metric, progress);
+}
+
+function finishMetricMotion(container, view, metric, token) {
+  if (token !== metricMotionToken) return;
+  clearMotionCanvas(container);
+  drawMetricGeometry(container, view, metric, 1);
+  container.dataset.motionPhase = METRIC_MOTION_PHASE.FIXMETRY;
+  container.classList.add("fm-motion-fixmetry");
+  window.setTimeout(() => {
+    if (token !== metricMotionToken) return;
+    container.classList.remove("fm-motion-active", "fm-motion-fixmetry");
+    container.dataset.motionPhase = "";
+  }, 900);
+}
+
+function animateFixmetry(container, view, metric, token) {
+  if (prefersReducedMotion()) {
+    finishMetricMotion(container, view, metric, token);
+    return;
+  }
+
+  const start = performance.now();
+  const duration = 520;
+
+  const tick = now => {
+    if (token !== metricMotionToken) return;
+    const p = Math.min(1, (now - start) / duration);
+    const eased = 1 - Math.pow(1 - p, 3);
+    clearMotionCanvas(container);
+    drawMetricGeometry(container, view, metric, eased);
+    container.dataset.motionPhase = METRIC_MOTION_PHASE.FIXMETRY;
+    if (p < 1) requestAnimationFrame(tick);
+    else finishMetricMotion(container, view, metric, token);
+  };
+  requestAnimationFrame(tick);
+}
+
+function animateMetricSelection(metric, options = {}) {
+  if (!currentAnalysis || !metric) return;
+
+  const token = ++metricMotionToken;
+  const container = options.container || document.getElementById("result-visual");
+  if (!container) return;
+
+  const view = getActiveView(currentAnalysis) || {};
+  container.dataset.motionPhase = METRIC_MOTION_PHASE.PHASE;
+  container.classList.remove("fm-motion-active", "fm-motion-fixmetry");
+  void container.offsetWidth;
+  container.classList.add("fm-motion-active");
+
+  // Reduced motion: skip decorative animation and show the real geometry immediately.
+  if (prefersReducedMotion()) {
+    drawMetricGeometry(container, view, metric, 1);
+    clearMotionCanvas(container);
+    container.dataset.motionPhase = "";
+    container.classList.remove("fm-motion-active", "fm-motion-fixmetry");
+    return;
+  }
+
+  // phase: brief visual reset/focus.
+  const phaseStart = performance.now();
+  const phaseDuration = 220;
+  const phaseTick = now => {
+    if (token !== metricMotionToken) return;
+    const p = Math.min(1, (now - phaseStart) / phaseDuration);
+    container.style.setProperty("--fm-motion-phase", p.toFixed(3));
+    if (p < 1) {
+      requestAnimationFrame(phaseTick);
+      return;
+    }
+
+    // metric: draw the real selected measurement using the real MediaPipe landmarks.
+    container.dataset.motionPhase = METRIC_MOTION_PHASE.METRIC;
+    const lineStart = performance.now();
+    const lineDuration = 620;
+
+    const lineTick = now2 => {
+      if (token !== metricMotionToken) return;
+      const q = Math.min(1, (now2 - lineStart) / lineDuration);
+      const eased = 1 - Math.pow(1 - q, 2);
+      drawMetricGeometry(container, view, metric, eased);
+      if (q < 1) {
+        requestAnimationFrame(lineTick);
+        return;
+      }
+
+      // random geometry: decorative transition only.
+      container.dataset.motionPhase = METRIC_MOTION_PHASE.RANDOM_GEOMETRY;
+      const seed = String(metric.key || "")
+        .split("")
+        .reduce((n, c) => n + c.charCodeAt(0), 17);
+      const randomStart = performance.now();
+      const randomDuration = 360;
+
+      const randomTick = now3 => {
+        if (token !== metricMotionToken) return;
+        const r = Math.min(1, (now3 - randomStart) / randomDuration);
+        drawRandomGeometryPhase(container, r, seed);
+        if (r < 1) {
+          requestAnimationFrame(randomTick);
+          return;
+        }
+
+        // fixmetry: return to the actual, fixed geometry.
+        animateFixmetry(container, view, metric, token);
+      };
+      requestAnimationFrame(randomTick);
+    };
+    requestAnimationFrame(lineTick);
+  };
+
+  requestAnimationFrame(phaseTick);
+}
+
+function animateMetricCards() {
+  if (!metricsContent) return;
+  const cards = $$(".scale-card", metricsContent);
+  cards.forEach((card, index) => {
+    card.style.setProperty("--metric-delay", `${Math.min(index, 24) * 38}ms`);
+    card.classList.add("fm-metric-card-enter");
+
+    const fill = $(".metric-scale__fill", card);
+    if (fill) {
+      const target = fill.style.width || "0%";
+      fill.style.setProperty("--metric-target", target);
+      fill.style.width = prefersReducedMotion() ? target : "0%";
+      if (!prefersReducedMotion()) {
+        window.setTimeout(() => {
+          fill.style.width = target;
+        }, 180 + Math.min(index, 24) * 38);
+      }
+    }
+  });
+}
+
+function animateFixmetryAlignment(result) {
+  const container = analysisFrame;
+  if (!container || !result?.alignment?.front?.available) return;
+
+  const token = ++metricMotionToken;
+  const view = getActiveView(result) || {};
+
+  if (prefersReducedMotion()) {
+    clearMotionCanvas(container);
+    drawFaceLandmarkNetwork(landmarkCanvas, view, null, 1);
+    container.dataset.motionPhase = "";
+    return;
+  }
+
+  const start = performance.now();
+  const duration = 680;
+  container.dataset.motionPhase = METRIC_MOTION_PHASE.FIXMETRY;
+  container.classList.add("fm-motion-active", "fm-motion-fixmetry");
+
+  const tick = now => {
+    if (token !== metricMotionToken) return;
+    const p = Math.min(1, (now - start) / duration);
+    const eased = 1 - Math.pow(1 - p, 3);
+    clearMotionCanvas(container);
+    drawFaceLandmarkNetwork(landmarkCanvas, view, null, eased);
+    if (p < 1) requestAnimationFrame(tick);
+    else {
+      container.classList.remove("fm-motion-active", "fm-motion-fixmetry");
+      container.dataset.motionPhase = "";
+    }
   };
   requestAnimationFrame(tick);
 }
@@ -1371,6 +1835,24 @@ async function startAnalysis(file, profileFile = null) {
     const result =
       normalizeClientResult(raw);
 
+    // Replace approximate Gemini geometry with dense client landmarks before
+    // alignment and metric rendering. Gemini remains the source of semantic
+    // analysis; the detector is the source of coordinates.
+    try {
+      const dense = await detectDenseFrontLandmarks();
+      mergeClientFrontLandmarks(result, dense);
+    } catch (error) {
+      console.warn("FaceMetric: landmark merge skipped.", error);
+    }
+
+    // Recalculate alignment from the final geometric landmarks so the image,
+    // canvas and downstream measurements all share the same coordinate frame.
+    result.alignment = normalizeAlignmentSet(
+      result.alignment,
+      result.views?.front?.landmarks || result.landmarks || {},
+      result.views?.profile?.landmarks || {}
+    );
+
     if (
       result.face_count <= 0 ||
       result.score === null
@@ -1510,6 +1992,18 @@ async function analyzePhoto(file, signal, profileFile = null) {
     file.name || "front.jpg"
   );
 
+  // Detect precise front landmarks before the server analysis so the Worker
+  // can use the same coordinates when producing geometry metrics.
+  let denseLandmarks = lastClientLandmarks;
+  try {
+    denseLandmarks = await detectDenseFrontLandmarks();
+  } catch (error) {
+    console.warn("FaceMetric: pre-analysis landmark detection skipped.", error);
+  }
+  if (denseLandmarks) {
+    formData.append("client_landmarks", JSON.stringify(denseLandmarks));
+  }
+
   if (profileFile) {
     formData.append(
       "profile",
@@ -1518,8 +2012,13 @@ async function analyzePhoto(file, signal, profileFile = null) {
     );
   }
 
-  formData.append("gender", selectedGender === "female" ? "female" : "male");
-  formData.append("adult_confirmed", adultConfirmed ? "true" : "false");
+  // Classification state is read only from the declared frontend state.
+  // There is intentionally no standalone `gender` variable here.
+  const requestGender = selectedGender === "female" ? "female" : "male";
+  const requestAdultConfirmed = adultConfirmed === true;
+
+  formData.append("gender", requestGender);
+  formData.append("adult_confirmed", requestAdultConfirmed ? "true" : "false");
 
   const userGeminiKey = getGeminiApiKey();
 
@@ -2551,7 +3050,10 @@ function applyAnalysisAlignment(result) {
   }
 
   requestAnimationFrame(() => {
-    applyImageAlignment(analysisImage, alignment, analysisFrame);
+    applySameAlignmentTransform(analysisImage, alignment, analysisFrame);
+    applySameAlignmentTransform(landmarkCanvas, alignment, analysisFrame);
+    ensureMotionCanvas(analysisFrame);
+    animateFixmetryAlignment(currentAnalysis);
     setTimeout(() => setAlignmentStatus(alignment, "done"), 450);
   });
 }
@@ -2608,6 +3110,11 @@ function renderResult(result) {
   requestAnimationFrame(() => drawResultMetricOverlay(activeMetric));
 
   injectStageTwoStyles();
+  animateMetricCards();
+  ensureMotionCanvas($("#result-visual"));
+  if (activeMetric) {
+    requestAnimationFrame(() => animateMetricSelection(activeMetric));
+  }
 }
 
 
@@ -2722,7 +3229,12 @@ function ensureResultFace(result) {
     image.src = source;
     const alignment = result?.alignment?.[view?.type === "profile" ? "profile" : "front"];
     if (alignment?.available) {
-      requestAnimationFrame(() => applyImageAlignment(image, alignment, visual));
+      requestAnimationFrame(() => {
+        applySameAlignmentTransform(image, alignment, visual);
+        const resultCanvas = $("#result-landmark-canvas", visual);
+        applySameAlignmentTransform(resultCanvas, alignment, visual);
+        ensureMotionCanvas(visual);
+      });
     }
   }
 
@@ -4219,6 +4731,8 @@ function drawResultMetricOverlay(metric = null) {
   if (!canvas || !visual || !currentAnalysis) return;
   const view = getActiveView(currentAnalysis) || {};
   drawFaceLandmarkNetwork(canvas, view, metric, 1);
+  const alignment = currentAnalysis?.alignment?.[view?.type === "profile" ? "profile" : "front"];
+  if (alignment?.available) applySameAlignmentTransform(canvas, alignment, visual);
 }
 
 function selectMetric(
@@ -4243,7 +4757,7 @@ function selectMetric(
     renderMetricInspector(
       currentAnalysis
     );
-    drawMetricOverlay(activeMetric);
+    animateMetricSelection(activeMetric);
   }
 
   const inspector = $("#metric-inspector");
@@ -4950,12 +5464,6 @@ function startNewAnalysis() {
   analysisRequestId++;
 
   cancelActiveAnalysis();
-
-  clearClassificationSettings();
-  selectedGender = "male";
-  adultConfirmed = false;
-  if (genderSelect) genderSelect.value = "male";
-  if (adultConfirm) adultConfirm.checked = false;
 
   selectedFile = null;
   selectedProfileFile = null;
@@ -5877,6 +6385,66 @@ function injectStageTwoStyles() {
       background: rgba(255,70,70,.1);
     }
 
+
+    .facemetric-motion-canvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      z-index: 5;
+      mix-blend-mode: screen;
+      opacity: 0;
+      transition: opacity .18s ease;
+    }
+
+    #result-visual,
+    #analysis-frame {
+      position: relative;
+      overflow: hidden;
+    }
+
+    #result-visual.fm-motion-active .facemetric-motion-canvas,
+    #analysis-frame.fm-motion-active .facemetric-motion-canvas {
+      opacity: 1;
+    }
+
+    #result-visual.fm-motion-fixmetry .result-landmark-canvas,
+    #analysis-frame.fm-motion-fixmetry #landmark-canvas {
+      filter: drop-shadow(0 0 8px rgba(117,169,255,.35));
+    }
+
+    .fm-metric-card-enter {
+      opacity: 0;
+      transform: translateY(12px) scale(.985);
+      animation: facemetricMetricCardIn .48s cubic-bezier(.2,.75,.2,1) forwards;
+      animation-delay: var(--metric-delay, 0ms);
+    }
+
+    .scale-card .metric-scale__fill {
+      transition: width .72s cubic-bezier(.2,.75,.2,1);
+    }
+
+    .fm-motion-fixmetry .metric-inspector__zone {
+      animation: facemetricFixmetryPulse .72s ease both;
+    }
+
+    @keyframes facemetricMetricCardIn {
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+
+    @keyframes facemetricFixmetryPulse {
+      0% { box-shadow: 0 0 0 0 rgba(117,169,255,0); transform: translate(-50%,-50%) scale(.78); }
+      55% { box-shadow: 0 0 0 12px rgba(117,169,255,.13), 0 0 34px rgba(117,169,255,.3); transform: translate(-50%,-50%) scale(1.08); }
+      100% { box-shadow: 0 0 0 6px rgba(255,255,255,.04), 0 0 28px rgba(255,255,255,.12); transform: translate(-50%,-50%) scale(1); }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .fm-metric-card-enter { animation: none; opacity: 1; transform: none; }
+      .scale-card .metric-scale__fill { transition: none; }
+      .facemetric-motion-canvas { display: none; }
+    }
+
     .scale-card {
       cursor: pointer;
       transition:
@@ -6202,6 +6770,7 @@ function injectStageTwoStyles() {
 ============================================================ */
 
 function initClassificationSettings() {
+  // Restore saved classification settings once, after all lexical declarations exist.
   const saved = getClassificationSettings();
 
   if (saved) {
