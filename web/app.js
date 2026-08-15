@@ -2,7 +2,7 @@
 // FACE METRIC APP - UNIFIED FRONTEND v2026.08.15-gender-modal-fix
 // ============================================================
 
-window.__FACEMETRIC_APP_VERSION__ = "2026-08-15-final-buttons-classification-fix-v1";
+window.__FACEMETRIC_APP_VERSION__ = "2026-08-15-final-ux-buttons-fix-v3";
 
 
 // ============================================================
@@ -491,6 +491,7 @@ let selectedProfileObjectUrl = null;
 // Classification settings. Geometric measurements remain independent.
 let selectedGender = "male";
 let adultConfirmed = false;
+let classificationConfirmedForCurrentUpload = false;
 
 // Expose read-only diagnostics for debugging the deployed frontend.
 window.FaceMetricClassification = {
@@ -6456,6 +6457,25 @@ function init() {
   activateDefaultResultTab();
 
   injectStageTwoStyles();
+
+  // Defensive UX reset: a hidden modal must never intercept page clicks.
+  const apiKeyModal = document.getElementById("apiKeyModal");
+  if (apiKeyModal && getGeminiApiKey()) {
+    apiKeyModal.hidden = true;
+    apiKeyModal.classList.remove("show");
+    apiKeyModal.style.display = "none";
+    apiKeyModal.style.pointerEvents = "none";
+    apiKeyModal.setAttribute("aria-hidden", "true");
+  }
+
+  const classificationModal = document.getElementById("classificationModal");
+  if (classificationModal) {
+    classificationModal.hidden = true;
+    classificationModal.classList.remove("show");
+    classificationModal.style.display = "none";
+    classificationModal.style.pointerEvents = "none";
+    classificationModal.setAttribute("aria-hidden", "true");
+  }
 
   showScreen("home");
 
