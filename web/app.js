@@ -245,7 +245,6 @@ function closeGeminiKeyModal() {
   modal.classList.remove("show");
   modal.hidden = true;
   modal.setAttribute("aria-hidden", "true");
-  maybeOpenClassificationModal();
 }
 
 function initGeminiKeyModal() {
