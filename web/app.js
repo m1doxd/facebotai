@@ -1,4 +1,7 @@
 
+// FaceMetric build: 2026-08-15-geometry-landmark-classification-v1
+// Classification modal opens after each new photo; analysis remains manual.
+
 // ============================================================
 // GEMINI BYOK
 // ============================================================
@@ -809,6 +812,15 @@ function handleFileSelected(file) {
 
   cancelActiveAnalysis();
   analysisRequestId++;
+
+  // A newly uploaded photo always requires fresh classification.
+  // Do not reuse the previous photo's gender / 18+ confirmation.
+  clearClassificationSettings();
+  selectedGender = "male";
+  adultConfirmed = false;
+  if (genderSelect) genderSelect.value = "male";
+  if (adultConfirm) adultConfirm.checked = false;
+
   selectedFile = file;
 
   revokeSelectedObjectUrl();
@@ -829,15 +841,15 @@ function handleFileSelected(file) {
 
   setAnalysisState("ГОТОВО К АНАЛИЗУ");
   showProfileUploadControl();
-
-  // Classification is requested only after the frontal photo is selected.
-  // It must not start the analysis; the user can add a profile first.
   updateAnalysisButtonState();
-  if (!getClassificationSettings()) {
-    window.setTimeout(() => openClassificationModal({ focus: true }), 120);
-  }
 
-  showToast("Анфас загружен. При желании добавь профиль, затем подтверди пол/18+ и нажми «Начать анализ».");
+  // Ask for gender and 18+ only after the photo is loaded.
+  // Confirmation closes the modal but NEVER starts analysis.
+  window.setTimeout(() => {
+    openClassificationModal({ focus: true });
+  }, 120);
+
+  showToast("Анфас загружен. Укажи пол и подтверди 18+, затем при желании добавь профиль.");
 }
 
 function handleProfileFileSelected(file) {
@@ -4938,6 +4950,12 @@ function startNewAnalysis() {
   analysisRequestId++;
 
   cancelActiveAnalysis();
+
+  clearClassificationSettings();
+  selectedGender = "male";
+  adultConfirmed = false;
+  if (genderSelect) genderSelect.value = "male";
+  if (adultConfirm) adultConfirm.checked = false;
 
   selectedFile = null;
   selectedProfileFile = null;
