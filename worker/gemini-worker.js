@@ -10,8 +10,10 @@ const ALLOWED_TYPES = new Set([
 
 const DEFAULT_MODEL = "gemini-3.6-flash";
 
-// Deployment marker: 2026-08-13-byok-profile-v1
-const WORKER_BUILD = "2026-08-15-alignment-geometry-v2";
+// Deployment marker: 2026-08-13-cors-fix-v2
+// This intentionally changes the Worker source so Git/Cloudflare
+// detects a new deployment.
+const WORKER_BUILD = "2026-08-13-cors-fix-v2";
 
 const SCORE_MIN = 0;
 const SCORE_MAX = 10;
@@ -41,24 +43,6 @@ export default {
         build: WORKER_BUILD,
         cors_headers: "Content-Type,Accept,X-Gemini-Key"
       });
-    }
-
-    // ========================================================
-    // VALIDATE USER GEMINI KEY
-    // ========================================================
-
-    if (url.pathname === "/api/validate-key") {
-      if (request.method !== "GET" && request.method !== "POST") {
-        return json(
-          {
-            success: false,
-            detail: "Method not allowed."
-          },
-          405
-        );
-      }
-
-      return await validateGeminiKey(request, env);
     }
 
     // ========================================================
@@ -112,117 +96,6 @@ export default {
   }
 };
 
-
-// ============================================================
-// VALIDATE USER GEMINI KEY
-// ============================================================
-
-async function validateGeminiKey(request, env) {
-  const apiKey =
-    request.headers.get("X-Gemini-Key")?.trim() || "";
-
-  if (!apiKey) {
-    return json(
-      {
-        success: false,
-        code: "GEMINI_KEY_REQUIRED",
-        detail: "Gemini API key is required."
-      },
-      400
-    );
-  }
-
-  const endpoint =
-    "https://generativelanguage.googleapis.com/v1beta/models";
-
-  let response;
-
-  try {
-    response = await fetch(endpoint, {
-      method: "GET",
-      headers: {
-        "x-goog-api-key": apiKey
-      }
-    });
-  } catch (error) {
-    console.error("GEMINI KEY VALIDATION NETWORK ERROR:", error);
-
-    return json(
-      {
-        success: false,
-        code: "GEMINI_UNAVAILABLE",
-        detail: "Не удалось подключиться к Gemini для проверки ключа."
-      },
-      502
-    );
-  }
-
-  let data = null;
-  const raw = await response.text();
-
-  if (raw.trim()) {
-    try {
-      data = JSON.parse(raw);
-    } catch {
-      data = null;
-    }
-  }
-
-  if (response.ok) {
-    return json({
-      success: true,
-      code: "GEMINI_KEY_VALID",
-      model: env.GEMINI_MODEL || DEFAULT_MODEL
-    });
-  }
-
-  const message =
-    data?.error?.message ||
-    `Gemini key validation failed (HTTP ${response.status}).`;
-
-  const lower = message.toLowerCase();
-
-  if (response.status === 429) {
-    return json(
-      {
-        success: false,
-        code: "GEMINI_QUOTA_EXCEEDED",
-        detail: "Лимит Gemini API исчерпан. Используйте другой ключ или попробуйте позже.",
-        gemini_status: 429
-      },
-      429
-    );
-  }
-
-  if (
-    response.status === 401 ||
-    response.status === 403 ||
-    lower.includes("api key") &&
-      (lower.includes("invalid") || lower.includes("not valid") || lower.includes("expired"))
-  ) {
-    return json(
-      {
-        success: false,
-        code: "GEMINI_INVALID_KEY",
-        detail: "Gemini API ключ недействителен или не имеет доступа к Gemini API.",
-        gemini_status: response.status
-      },
-      401
-    );
-  }
-
-  return json(
-    {
-      success: false,
-      code: "GEMINI_API_ERROR",
-      detail: message,
-      gemini_status: response.status
-    },
-    response.status >= 400 && response.status < 600
-      ? response.status
-      : 502
-  );
-}
 
 // ============================================================
 // MAIN ANALYSIS
@@ -297,7 +170,6 @@ async function analyze(request, env) {
   }
 
   const file = formData.get("file");
-  const profileFile = formData.get("profile");
 
   if (
     !file ||
@@ -348,34 +220,11 @@ async function analyze(request, env) {
     );
   }
 
-  if (profileFile && typeof profileFile.arrayBuffer === "function") {
-    const profileMimeType = profileFile.type || "";
-    if (!ALLOWED_TYPES.has(profileMimeType)) {
-      return json(
-        { success: false, detail: "Only JPG, PNG and WEBP profile images are supported." },
-        400
-      );
-    }
-    if (profileFile.size <= 0) {
-      return json(
-        { success: false, detail: "The profile image file is empty." },
-        400
-      );
-    }
-    if (profileFile.size > MAX_FILE_SIZE) {
-      return json(
-        { success: false, detail: "Profile image is too large. Maximum size is 15 MB." },
-        413
-      );
-    }
-  }
-
   // ========================================================
   // IMAGE -> BASE64
   // ========================================================
 
   let base64;
-  let profileBase64 = null;
 
   try {
     const bytes =
@@ -384,11 +233,6 @@ async function analyze(request, env) {
       );
 
     base64 = uint8ToBase64(bytes);
-
-    if (profileFile && typeof profileFile.arrayBuffer === "function") {
-      const profileBytes = new Uint8Array(await profileFile.arrayBuffer());
-      profileBase64 = uint8ToBase64(profileBytes);
-    }
   } catch (error) {
     console.error(
       "IMAGE READ ERROR:",
@@ -413,91 +257,568 @@ async function analyze(request, env) {
   // ========================================================
 
   const prompt = `
-You are the landmark-detection engine for FaceBot.
+You are the visual facial-analysis engine for FaceBot.
 
-Your task is NOT to invent beauty scores. Your only job is to locate
-visible facial landmarks and describe pose/quality. FaceBot will calculate
-all numeric metrics and scores itself from the returned coordinates.
+Your job is to analyze the visible facial geometry in the supplied
+photograph and return structured JSON.
+
+IMPORTANT:
+
+This is a visual geometry analysis system.
 
 Do NOT identify the person.
-Do NOT infer race, ethnicity, health, personality, intelligence, sexuality,
-religion, politics, or any other sensitive personal attribute.
-Do not invent measurements, scores, ideal ranges, or beauty ratings.
-Do not fill a field just because it exists. If a point is not reliably visible,
-omit it or set its confidence low.
 
-COORDINATES
-Return normalized coordinates:
-x=0..1 from left to right
-y=0..1 from top to bottom.
-Coordinates are approximate visual landmarks, not medical-grade measurements.
+Do NOT infer:
+- race,
+- ethnicity,
+- health,
+- medical conditions,
+- personality,
+- intelligence,
+- sexuality,
+- criminality,
+- political affiliation,
+- religion,
+- or other sensitive personal attributes.
 
-IMAGE 1 is the frontal/primary image.
-IMAGE 2, when supplied, is a separate optional profile image of the same person.
-Analyze each image independently. Never copy coordinates or values from image 1
-into image 2.
+You may evaluate visible facial appearance and geometry.
 
-FRONTAL LANDMARKS (use these names when visible):
-left_eye_inner, left_eye_outer, right_eye_inner, right_eye_outer,
-left_brow_inner, left_brow_outer, right_brow_inner, right_brow_outer,
-nose_bridge, nose_tip, nose_left, nose_right, mouth_left, mouth_right,
-upper_lip_center, lower_lip_center, chin, left_jaw, right_jaw,
-left_cheekbone, right_cheekbone, forehead_center.
+Do not claim to have used MediaPipe, OpenCV, ExtraTrees,
+or another tool unless it was actually provided to you.
 
-PROFILE LANDMARKS (only for IMAGE 2):
-profile_forehead, profile_glabella, profile_nasion, profile_pronasale,
-profile_subnasale, profile_labiale_superius, profile_labiale_inferius,
-profile_pogonion, profile_menton, profile_gonion, profile_chin_neck,
-profile_nose_tip.
+Do not invent exact millimeter measurements.
 
-For every point return {x,y,confidence}. Confidence is 0..1.
+Do not invent landmarks that cannot reasonably be located.
 
-POSE
-For each image return:
-- view type: frontal, near_frontal, profile, near_profile, three_quarter, unknown
-- confidence
-- image_quality
-- frontal_suitability / profile_suitability as applicable
-- roll angle and correction angle in degrees
+If the image quality is poor, use lower confidence.
 
-QUALITY RULES
-A point hidden by hair, hand, glasses glare, heavy shadow, cropping, or extreme
-pose should be omitted or have low confidence.
-If no usable face exists, return face_count=0.
+If the face is not usable, return:
+face_count = 0
+score = null
 
-OUTPUT ONLY VALID JSON. Treat IMAGE 1 and IMAGE 2 as completely independent observations.
-Return exactly this structure:
+============================================================
+VIEW / POSE ANALYSIS
+============================================================
+
+First determine what kind of image this is.
+
+Possible view values:
+
+- "frontal"
+- "near_frontal"
+- "profile"
+- "near_profile"
+- "three_quarter"
+- "unknown"
+
+A frontal image is the preferred primary analysis view.
+
+A profile image is optional.
+
+A three-quarter image must NOT be treated as a perfect frontal
+or perfect profile image.
+
+Estimate visible head roll.
+
+The roll angle means the clockwise/counter-clockwise rotation
+of the face in the image.
+
+Use:
+
+positive roll = face tilted clockwise
+negative roll = face tilted counter-clockwise
+
+The frontend will later use this value to rotate the image
+and create an aligned analysis view.
+
+DO NOT generate or modify the image yourself.
+
+Return only the estimated correction angle.
+
+============================================================
+FACE USABILITY
+============================================================
+
+Estimate:
+
+- face detection confidence
+- frontal suitability
+- profile suitability
+- image quality
+- pose confidence
+
+Use values between 0 and 1.
+
+A face can be detected but still be unsuitable for accurate
+measurement.
+
+For example:
+
+face_count = 1
+face_quality = 0.91
+frontal_suitability = 0.95
+
+is good.
+
+============================================================
+LANDMARK REPRESENTATION
+============================================================
+
+When possible, return approximate normalized landmark positions.
+
+Coordinates must use:
+
+x = 0.0 to 1.0
+y = 0.0 to 1.0
+
+Origin:
+
+top-left = (0,0)
+
+bottom-right = (1,1)
+
+Only return landmarks that are visibly identifiable.
+
+The purpose of these landmarks is future frontend visualization.
+
+Do not pretend these coordinates are medical-grade measurements.
+
+Useful landmark names may include:
+
+- left_eye_inner
+- left_eye_outer
+- right_eye_inner
+- right_eye_outer
+- left_brow_inner
+- left_brow_outer
+- right_brow_inner
+- right_brow_outer
+- nose_bridge
+- nose_tip
+- nose_left
+- nose_right
+- mouth_left
+- mouth_right
+- upper_lip_center
+- lower_lip_center
+- chin
+- left_jaw
+- right_jaw
+- left_cheekbone
+- right_cheekbone
+- forehead_center
+
+============================================================
+METRIC SYSTEM
+============================================================
+
+Every numeric metric score must be between 0 and 10.
+
+Do not give every metric a high score.
+
+Use the following conceptual groups.
+
+------------------------------------------------------------
+FACE GEOMETRY
+------------------------------------------------------------
+
+- face_aspect_ratio
+- facial_width_height_balance
+- midface_proportion
+- lower_face_proportion
+- upper_face_proportion
+- facial_thirds_balance
+
+------------------------------------------------------------
+SYMMETRY
+------------------------------------------------------------
+
+- overall_symmetry
+- left_right_balance
+- eye_alignment
+- brow_symmetry
+- mouth_symmetry
+- jaw_symmetry
+
+------------------------------------------------------------
+EYES
+------------------------------------------------------------
+
+- eye_spacing
+- eye_aspect_ratio
+- eye_alignment
+- eye_area_balance
+- eye_shape_harmony
+
+------------------------------------------------------------
+EYEBROWS
+------------------------------------------------------------
+
+- brow_position
+- brow_shape
+- brow_length
+- brow_symmetry
+- brow_eye_relationship
+
+------------------------------------------------------------
+NOSE
+------------------------------------------------------------
+
+- nose_width
+- nose_length
+- nose_proportion
+- nose_face_relationship
+- nose_symmetry
+
+------------------------------------------------------------
+JAW
+------------------------------------------------------------
+
+- jaw_width
+- jaw_definition
+- jaw_shape
+- jaw_symmetry
+- lower_face_definition
+
+------------------------------------------------------------
+CHIN
+------------------------------------------------------------
+
+- chin_prominence
+- chin_proportion
+- chin_width
+- chin_face_relationship
+
+------------------------------------------------------------
+CHEEKS / CHEEKBONES
+------------------------------------------------------------
+
+- cheek_prominence
+- cheek_definition
+- cheek_symmetry
+- cheek_jaw_relationship
+
+------------------------------------------------------------
+LIPS / MOUTH
+------------------------------------------------------------
+
+- mouth_width
+- lip_proportion
+- mouth_symmetry
+- lip_shape
+- mouth_face_relationship
+
+------------------------------------------------------------
+MIDFACE
+------------------------------------------------------------
+
+- midface_balance
+- midface_length
+- midface_eye_relationship
+- midface_lower_face_relationship
+
+============================================================
+ANGULARITY
+============================================================
+
+Estimate visible structural definition only.
+
+Return:
+
+- angularity
+- facial_definition
+- jaw_definition
+- cheek_definition
+- chin_definition
+
+Do not interpret these as biological or medical characteristics.
+
+============================================================
+VISUAL DIMORPHISM
+============================================================
+
+This is an optional visual-appearance category.
+
+Only evaluate visible facial morphology.
+
+Do NOT infer biological sex with certainty.
+
+Use:
+
+- dimorphism
+- jaw_dimorphism
+- brow_dimorphism
+- cheek_dimorphism
+- chin_dimorphism
+- facial_width_dimorphism
+
+If the image is insufficient for this category,
+return lower confidence or null.
+
+============================================================
+HARMONY
+============================================================
+
+Return separate scores for:
+
+- overall_harmony
+- frontal_harmony
+- profile_harmony
+- proportions
+- symmetry_harmony
+- feature_harmony
+- facial_definition
+- angularity
+
+Profile harmony MUST be null if no useful profile view exists.
+
+============================================================
+OVERALL SCORE
+============================================================
+
+Return one overall visual harmony score from 0 to 10.
+
+This score should reflect the visible facial geometry
+and the quality of the usable image.
+
+Do not make the score artificially high.
+
+STRICT CALIBRATION:
+- Most ordinary faces must fall around 4.5-6.5.
+- Scores above 7 are uncommon and require clearly above-average visible harmony.
+- Scores above 8 are rare.
+- Scores 9+ are exceptional and should almost never occur.
+- Never increase scores to be polite or avoid criticism.
+
+The score is an appearance-analysis score, not a measure
+of human worth.
+
+============================================================
+SCORE DISTRIBUTION CALIBRATION
+
+Use realistic population distribution:
+0-2.99: very uncommon / severe visible imbalance
+3-4.49: below average
+4.5-5.99: average range
+6-6.99: above average
+7-7.99: strong features
+8-8.99: rare
+9+: exceptional
+
+============================================================
+COMMUNITY-STYLE TIER
+============================================================
+
+Return a community-style label based on the score.
+
+Use this fixed application mapping:
+
+1.0 - 1.99:
+"Sub 3"
+
+2.0 - 3.99:
+"Sub 5"
+
+4.0 - 4.99:
+"LTN"
+
+5.0 - 5.49:
+"MTN"
+
+5.5 - 6.49:
+"HTN"
+
+6.5 - 7.49:
+"Chadlite"
+
+7.5 - 8.99:
+"Chad"
+
+9.0 - 9.49:
+"Adamlite"
+
+9.5 - 9.99:
+"Near True Adam"
+
+10.0:
+"True Adam"
+
+Also return:
+
+- tier
+- tier_level
+
+tier_level should be one of:
+
+"low"
+"mid"
+"high"
+"base"
+
+For example:
+
+6.1 -> HTN / mid
+6.4 -> HTN / high
+7.0 -> Chadlite / mid
+8.2 -> Chad / mid
+
+Do NOT use these labels for people outside the score
+calculation. They are only the application's display labels.
+
+============================================================
+METRIC VISUALIZATION
+============================================================
+
+For important metrics, return a visualization object.
+
+Example:
+
+{
+  "value": 7.2,
+  "score": 8.1,
+  "status": "good",
+  "ideal_min": 7.0,
+  "ideal_max": 9.0,
+  "unit": "ratio",
+  "landmarks": [
+    "left_eye_inner",
+    "right_eye_inner"
+  ]
+}
+
+status must be one of:
+
+"good"
+"average"
+"poor"
+"uncertain"
+
+If a reliable ideal range cannot be established from the
+visible image, use:
+
+ideal_min = null
+ideal_max = null
+status = "uncertain"
+
+Do not invent scientific reference ranges.
+
+The frontend will later use these fields to visually explain
+which part of the face the metric represents.
+
+============================================================
+OUTPUT FORMAT
+============================================================
+
+Return ONLY valid JSON.
+
+Return exactly this high-level structure:
+
 {
   "face_count": 1,
-  "front_view": {
+
+  "view": {
     "type": "frontal",
     "confidence": 0.0,
     "frontal_suitability": 0.0,
-    "image_quality": 0.0,
-    "roll": {"angle_degrees": 0.0,"correction_degrees": 0.0,"confidence": 0.0}
-  },
-  "profile_view": {
-    "type": "profile",
-    "confidence": 0.0,
     "profile_suitability": 0.0,
     "image_quality": 0.0,
-    "roll": {"angle_degrees": 0.0,"correction_degrees": 0.0,"confidence": 0.0}
+
+    "roll": {
+      "angle_degrees": 0.0,
+      "correction_degrees": 0.0,
+      "confidence": 0.0
+    }
   },
+
   "frontal": {
     "available": true,
     "confidence": 0.0,
-    "landmarks": {}
+    "harmony": 0.0
   },
+
   "profile": {
     "available": false,
     "confidence": 0.0,
-    "landmarks": {}
+    "harmony": null
+  },
+
+  "landmarks": {
+    "left_eye_inner": {
+      "x": 0.0,
+      "y": 0.0,
+      "confidence": 0.0
+    }
+  },
+
+  "score": 0.0,
+
+  "percent": 0,
+
+  "tier": {
+    "name": "HTN",
+    "level": "mid"
+  },
+
+  "sections": {
+    "harmony": 0.0,
+    "dimorphism": 0.0,
+    "features": 0.0,
+    "angularity": 0.0,
+    "symmetry": 0.0,
+    "proportions": 0.0
+  },
+
+  "metrics": {
+    "face_geometry": {},
+    "symmetry": {},
+    "eyes": {},
+    "eyebrows": {},
+    "nose": {},
+    "jaw": {},
+    "chin": {},
+    "cheeks": {},
+    "lips_mouth": {},
+    "midface": {},
+    "angularity": {},
+    "dimorphism": {}
+  },
+
+  "production_features": {
+    "overall_harmony": 0.0,
+    "frontal_harmony": 0.0,
+    "profile_harmony": null,
+    "facial_definition": 0.0,
+    "angularity": 0.0,
+    "proportions": 0.0,
+    "symmetry": 0.0,
+    "confidence": 0.0,
+    "dimorphism": 0.0
   }
 }
 
-If IMAGE 2 is absent, profile.available MUST be false and profile.landmarks MUST be {}.
-If IMAGE 2 is present but unusable, profile.available=false. Never fabricate profile data.
-`
+IMPORTANT:
+
+If profile is not present:
+
+"profile": {
+  "available": false,
+  "confidence": 0.0,
+  "harmony": null
+}
+
+Do NOT create fake profile measurements.
+
+If the face is unusable:
+
+{
+  "face_count": 0,
+  "score": null
+}
+
+with the remaining fields populated as reasonably as possible.
+
+============================================================
+`;
 
   // ========================================================
   // GEMINI REQUEST
@@ -523,24 +844,6 @@ If IMAGE 2 is present but unusable, profile.available=false. Never fabricate pro
               data: base64
             }
           },
-          {
-            text: profileBase64
-              ? "IMAGE 1 — FRONT / FRONTAL VIEW"
-              : "IMAGE — FRONT / FRONTAL VIEW"
-          },
-          ...(profileBase64
-            ? [
-                {
-                  inline_data: {
-                    mime_type: profileFile.type,
-                    data: profileBase64
-                  }
-                },
-                {
-                  text: "IMAGE 2 — PROFILE VIEW. This is the optional profile photo of the same person."
-                }
-              ]
-            : []),
           {
             text: prompt
           }
@@ -686,32 +989,6 @@ If IMAGE 2 is present but unusable, profile.available=false. Never fabricate pro
       geminiData?.error?.message ||
       `Gemini API error (${geminiResponse.status}).`;
 
-    const lowerMessage = message.toLowerCase();
-
-    let code = "GEMINI_API_ERROR";
-    let detail = message;
-    let status = geminiResponse.status;
-
-    if (geminiResponse.status === 429) {
-      code = "GEMINI_QUOTA_EXCEEDED";
-      detail =
-        "Лимит Gemini API исчерпан. Введите другой Gemini API ключ или попробуйте позже.";
-      status = 429;
-    } else if (
-      geminiResponse.status === 401 ||
-      geminiResponse.status === 403 ||
-      (geminiResponse.status === 400 &&
-        lowerMessage.includes("api key") &&
-        (lowerMessage.includes("invalid") ||
-          lowerMessage.includes("not valid") ||
-          lowerMessage.includes("expired")))
-    ) {
-      code = "GEMINI_INVALID_KEY";
-      detail =
-        "Gemini API ключ недействителен или не имеет доступа к Gemini API.";
-      status = 401;
-    }
-
     console.error(
       "GEMINI API ERROR:",
       JSON.stringify(
@@ -724,11 +1001,9 @@ If IMAGE 2 is present but unusable, profile.available=false. Never fabricate pro
     return json(
       {
         success: false,
-        code,
-        detail,
-        gemini_status: geminiResponse.status
+        detail: message
       },
-      status
+      geminiResponse.status
     );
   }
 
@@ -993,413 +1268,138 @@ function parseJsonResponse(text) {
 // NORMALIZE ANALYSIS
 // ============================================================
 
-function normalizeAnalysis(data, model) {
-  if (!isPlainObject(data)) {
-    throw new Error("Invalid analysis payload.");
+function normalizeAnalysis(
+  data,
+  model
+) {
+  if (
+    !data ||
+    typeof data !== "object" ||
+    Array.isArray(data)
+  ) {
+    throw new Error(
+      "Invalid analysis payload."
+    );
   }
 
-  const faceCount = normalizeInteger(data.face_count, 0, 20);
-  if (faceCount <= 0) {
-    return {
-      success: true,
-      score: null,
-      percent: null,
-      face_count: 0,
-      landmarks_count: 0,
-      detected_features: 0,
-      feature_count: 0,
-      model,
-      analysis_method: "deterministic_geometry_v1",
-      metric_source: "landmark_geometry",
-      reference_note: "Приложение использует фиксированные продуктовые референсные диапазоны; это не медицинская или научная норма.",
-      view: normalizeView(data.front_view || data.view || {}),
-      profile_view: normalizeView(data.profile_view || {}),
-      frontal: { available: false, confidence: 0, harmony: null, landmarks: {}, metrics: {} },
-      profile: { available: false, confidence: 0, harmony: null, landmarks: {}, metrics: {}, landmarks_count: 0 },
-      landmarks: {},
-      tier: getTier(null),
-      sections: emptySections(),
-      metrics: {},
-      production_features: emptyProduction(),
-      generated_at: new Date().toISOString()
-    };
-  }
+  const faceCount =
+    normalizeInteger(
+      data.face_count,
+      0,
+      20
+    );
 
-  const view = normalizeView(data.front_view || data.view || {});
-  const profileView = normalizeView(data.profile_view || {});
-  const frontalRaw = isPlainObject(data.frontal) ? data.frontal : {};
-  const profileRaw = isPlainObject(data.profile) ? data.profile : {};
-  const frontLandmarks = normalizeLandmarks(
-    frontalRaw.landmarks || data.landmarks || {}
-  );
-  const profileLandmarks = normalizeLandmarks(profileRaw.landmarks || {});
+  const score =
+    normalizeNullableScore(
+      data.score
+    );
 
-  const frontQuality = clamp01(
-    averageNumbers([
-      frontalRaw.confidence,
-      view.confidence,
-      view.image_quality,
-      view.frontal_suitability
-    ])
-  );
-  const profileAvailable = Boolean(
-    profileRaw.available && Object.keys(profileLandmarks).length >= 3
-  );
-  const profileQuality = clamp01(
-    averageNumbers([
-      profileRaw.confidence,
-      profileView.confidence,
-      profileView.profile_suitability,
-      profileView.image_quality
-    ])
-  );
+  const view =
+    normalizeView(
+      data.view
+    );
 
-  const frontAlignment = calculateAlignment(frontLandmarks, "front");
-  const normalizedFrontLandmarks = applyAlignmentToLandmarks(frontLandmarks, frontAlignment);
-  const front = buildFrontalGeometry(normalizedFrontLandmarks, frontQuality);
-  const profileAlignment = calculateAlignment(profileLandmarks, "profile");
-  const normalizedProfileLandmarks = applyAlignmentToLandmarks(profileLandmarks, profileAlignment);
-  const profile = profileAvailable
-    ? buildProfileGeometry(normalizedProfileLandmarks, profileQuality)
-    : { available: false, confidence: profileQuality, harmony: null, landmarks: normalizedProfileLandmarks, metrics: {}, landmarks_count: Object.keys(normalizedProfileLandmarks).length || null };
+  const frontal =
+    normalizeViewResult(
+      data.frontal,
+      false
+    );
 
-  const frontScores = metricScores(front.metrics);
-  const profileScores = metricScores(profile.metrics);
-  const frontalHarmony = weightedMean(frontScores, frontQuality);
-  const profileHarmony = profile.available ? weightedMean(profileScores, profileQuality) : null;
+  const profile =
+    normalizeViewResult(
+      data.profile,
+      true
+    );
 
-  const combined = profileHarmony !== null
-    ? weightedMean([
-        { score: frontalHarmony, weight: 0.7 },
-        { score: profileHarmony, weight: 0.3 }
-      ], 1)
-    : frontalHarmony;
+  const landmarks =
+    normalizeLandmarks(
+      data.landmarks
+    );
 
-  const rawScore = combined === null ? null : clampScore(combined);
-  const sections = buildSections(front.metrics, profile.metrics, frontQuality, profileQuality, profile.available);
-  const sectionScores = [sections.features, sections.angularity, sections.symmetry, sections.proportions].filter(Number.isFinite);
-  const conservativeScore = sectionScores.length ? clampScore(average(sectionScores)) : rawScore;
-  const score = rawScore === null ? null : clampScore(Math.min(rawScore, conservativeScore));
-  const production = {
-    overall_harmony: score,
-    frontal_harmony: frontalHarmony,
-    profile_harmony: profileHarmony,
-    facial_definition: sections.features,
-    angularity: sections.angularity,
-    proportions: sections.proportions,
-    symmetry: sections.symmetry,
-    confidence: profile.available ? weightedMean([
-      { score: frontQuality * 10, weight: 0.7 },
-      { score: profileQuality * 10, weight: 0.3 }
-    ], 1) / 10 : frontQuality,
-    dimorphism: null
-  };
+  const sections =
+    normalizeSections(
+      data.sections
+    );
 
-  const metrics = front.metrics;
-  const allLandmarks = normalizedFrontLandmarks;
+  const metrics =
+    normalizeMetrics(
+      data.metrics
+    );
+
+  const production =
+    normalizeProductionFeatures(
+      data.production_features,
+      sections
+    );
+
+  const normalizedScore =
+    score !== null
+      ? score
+      : faceCount > 0
+        ? calculateFallbackOverallScore(
+            sections,
+            production
+          )
+        : null;
+
+  const percent =
+    normalizedScore === null
+      ? null
+      : Math.round(
+          normalizedScore * 10
+        );
+
+  const tier =
+    getTier(
+      normalizedScore
+    );
 
   return {
     success: true,
-    score,
-    percent: score === null ? null : Math.round(score * 10),
-    face_count: faceCount,
-    landmarks_count: Object.keys(allLandmarks).length || null,
-    detected_features: countLeaves(metrics),
-    feature_count: countLeaves(metrics),
+
+    score:
+      normalizedScore,
+
+    percent,
+
+    face_count:
+      faceCount,
+
+    landmarks_count:
+      Object.keys(
+        landmarks
+      ).length || null,
+
+    detected_features:
+      countLeaves(metrics),
+
+    feature_count:
+      countLeaves(production),
+
     model,
-    analysis_method: "deterministic_geometry_v1",
-      metric_source: "landmark_geometry",
-      reference_note: "Приложение использует фиксированные продуктовые референсные диапазоны; это не медицинская или научная норма.",
+
     view,
-    profile_view: profileView,
-    frontal: {
-      available: true,
-      confidence: frontQuality,
-      harmony: frontalHarmony,
-      landmarks: normalizedFrontLandmarks,
-      metrics: front.metrics,
-      landmarks_count: Object.keys(frontLandmarks).length || null
-    },
+
+    frontal,
+
     profile,
-    landmarks: allLandmarks,
-    tier: getTier(score),
+
+    landmarks,
+
+    tier,
+
     sections,
+
     metrics,
-    production_features: production,
-    alignment: { front: frontAlignment, profile: profileAlignment },
-    generated_at: new Date().toISOString()
+
+    production_features:
+      production,
+
+    generated_at:
+      new Date().toISOString()
   };
 }
 
-function emptySections() {
-  return { harmony: null, dimorphism: null, features: null, angularity: null, symmetry: null, proportions: null };
-}
-
-function emptyProduction() {
-  return { overall_harmony: null, frontal_harmony: null, profile_harmony: null, facial_definition: null, angularity: null, proportions: null, symmetry: null, confidence: null, dimorphism: null };
-}
-
-function clamp01(value) {
-  if (value === null || value === undefined || !Number.isFinite(Number(value))) return 0;
-  return Math.max(0, Math.min(1, Number(value)));
-}
-
-function averageNumbers(values) {
-  const nums = values.map(Number).filter(Number.isFinite);
-  return nums.length ? nums.reduce((a,b)=>a+b,0)/nums.length : 0;
-}
-
-function point(landmarks, name) {
-  const p = landmarks[name];
-  return p && Number.isFinite(p.x) && Number.isFinite(p.y) ? p : null;
-}
-
-function dist(a,b) {
-  if (!a || !b) return null;
-  return Math.hypot(a.x-b.x, a.y-b.y);
-}
-
-function angle(a,b,c) {
-  if (!a || !b || !c) return null;
-  const ux=a.x-b.x, uy=a.y-b.y, vx=c.x-b.x, vy=c.y-b.y;
-  const du=Math.hypot(ux,uy), dv=Math.hypot(vx,vy);
-  if (!du || !dv) return null;
-  const cos=Math.max(-1,Math.min(1,(ux*vx+uy*vy)/(du*dv)));
-  return Math.acos(cos)*180/Math.PI;
-}
-
-function scoreRange(value, min, max, tolerance, unit="ratio") {
-  if (value === null || !Number.isFinite(value)) {
-    return metric(null, null, "uncertain", min, max, unit, []);
-  }
-  const center = (min + max) / 2;
-  const half = Math.max((max - min) / 2, 1e-6);
-  const distance = Math.abs(value - center);
-  // Broad reference matching: 10 at center, ~8 at the reference boundary,
-  // then a gradual decline. Never punish a single measurement catastrophically.
-  const normalized = Math.min(1.75, distance / half);
-  const score = clampScore(10 - 2.0 * normalized - Math.max(0, normalized - 1) * 1.5);
-  const outside = value < min || value > max;
-  const far = distance > half + Math.max(tolerance, half * 0.75);
-  const status = far ? "outside_reference" : outside ? "near_reference" : "within_reference";
-  return metric(value, score, status, min, max, unit, []);
-}
-
-function scoreCentered(value, target, tolerance, unit="ratio") {
-  if (value === null || !Number.isFinite(value)) {
-    return metric(null, null, "uncertain", null, null, unit, []);
-  }
-  const d = Math.abs(value - target);
-  const scale = Math.max(tolerance, 1e-6);
-  const normalized = Math.min(1.75, d / scale);
-  const score = clampScore(10 - 2.4 * normalized);
-  const status = normalized <= 0.55 ? "within_reference" : normalized <= 1 ? "near_reference" : "outside_reference";
-  return metric(value, score, status, target - tolerance, target + tolerance, unit, []);
-}
-
-function metric(value,score,status,idealMin,idealMax,unit,landmarks) {
-  return { value: value === null ? null : round(value,4), score: score === null ? null : round(score,1), status, ideal_min: idealMin === null ? null : round(idealMin,4), ideal_max: idealMax === null ? null : round(idealMax,4), unit, landmarks };
-}
-
-function metricWithPoints(m,names) { return {...m, landmarks:names.filter(Boolean)}; }
-function round(v,n=4){ const p=10**n; return Math.round(v*p)/p; }
-
-
-function calculateAlignment(lm, type) {
-  const entries = Object.entries(lm || {}).filter(([, p]) =>
-    p && Number.isFinite(Number(p.x)) && Number.isFinite(Number(p.y))
-  );
-  if (entries.length < 3) {
-    return { available: false, type, roll_degrees: 0, correction_degrees: 0, center_x: 0.5, center_y: 0.5, scale: 1, confidence: 0 };
-  }
-
-  const points = Object.fromEntries(entries);
-  let roll = 0;
-  let correction = 0;
-
-  if (type === "front") {
-    const left = points.left_eye_inner || points.left_eye_outer;
-    const right = points.right_eye_inner || points.right_eye_outer;
-    const eyeMid = left && right
-      ? { x: (left.x + right.x) / 2, y: (left.y + right.y) / 2 }
-      : null;
-
-    if (left && right) {
-      roll = Math.atan2(right.y - left.y, right.x - left.x) * 180 / Math.PI;
-    }
-
-    const nose = points.nose_tip || points.nose_bridge;
-    const mouth = points.lower_lip_center || points.upper_lip_center;
-    const chin = points.chin;
-    const evidence = [
-      eyeMid && nose && nose.y > eyeMid.y,
-      nose && mouth && mouth.y > nose.y,
-      mouth && chin && chin.y > mouth.y
-    ].filter(v => typeof v === "boolean");
-    const normal = evidence.filter(Boolean).length;
-    const reversed = evidence.length - normal;
-    const upsideDown = evidence.length >= 2 && reversed > normal;
-
-    while (roll > 90) roll -= 180;
-    while (roll < -90) roll += 180;
-    correction = -roll + (upsideDown ? 180 : 0);
-  } else {
-    const a = points.profile_glabella || points.profile_nasion || points.profile_forehead;
-    const b = points.profile_pogonion || points.profile_menton || points.profile_chin_neck;
-    if (a && b) {
-      roll = Math.atan2(b.x - a.x, b.y - a.y) * 180 / Math.PI;
-    }
-    while (roll > 90) roll -= 180;
-    while (roll < -90) roll += 180;
-    correction = -roll;
-  }
-
-  while (correction > 180) correction -= 360;
-  while (correction < -180) correction += 360;
-
-  const anchors = type === "front"
-    ? [
-        points.left_cheekbone, points.right_cheekbone,
-        points.left_jaw, points.right_jaw,
-        points.nose_tip, points.chin, points.forehead_center
-      ].filter(Boolean)
-    : [
-        points.profile_forehead, points.profile_nasion,
-        points.profile_pronasale, points.profile_pogonion,
-        points.profile_menton
-      ].filter(Boolean);
-
-  const used = anchors.length >= 3 ? anchors : entries.map(([, p]) => p);
-  const xs = used.map(p => Number(p.x));
-  const ys = used.map(p => Number(p.y));
-  const centerX = (Math.min(...xs) + Math.max(...xs)) / 2;
-  const centerY = (Math.min(...ys) + Math.max(...ys)) / 2;
-  const width = Math.max(Math.max(...xs) - Math.min(...xs), 0.01);
-  const height = Math.max(Math.max(...ys) - Math.min(...ys), 0.01);
-  const targetHeight = type === "front" ? 0.70 : 0.76;
-  const targetWidth = type === "front" ? 0.58 : 0.60;
-  const scale = Math.max(0.82, Math.min(1.30, Math.max(targetHeight / height, targetWidth / width)));
-  const avgConfidence = used.reduce((sum, p) => sum + (Number(p.confidence) || 0), 0) / Math.max(used.length, 1);
-
-  return {
-    available: true,
-    type,
-    roll_degrees: round(roll, 2),
-    correction_degrees: round(correction, 2),
-    center_x: round(centerX, 4),
-    center_y: round(centerY, 4),
-    scale: round(scale, 3),
-    confidence: round(avgConfidence, 3)
-  };
-}
-
-function applyAlignmentToLandmarks(lm, alignment) {
-  if (!alignment?.available) return lm || {};
-  const cx = Number(alignment.center_x ?? 0.5);
-  const cy = Number(alignment.center_y ?? 0.5);
-  const scale = Number(alignment.scale ?? 1) || 1;
-  const angle = Number(alignment.correction_degrees ?? 0) * Math.PI / 180;
-  const cos = Math.cos(angle);
-  const sin = Math.sin(angle);
-  const out = {};
-  for (const [name, point] of Object.entries(lm || {})) {
-    if (!point || !Number.isFinite(Number(point.x)) || !Number.isFinite(Number(point.y))) continue;
-    const sx = (Number(point.x) - cx) * scale;
-    const sy = (Number(point.y) - cy) * scale;
-    out[name] = {
-      x: round(0.5 + sx * cos - sy * sin, 5),
-      y: round(0.5 + sx * sin + sy * cos, 5),
-      confidence: Number.isFinite(Number(point.confidence)) ? Number(point.confidence) : null
-    };
-  }
-  return out;
-}
-
-function buildFrontalGeometry(lm, quality) {
-  const le=point(lm,"left_eye_inner"), leO=point(lm,"left_eye_outer"), re=point(lm,"right_eye_inner"), reO=point(lm,"right_eye_outer");
-  const nb=point(lm,"nose_bridge"), nt=point(lm,"nose_tip"), nl=point(lm,"nose_left"), nr=point(lm,"nose_right");
-  const ml=point(lm,"mouth_left"), mr=point(lm,"mouth_right"), chin=point(lm,"chin"), lc=point(lm,"left_cheekbone"), rc=point(lm,"right_cheekbone"), lj=point(lm,"left_jaw"), rj=point(lm,"right_jaw"), fc=point(lm,"forehead_center"), ul=point(lm,"upper_lip_center"), ll=point(lm,"lower_lip_center");
-  const eyeMid = le&&re ? {x:(le.x+re.x)/2,y:(le.y+re.y)/2} : null;
-  const faceW=dist(lc,rc) ?? dist(lj,rj);
-  const faceH = fc&&chin
-    ? dist(fc,chin)
-    : (eyeMid&&chin ? dist(eyeMid,chin) : null);
-  const metrics={};
-  if (faceW && faceH) metrics.face_geometry={face_aspect_ratio:metricWithPoints(scoreRange(faceW/faceH,0.62,0.82,0.18),["left_cheekbone","right_cheekbone","forehead_center","chin"])};
-  else metrics.face_geometry={};
-  if (faceW) {
-    metrics.symmetry={};
-    if (le&&re&&eyeMid) metrics.symmetry.eye_alignment=metricWithPoints(scoreCentered(Math.abs(le.y-re.y)/faceW,0,0.035),["left_eye_inner","right_eye_inner"]);
-    if (ml&&mr) metrics.symmetry.mouth_symmetry=metricWithPoints(scoreCentered(Math.abs(ml.y-mr.y)/faceW,0,0.035),["mouth_left","mouth_right"]);
-    if (lj&&rj&&eyeMid) metrics.symmetry.jaw_symmetry=metricWithPoints(scoreCentered(Math.abs(lj.y-rj.y)/faceW,0,0.05),["left_jaw","right_jaw"]);
-    if (lc&&rc) metrics.symmetry.cheek_symmetry=metricWithPoints(scoreCentered(Math.abs(lc.y-rc.y)/faceW,0,0.05),["left_cheekbone","right_cheekbone"]);
-    const symVals=metricScores(metrics.symmetry); metrics.symmetry.overall_symmetry=metricWithPoints({value:symVals.length?round(symVals.reduce((a,x)=>a+x.score,0)/symVals.length/10,3):null,score:symVals.length?round(symVals.reduce((a,x)=>a+x.score,0)/symVals.length,1):null,status:symVals.length?"good":"uncertain",ideal_min:0.9,ideal_max:1,unit:"index",landmarks:["left_eye_inner","right_eye_inner","mouth_left","mouth_right","left_jaw","right_jaw"]},["left_eye_inner","right_eye_inner","mouth_left","mouth_right","left_jaw","right_jaw"]);
-    metrics.eyes={};
-    if (le&&re) metrics.eyes.eye_spacing=metricWithPoints(scoreRange(dist(le,re)/faceW,0.20,0.38,0.12),["left_eye_inner","right_eye_inner"]);
-    if (le&&leO) metrics.eyes.left_eye_width=metricWithPoints(scoreRange(dist(le,leO)/faceW,0.10,0.20,0.10),["left_eye_inner","left_eye_outer"]);
-    if (re&&reO) metrics.eyes.right_eye_width=metricWithPoints(scoreRange(dist(re,reO)/faceW,0.10,0.20,0.10),["right_eye_inner","right_eye_outer"]);
-    if (nl&&nr) metrics.nose={nose_width:metricWithPoints(scoreRange(dist(nl,nr)/faceW,0.15,0.30,0.14),["nose_left","nose_right"])};
-    else metrics.nose={};
-    if (nb&&nt&&faceH) metrics.nose.nose_length=metricWithPoints(scoreRange(dist(nb,nt)/faceH,0.16,0.34,0.16),["nose_bridge","nose_tip"]);
-    if (ml&&mr) metrics.lips_mouth={mouth_width:metricWithPoints(scoreRange(dist(ml,mr)/faceW,0.28,0.52,0.20),["mouth_left","mouth_right"])};
-    else metrics.lips_mouth={};
-    if (lj&&rj) metrics.jaw={jaw_width:metricWithPoints(scoreRange(dist(lj,rj)/faceW,0.62,1.02,0.30),["left_jaw","right_jaw"])};
-    else metrics.jaw={};
-    metrics.chin={};
-    if (lm.chin_left&&lm.chin_right&&faceW) metrics.chin.chin_width=metricWithPoints(scoreRange(dist(point(lm,"chin_left"),point(lm,"chin_right"))/faceW,0.16,0.34,0.14),["chin_left","chin_right"]); else metrics.chin.chin_width=metricWithPoints(metric(null,null,"uncertain",null,null,"ratio",[]),["chin"]);
-    metrics.proportions={};
-    if (fc&&eyeMid&&chin&&faceH) metrics.proportions.upper_to_lower_third=metricWithPoints(scoreRange(dist(fc,eyeMid)/dist(eyeMid,chin),0.60,1.10,0.30),["forehead_center","left_eye_inner","right_eye_inner","chin"]);
-    if (eyeMid&&ul&&chin&&faceH) metrics.proportions.mid_to_lower_face=metricWithPoints(scoreRange(dist(eyeMid,ul)/dist(ul,chin),0.70,1.35,0.35),["left_eye_inner","right_eye_inner","upper_lip_center","chin"]);
-    metrics.angularity={};
-    if (lc&&lj&&rj&&rc) {
-      const la=angle(lc,lj,chin), ra=angle(rc,rj,chin);
-      if (la!==null&&ra!==null) metrics.angularity.jaw_angle=metricWithPoints(scoreRange((la+ra)/2,110,140,20,"degrees"),["left_cheekbone","left_jaw","chin","right_jaw","right_cheekbone"]);
-    }
-  }
-  const featureScores=metricScores(metrics);
-  const harmony=weightedMean(featureScores,quality);
-  return {available:Object.keys(lm).length>=4,confidence:quality,harmony,landmarks:lm,metrics,landmarks_count:Object.keys(lm).length||null};
-}
-
-function buildProfileGeometry(lm, quality) {
-  const gf=point(lm,"profile_glabella"), na=point(lm,"profile_nasion"), no=point(lm,"profile_pronasale"), sn=point(lm,"profile_subnasale"), ls=point(lm,"profile_labiale_superius"), li=point(lm,"profile_labiale_inferius"), po=point(lm,"profile_pogonion"), me=point(lm,"profile_menton"), go=point(lm,"profile_gonion"), ch=point(lm,"profile_chin_neck");
-  const metrics={profile:{}};
-  if (gf&&na&&no) metrics.profile.nasofacial_angle=metricWithPoints(scoreRange(180-angle(gf,na,no),30,40,10,"degrees"),["profile_glabella","profile_nasion","profile_pronasale"]);
-  if (sn&&ls&&no) metrics.profile.nasolabial_angle=metricWithPoints(scoreRange(angle(no,sn,ls),90,110,15,"degrees"),["profile_pronasale","profile_subnasale","profile_labiale_superius"]);
-  if (go&&po&&ch) metrics.profile.gonial_angle=metricWithPoints(scoreRange(180-angle(po,go,ch),115,135,15,"degrees"),["profile_pogonion","profile_gonion","profile_chin_neck"]);
-  if (na&&no&&po) metrics.profile.nose_chin_projection=metricWithPoints(scoreCentered(Math.abs(no.x-po.x),0.16,0.12),["profile_nasion","profile_pronasale","profile_pogonion"]);
-  if (no&&ls&&po) metrics.profile.profile_projection_balance=metricWithPoints(scoreCentered(Math.abs((no.x-ls.x)/(Math.abs(no.x-po.x)||1)),0.55,0.35),["profile_pronasale","profile_labiale_superius","profile_pogonion"]);
-  const scores=metricScores(metrics); const harmony=weightedMean(scores,quality);
-  return {available:Object.keys(lm).length>=4,confidence:quality,harmony,landmarks:lm,metrics,landmarks_count:Object.keys(lm).length||null};
-}
-
-function metricScores(obj) {
-  const out=[];
-  walkMetrics(obj,m=>{ if (m && Number.isFinite(Number(m.score))) out.push({score:Number(m.score),weight:1}); });
-  return out;
-}
-function walkMetrics(obj,cb){
-  if(!obj||typeof obj!=="object")return;
-  if(Object.prototype.hasOwnProperty.call(obj,"score")&&Object.prototype.hasOwnProperty.call(obj,"status")){cb(obj);return;}
-  Object.values(obj).forEach(v=>walkMetrics(v,cb));
-}
-function weightedMean(items,quality=1){
-  if(!Array.isArray(items)||!items.length)return null;
-  const normalized=items.filter(x=>x&&Number.isFinite(Number(x.score))).map(x=>({score:Number(x.score),weight:Number(x.weight)||1}));
-  if(!normalized.length)return null;
-  const sum=normalized.reduce((a,x)=>a+x.score*x.weight,0)/normalized.reduce((a,x)=>a+x.weight,0);
-  const q=clamp01(quality);
-  return clampScore(4 + (sum-4)*(0.55+0.45*q));
-}
-function buildSections(front,profile,frontQ,profileQ,hasProfile){
-  const sym=avgMetricGroup(front.symmetry);
-  const prop=avgMetricGroup(front.proportions);
-  const feat=avgMetricGroup({...(front.eyes||{}),...(front.nose||{}),...(front.lips_mouth||{}),...(front.jaw||{}),...(front.chin||{})});
-  const ang=avgMetricGroup(front.angularity);
-  return {harmony:avgNullable([sym,prop,feat,ang]),dimorphism:null,features:feat,angularity:ang,symmetry:sym,proportions:prop};
-}
-function avgMetricGroup(group){ const s=metricScores(group||{}); return s.length?round(s.reduce((a,x)=>a+x.score,0)/s.length,1):null; }
-function avgNullable(vs){const n=vs.filter(Number.isFinite);return n.length?round(n.reduce((a,b)=>a+b,0)/n.length,1):null;}
 
 // ============================================================
 // VIEW NORMALIZATION
@@ -1923,14 +1923,6 @@ function normalizeProductionFeatures(
 // ============================================================
 // FALLBACK SCORE
 // ============================================================
-
-function clampScore(value) {
-  if (value === null || value === undefined) return null;
-  const number = Number(value);
-  if (!Number.isFinite(number)) return null;
-  return Math.round(Math.max(SCORE_MIN, Math.min(SCORE_MAX, number)) * 10) / 10;
-}
-
 
 function calculateFallbackOverallScore(
   sections,
