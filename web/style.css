@@ -3222,3 +3222,86 @@ body.metric-reference-open{overflow:hidden}
     transition: none !important;
   }
 }
+
+
+/* FaceMetric metric viewer — dark theme override */
+#metric-reference-modal,
+#metric-reference-modal .metric-reference-dialog,
+#metric-reference-modal .metric-reference-card,
+#metric-reference-modal .metric-reference-panel,
+#metric-reference-modal .metric-reference-content {
+  color-scheme: dark !important;
+  background: #101011 !important;
+  color: #f5f5f7 !important;
+  border-color: rgba(255,255,255,.08) !important;
+}
+
+#metric-reference-modal {
+  background: rgba(0,0,0,.72) !important;
+  backdrop-filter: blur(18px) saturate(115%) !important;
+  -webkit-backdrop-filter: blur(18px) saturate(115%) !important;
+}
+
+#metric-reference-modal .metric-reference-header,
+#metric-reference-modal .metric-reference-body,
+#metric-reference-modal .metric-reference-info,
+#metric-reference-modal .metric-reference-tabs,
+#metric-reference-modal .metric-reference-empty {
+  background: #101011 !important;
+  color: #f5f5f7 !important;
+}
+
+#metric-reference-modal .metric-reference-media,
+#metric-reference-modal .metric-reference-visual,
+#metric-reference-modal .metric-reference-image-wrap {
+  background: #09090b !important;
+}
+
+#metric-reference-modal .metric-reference-tabs button {
+  background: #1c1c1e !important;
+  color: #a1a1a6 !important;
+  border-color: rgba(255,255,255,.06) !important;
+}
+
+#metric-reference-modal .metric-reference-tabs button.active,
+#metric-reference-modal .metric-reference-tabs button[aria-selected="true"] {
+  background: #2a2a2c !important;
+  color: #fff !important;
+}
+
+#metric-reference-modal .metric-reference-close,
+#metric-reference-modal button[data-metric-prev],
+#metric-reference-modal button[data-metric-next] {
+  background: rgba(255,255,255,.08) !important;
+  color: #fff !important;
+  border-color: rgba(255,255,255,.10) !important;
+}
+
+#metric-reference-modal .metric-reference-close:hover,
+#metric-reference-modal button[data-metric-prev]:hover,
+#metric-reference-modal button[data-metric-next]:hover {
+  background: rgba(255,255,255,.14) !important;
+}
+
+#metric-reference-modal .metric-reference-label,
+#metric-reference-modal .metric-reference-description,
+#metric-reference-modal .metric-reference-meta,
+#metric-reference-modal small {
+  color: #a1a1a6 !important;
+}
+
+#metric-reference-modal .metric-reference-value,
+#metric-reference-modal h1,
+#metric-reference-modal h2,
+#metric-reference-modal h3,
+#metric-reference-modal strong {
+  color: #f5f5f7 !important;
+}
+
+#metric-reference-modal .metric-reference-landmarks,
+#metric-reference-modal .metric-reference-box,
+#metric-reference-modal .metric-reference-stat {
+  background: #151517 !important;
+  border-color: rgba(255,255,255,.08) !important;
+  color: #f5f5f7 !important;
+}
