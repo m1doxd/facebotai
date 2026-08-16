@@ -1170,11 +1170,17 @@ function getMetricLandmarkNames(key, viewType = "front") {
 }
 
 function metricOverlayColor(metric) {
+  const score = getMetricNumericScore(metric);
+  if (score !== null) {
+    if (score < 5) return "#ff5368";
+    if (score < 7) return "#f2c75c";
+    return "#55d98b";
+  }
+
   const status = String(metric?.value?.status || "").toLowerCase();
-  const score = normalizeMetricValue(metric?.value);
-  if (status === "poor" || (score !== null && score < 5)) return "#ff5368";
-  if (status === "average" || (score !== null && score < 7)) return "#f2c75c";
-  if (status === "good" || (score !== null && score >= 7)) return "#55d98b";
+  if (status === "poor") return "#ff5368";
+  if (status === "average") return "#f2c75c";
+  if (status === "good") return "#55d98b";
   return "#75a9ff";
 }
 
@@ -4701,6 +4707,7 @@ function openMetricReferenceViewer(metric) {
   const view = getActiveView(currentAnalysis) || currentAnalysis.frontal || { type: "front", landmarks: {} };
   const source = getViewImageSource(view);
   const score = getMetricNumericScore(metric);
+  const value = metric?.value;
   const zone = getMetricZone(metric.key);
   const focus = getMetricFocusConfig(metric.key, view?.type === "profile" ? "profile" : "front");
   const points = getMetricFocusPoints(metric, view);
@@ -4840,8 +4847,16 @@ function openMetricReferenceViewer(metric) {
   animateMetricReferenceScore(scoreElement, score);
 
   modal.querySelectorAll("[data-close-metric]").forEach(el => el.addEventListener("click", closeMetricReferenceViewer));
-  modal.querySelector("[data-metric-prev]")?.addEventListener("click", () => prev && openMetricReferenceViewer(prev));
-  modal.querySelector("[data-metric-next]")?.addEventListener("click", () => next && openMetricReferenceViewer(next));
+  modal.querySelector("[data-metric-prev]")?.addEventListener("click", event => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (prev) openMetricReferenceViewer(prev);
+  });
+  modal.querySelector("[data-metric-next]")?.addEventListener("click", event => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (next) openMetricReferenceViewer(next);
+  });
   modal.querySelectorAll("[data-ref-tab]").forEach(button => {
     button.addEventListener("click", () => {
       const target = button.dataset.refTab;
