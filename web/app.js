@@ -239,7 +239,6 @@ function closeGeminiKeyModal() {
   modal.classList.remove("show");
   modal.hidden = true;
   modal.setAttribute("aria-hidden", "true");
-  maybeOpenClassificationModal();
 }
 
 function initGeminiKeyModal() {
@@ -288,13 +287,15 @@ function initGeminiKeyModal() {
 
     try {
       const response = await fetchWithTimeout(
-        VALIDATE_KEY_ENDPOINT,
+        `${VALIDATE_KEY_ENDPOINT}?t=${Date.now()}`,
         {
-          method: "GET",
+          method: "POST",
           headers: {
+            "Content-Type": "application/json",
             Accept: "application/json",
             "X-Gemini-Key": key
           },
+          body: JSON.stringify({}),
           cache: "no-store"
         },
         HEALTH_TIMEOUT
@@ -2771,7 +2772,6 @@ function applyImageAlignment(image, alignment, frameElement = null) {
 
   image.style.transformOrigin = "50% 50%";
   image.style.transform = transform;
-  image.dataset.metricBaseTransform = transform;
 
   // The landmark canvas must receive exactly the same transform.
   const canvas =
@@ -2909,17 +2909,18 @@ function ensureResultFace(result) {
 
     visual.innerHTML = `
       <div class="result-visual__media">
+        <div class="result-visual__media-inner">
+          <img
+            class="result-visual__image"
+            alt="Результат анализа"
+          >
 
-        <img
-          class="result-visual__image"
-          alt="Результат анализа"
-        >
-
-        <canvas
-          id="result-landmark-canvas"
-          class="result-landmark-canvas"
-          aria-hidden="true"
-        ></canvas>
+          <canvas
+            id="result-landmark-canvas"
+            class="result-landmark-canvas"
+            aria-hidden="true"
+          ></canvas>
+        </div>
 
         <div class="result-visual__shade"></div>
 
@@ -4302,6 +4303,8 @@ function renderMetricInspector(
   }
 
   if (!activeMetric) {
+    resetMetricFocusTransform();
+    document.getElementById("result-visual")?.classList.remove("metric-focus");
     inspector.innerHTML = `
       <div class="metric-inspector__empty">
         <span class="metric-inspector__icon">⌖</span>
@@ -4489,70 +4492,73 @@ function drawResultMetricOverlay(metric = null) {
   drawFaceLandmarkNetwork(canvas, view, metric, 1);
 }
 
-function getMetricFocusLandmarkCenter(metric) {
+function resetMetricFocusTransform() {
+  const visual = document.getElementById("result-visual");
+  const stage = visual?.querySelector(".result-visual__media-inner");
+  if (!stage) return;
+  stage.style.transform = "translate3d(0,0,0) scale(1)";
+  stage.style.transformOrigin = "50% 50%";
+}
+
+function applyMetricFocusTransform(metric) {
+  const visual = document.getElementById("result-visual");
+  const stage = visual?.querySelector(".result-visual__media-inner");
+  if (!visual || !stage || !currentAnalysis || !metric) {
+    resetMetricFocusTransform();
+    return;
+  }
+
+  const canvas = document.getElementById("result-landmark-canvas");
+  const image = visual.querySelector(".result-visual__image");
+  if (!canvas || !image) return;
+
   const view = getActiveView(currentAnalysis) || {};
-  const points = view?.landmarks || {};
-  const names = Array.isArray(metric?.value?.landmarks) && metric.value.landmarks.length
+  const points = getValidatedOverlayPoints(view);
+  const viewType = view?.type === "profile" ? "profile" : "front";
+
+  const names = Array.isArray(metric.value?.landmarks) && metric.value.landmarks.length
     ? metric.value.landmarks
-    : getMetricLandmarkNames(metric?.key, view?.type === "profile" ? "profile" : "front");
+    : getMetricLandmarkNames(metric.key, viewType);
 
-  const valid = names
-    .map(name => points[name])
-    .filter(point => point && Number.isFinite(Number(point.x)) && Number.isFinite(Number(point.y)))
-    .map(point => ({ x: Number(point.x), y: Number(point.y) }));
+  const visible = names
+    .filter(name => points[name])
+    .map(name => landmarkToCanvasPoint(points[name], image, visual))
+    .filter(Boolean);
 
-  if (!valid.length) return { x: 0.5, y: 0.5 };
+  if (visible.length < 2) {
+    resetMetricFocusTransform();
+    return;
+  }
 
-  return {
-    x: valid.reduce((sum, point) => sum + point.x, 0) / valid.length,
-    y: valid.reduce((sum, point) => sum + point.y, 0) / valid.length
-  };
-}
+  const stageWidth = visual.clientWidth || 1;
+  const stageHeight = visual.clientHeight || 1;
 
-function applyMetricVisualFocus(metric, animate = true) {
-  const visual = $("#result-visual");
-  const media = visual?.querySelector(".result-visual__media");
-  const image = visual?.querySelector(".result-visual__image");
-  const canvas = visual?.querySelector("#result-landmark-canvas");
-  if (!visual || !media || !image || !canvas) return;
+  const minX = Math.min(...visible.map(p => p.x));
+  const maxX = Math.max(...visible.map(p => p.x));
+  const minY = Math.min(...visible.map(p => p.y));
+  const maxY = Math.max(...visible.map(p => p.y));
 
-  const center = getMetricFocusLandmarkCenter(metric);
-  const scale = Math.max(1, Math.min(1.32, Number(metric?.focusScale) || 1.18));
-  const originX = Math.max(15, Math.min(85, center.x * 100));
-  const originY = Math.max(15, Math.min(85, center.y * 100));
+  const boxW = Math.max(1, maxX - minX);
+  const boxH = Math.max(1, maxY - minY);
 
-  const baseTransform = image.dataset.metricBaseTransform || image.style.transform || "none";
-  image.dataset.metricBaseTransform = baseTransform;
-  canvas.dataset.metricBaseTransform = baseTransform;
+  const scale = Math.max(
+    1,
+    Math.min(
+      1.65,
+      (stageWidth * 0.42) / boxW,
+      (stageHeight * 0.42) / boxH
+    )
+  );
 
-  const apply = element => {
-    element.style.transformOrigin = `${originX}% ${originY}%`;
-    element.style.transform = baseTransform === "none"
-      ? `scale(${scale})`
-      : `${baseTransform} scale(${scale})`;
-    element.style.transition = animate
-      ? "transform 520ms cubic-bezier(.22,.8,.22,1), transform-origin 520ms ease"
-      : "none";
-  };
+  const cx = (minX + maxX) / 2;
+  const cy = (minY + maxY) / 2;
 
-  apply(image);
-  apply(canvas);
-  visual.classList.add("metric-focus");
-}
+  const tx = stageWidth / 2 - cx;
+  const ty = stageHeight / 2 - cy;
 
-function clearMetricVisualFocus() {
-  const visual = $("#result-visual");
-  const image = visual?.querySelector(".result-visual__image");
-  const canvas = visual?.querySelector("#result-landmark-canvas");
-  if (!image || !canvas) return;
-
-  const baseTransform = image.dataset.metricBaseTransform || "none";
-  [image, canvas].forEach(element => {
-    element.style.transformOrigin = "50% 50%";
-    element.style.transform = baseTransform;
-    element.style.transition = "transform 420ms cubic-bezier(.22,.8,.22,1)";
-  });
-  visual.classList.remove("metric-focus");
+  stage.style.transformOrigin = "50% 50%";
+  stage.style.transform =
+    `translate3d(${tx.toFixed(1)}px, ${ty.toFixed(1)}px, 0) scale(${scale.toFixed(3)})`;
 }
 
 function selectMetric(
@@ -4580,17 +4586,16 @@ function selectMetric(
     drawMetricOverlay(activeMetric);
   }
 
-  // Keep zoom strictly inside the image stage. Never scroll or transform
-  // the whole result panel: the metric UI must remain visible beside the face.
-  window.requestAnimationFrame(() => {
-    applyMetricVisualFocus(activeMetric, true);
-  });
-
   const inspector = $("#metric-inspector");
+  const visual = $("#result-visual");
+
+  visual?.classList.add("metric-focus");
+  applyMetricFocusTransform(activeMetric);
+
   window.setTimeout(() => {
     inspector?.classList.add("metric-inspector--focused");
-    window.setTimeout(() => inspector?.classList.remove("metric-inspector--focused"), 700);
-  }, 180);
+    window.setTimeout(() => inspector?.classList.remove("metric-inspector--focused"), 900);
+  }, 260);
 }
 
 
@@ -6218,9 +6223,57 @@ function injectStageTwoStyles() {
       background: rgba(255,255,255,.055);
     }
 
+    /* Metric viewer: zoom is clipped to the image stage only. */
+    #result-visual {
+      position: relative;
+      overflow: hidden;
+      isolation: isolate;
+      min-width: 0;
+      max-width: 100%;
+    }
+
+    #result-visual .result-visual__media {
+      position: relative;
+      overflow: hidden;
+      min-width: 0;
+      max-width: 100%;
+      contain: paint;
+    }
+
+    #result-visual .result-visual__media-inner {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      transform-origin: 50% 50%;
+      transition: transform 720ms cubic-bezier(.22,.8,.2,1);
+      will-change: transform;
+      z-index: 1;
+    }
+
+    #result-visual .result-visual__image,
+    #result-visual #result-landmark-canvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      transform-origin: 50% 50%;
+      will-change: transform;
+      backface-visibility: hidden;
+    }
+
+    #result-visual.metric-focus .result-visual__region-layer,
+    #result-visual.metric-focus .result-region {
+      display: none !important;
+    }
+
     .metric-inspector {
       margin: 18px 0;
       padding: 16px;
+      width: 100%;
+      max-width: 100%;
+      box-sizing: border-box;
+      overflow: hidden;
       border: 1px solid rgba(255,255,255,.08);
       border-radius: 18px;
       background:
@@ -6513,64 +6566,6 @@ function injectStageTwoStyles() {
       border-color: rgba(255,80,80,.85);
       background: rgba(255,80,80,.08);
     }
-
-
-    /* ========================================================
-       METRIC VIEWER / LOCAL ZOOM FIX
-       Zoom is clipped to the image stage only. The information
-       panel never gets covered by the enlarged face image.
-    ======================================================== */
-    #result-visual {
-      position: relative;
-      isolation: isolate;
-      overflow: hidden;
-      max-width: 100%;
-    }
-
-    #result-visual .result-visual__media {
-      position: relative;
-      overflow: hidden;
-      min-width: 0;
-      max-width: 100%;
-      contain: paint;
-    }
-
-    #result-visual .result-visual__image,
-    #result-visual #result-landmark-canvas {
-      transform-origin: 50% 50%;
-      will-change: transform;
-      backface-visibility: hidden;
-    }
-
-    #result-visual.metric-focus .result-visual__region-layer,
-    #result-visual.metric-focus .result-region {
-      display: none !important;
-    }
-
-    #metric-inspector {
-      position: relative;
-      z-index: 5;
-      min-width: 0;
-      overflow: hidden;
-      box-sizing: border-box;
-    }
-
-    #metric-inspector.metric-inspector--focused {
-      animation: facemetric-inspector-focus 700ms ease both;
-    }
-
-    @keyframes facemetric-inspector-focus {
-      0% { transform: translateY(4px); opacity: .72; }
-      100% { transform: translateY(0); opacity: 1; }
-    }
-
-    @media (max-width: 900px) {
-      #metric-inspector {
-        margin-left: 0;
-        margin-right: 0;
-      }
-    }
-
   `;
 
   document.head.appendChild(
