@@ -208,6 +208,14 @@ function clearGeminiApiKey() {
   }
 }
 
+function prepareIosModal(modal) {
+  if (!modal) return;
+  modal.classList.remove("ios-modal-enter", "ios-modal-leave");
+  void modal.offsetWidth;
+  modal.classList.add("ios-modal-enter");
+  prepareIosModal(modal);
+}
+
 function openGeminiKeyModal(options = {}) {
   const modal = document.getElementById("apiKeyModal");
   const input = document.getElementById("geminiApiKeyInput");
@@ -4603,11 +4611,18 @@ function drawResultMetricOverlay(metric = null) {
 
 function getMetricNumericScore(metric) {
   if (!metric) return null;
-  const raw = isObject(metric.value) && Object.prototype.hasOwnProperty.call(metric.value, "score")
-    ? metric.value.score
-    : metric.value;
-  const n = Number(raw);
-  return Number.isFinite(n) && n >= 0 && n <= 10 ? n : null;
+  const value = metric.value;
+
+  const candidates = isObject(value)
+    ? [value.score, value.value, value.measurement, value.numericValue, value.numeric_value, value.result]
+    : [value];
+
+  for (const raw of candidates) {
+    const n = normalizeMetricValue(raw);
+    if (n !== null && n >= 0 && n <= 10) return n;
+  }
+
+  return null;
 }
 
 function getMetricRawLandmarks(metric) {
@@ -4736,7 +4751,7 @@ function openMetricReferenceViewer(metric) {
               <span>SCORE</span>
               <strong><b data-metric-score>—</b><small>/10</small></strong>
             </div>
-            <span class="metric-reference-scoreline__status" data-metric-status>${score == null ? "Недостаточно данных" : getMetricStatus(score)}</span>
+            <span class="metric-reference-scoreline__status" data-metric-status>${score == null ? (value == null || String(value).trim() === "" ? "Недостаточно данных" : "Данные доступны") : getMetricStatus(score)}</span>
           </div>
 
           <div class="metric-reference-bar" style="--metric-position:${score == null ? 50 : score * 10}%; --metric-gradient:${metricReferenceGradient(score)}">
@@ -4769,7 +4784,7 @@ function openMetricReferenceViewer(metric) {
 
           <div class="metric-reference-content" data-ref-panel="interpretation">
             <span class="metric-reference-label">INTERPRETATION</span>
-            <h3 data-metric-interpretation>${score == null ? "Недостаточно данных" : getMetricStatus(score)}</h3>
+            <h3 data-metric-interpretation>${score == null ? (value == null || String(value).trim() === "" ? "Недостаточно данных" : "Данные доступны") : getMetricStatus(score)}</h3>
             <p>Значение отображается вместе с визуальной геометрией и шкалой. Для метрик, требующих другого ракурса, используется соответствующий view.</p>
             ${metricReferenceGraph(score)}
           </div>
