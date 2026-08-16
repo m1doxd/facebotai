@@ -173,6 +173,14 @@ function maybeOpenClassificationModal() {
   }
 }
 
+function resetMetricSelection() {
+  activeMetric = null;
+  try {
+    document.querySelectorAll(".metric-card.active, .metric-row.active, [data-metric].active")
+      .forEach(el => el.classList.remove("active"));
+  } catch {}
+}
+
 function getGeminiApiKey() {
   return (
     readStorage(GEMINI_STORAGE_KEY) ||
@@ -1737,6 +1745,7 @@ async function startAnalysis(file, profileFile = null) {
     }
 
     currentAnalysis = result;
+    resetMetricSelection();
     applyAnalysisAlignment(result);
     requestAnimationFrame(() => animateAnalysisNetwork(result));
     if (alignmentStatus) {
@@ -6098,35 +6107,42 @@ function normalizeScore(
 }
 
 
-function normalizeMetricValue(
-  value
-) {
-  if (
-    value === null ||
-    value === undefined ||
-    value === ""
-  ) {
+function normalizeMetricValue(value) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (value == null) return null;
+
+  if (typeof value === "object") {
+    const candidates = [
+      value.value,
+      value.measurement,
+      value.numericValue,
+      value.numeric_value,
+      value.score,
+      value.result
+    ];
+    for (const candidate of candidates) {
+      const n = normalizeMetricValue(candidate);
+      if (n != null) return n;
+    }
     return null;
   }
 
-  const number =
-    Number(value);
+  const raw = String(value).trim();
+  if (!raw) return null;
 
-  if (
-    !Number.isFinite(
-      number
-    )
-  ) {
-    return null;
-  }
+  const cleaned = raw
+    .replace(/,/g, ".")
+    .replace(/(\d)\s*°/g, "$1")
+    .replace(/%/g, "")
+    .replace(/\s+/g, " ");
 
-  return (
-    number >= 0 &&
-    number <= 10
-  )
-    ? number
-    : null;
+  const match = cleaned.match(/[-+]?(?:\d+(?:\.\d+)?|\.\d+)/);
+  if (!match) return null;
+
+  const n = Number(match[0]);
+  return Number.isFinite(n) ? n : null;
 }
+
 
 
 function getMetricLevel(
