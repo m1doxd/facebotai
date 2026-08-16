@@ -2976,3 +2976,97 @@ body.metric-reference-open{overflow:hidden}
   .metric-reference-viewer__nav--prev{left:8px}
   .metric-reference-viewer__nav--next{right:8px}
 }
+
+
+/* ============================================================
+   iOS-like minimal modals
+   ============================================================ */
+#apiKeyModal,
+#classificationModal {
+  --ios-bg: rgba(28, 28, 30, 0.96);
+  --ios-surface: rgba(44, 44, 46, 0.96);
+  --ios-text: #f5f5f7;
+  --ios-secondary: #a1a1a6;
+  --ios-border: rgba(255,255,255,.10);
+  --ios-accent: #0a84ff;
+}
+
+#apiKeyModal .modal-card,
+#classificationModal .modal-card,
+#apiKeyModal .modal-content,
+#classificationModal .modal-content {
+  width: min(92vw, 430px);
+  border-radius: 24px;
+  background: var(--ios-bg);
+  color: var(--ios-text);
+  border: 1px solid var(--ios-border);
+  box-shadow: 0 24px 70px rgba(0,0,0,.42);
+  padding: 26px;
+  backdrop-filter: blur(22px) saturate(150%);
+  -webkit-backdrop-filter: blur(22px) saturate(150%);
+}
+
+#apiKeyModal input,
+#classificationModal select,
+#classificationModal input {
+  width: 100%;
+  min-height: 50px;
+  box-sizing: border-box;
+  border-radius: 14px;
+  border: 1px solid var(--ios-border);
+  background: var(--ios-surface);
+  color: var(--ios-text);
+  padding: 0 15px;
+  font: 500 15px/1.2 -apple-system, BlinkMacSystemFont, "SF Pro Display",
+        "SF Pro Text", Inter, system-ui, sans-serif;
+  outline: none;
+  transition: border-color .18s ease, box-shadow .18s ease, transform .12s ease;
+}
+
+#apiKeyModal input:focus,
+#classificationModal select:focus,
+#classificationModal input:focus {
+  border-color: rgba(10,132,255,.85);
+  box-shadow: 0 0 0 4px rgba(10,132,255,.16);
+}
+
+#apiKeyModal button,
+#classificationModal button {
+  min-height: 48px;
+  border: 0;
+  border-radius: 14px;
+  padding: 0 18px;
+  font: 600 15px/1 -apple-system, BlinkMacSystemFont, "SF Pro Text",
+        Inter, system-ui, sans-serif;
+  cursor: pointer;
+  transition: transform .12s ease, opacity .18s ease, filter .18s ease;
+}
+
+#apiKeyModal button:active,
+#classificationModal button:active {
+  transform: scale(.98);
+}
+
+#apiKeyModal button[type="submit"],
+#classificationModal button[type="submit"] {
+  background: var(--ios-accent);
+  color: white;
+}
+
+#apiKeyModal .modal-title,
+#classificationModal .modal-title,
+#apiKeyModal h2,
+#classificationModal h2 {
+  letter-spacing: -.02em;
+  font: 650 24px/1.15 -apple-system, BlinkMacSystemFont, "SF Pro Display",
+        Inter, system-ui, sans-serif;
+}
+
+#apiKeyModal p,
+#classificationModal p,
+#apiKeyModal .modal-subtitle,
+#classificationModal .modal-subtitle {
+  color: var(--ios-secondary);
+  font: 400 14px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text",
+        Inter, system-ui, sans-serif;
+}
