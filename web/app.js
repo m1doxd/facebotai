@@ -1,9 +1,3 @@
-// ============================================================
-// FACE METRIC APP - UNIFIED FRONTEND v2026.08.15-gender-modal-fix
-// ============================================================
-
-window.__FACEMETRIC_APP_VERSION__ = "2026-08-15-gender-modal-fix-v1";
-
 
 // ============================================================
 // GEMINI BYOK
@@ -481,12 +475,6 @@ let selectedProfileObjectUrl = null;
 // Classification settings. Geometric measurements remain independent.
 let selectedGender = "male";
 let adultConfirmed = false;
-
-// Expose read-only diagnostics for debugging the deployed frontend.
-window.FaceMetricClassification = {
-  get gender() { return selectedGender === "female" ? "female" : "male"; },
-  get adultConfirmed() { return adultConfirmed === true; }
-};
 
 let currentAnalysis = null;
 let currentScreen = "home";
@@ -995,12 +983,7 @@ function metricOverlayColor(metric) {
 }
 
 function getOverlayPoints(view) {
-  const landmarks = view?.landmarks || {};
-  return Object.fromEntries(
-    Object.entries(landmarks).filter(([, p]) =>
-      p && Number.isFinite(Number(p.x)) && Number.isFinite(Number(p.y))
-    )
-  );
+  return getValidatedOverlayPoints(view);
 }
 
 function getMetricLinePairs(key, viewType, selectedNames) {
@@ -1038,27 +1021,177 @@ function getMetricLinePairs(key, viewType, selectedNames) {
   return map[k] || selectedNames.slice(0, -1).map((name, i) => [name, selectedNames[i + 1]]);
 }
 
+function getLandmarkOverlayFrame(canvas) {
+  if (!canvas) return null;
+
+  if (canvas.id === "result-landmark-canvas") {
+    return document.getElementById("result-visual");
+  }
+
+  return analysisFrame || canvas.parentElement || null;
+}
+
+function getLandmarkOverlayImage(canvas, frame) {
+  if (!frame) return null;
+
+  if (canvas?.id === "result-landmark-canvas") {
+    return frame.querySelector(".result-visual__image") || frame.querySelector("img");
+  }
+
+  return analysisImage || frame.querySelector("#analysis-image") || frame.querySelector("img");
+}
+
+function getLandmarkCanvasLayoutSize(canvas, frame) {
+  const width =
+    Number(frame?.clientWidth) ||
+    Number(canvas?.offsetWidth) ||
+    Number(canvas?.clientWidth) ||
+    0;
+
+  const height =
+    Number(frame?.clientHeight) ||
+    Number(canvas?.offsetHeight) ||
+    Number(canvas?.clientHeight) ||
+    0;
+
+  return { width, height };
+}
+
+function getValidatedOverlayPoints(view) {
+  const landmarks = view?.landmarks || {};
+  const result = {};
+
+  for (const [name, point] of Object.entries(landmarks)) {
+    if (!point) continue;
+
+    const x = Number(point.x);
+    const y = Number(point.y);
+
+    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+
+    // MediaPipe-style normalized coordinates.
+    // A small tolerance allows landmarks that touch the image edge.
+    if (x < -0.08 || x > 1.08 || y < -0.08 || y > 1.08) continue;
+
+    if (point.confidence != null) {
+      const confidence = Number(point.confidence);
+      if (Number.isFinite(confidence) && confidence < 0.35) continue;
+    }
+
+    result[name] = { ...point, x, y };
+  }
+
+  return result;
+}
+
+function landmarkToCanvasPoint(point, image, frame) {
+  if (!point || !image || !frame) return null;
+
+  const x = Number(point.x);
+  const y = Number(point.y);
+
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+
+  const frameWidth = Number(frame.clientWidth) || 0;
+  const frameHeight = Number(frame.clientHeight) || 0;
+  const naturalWidth = Number(image.naturalWidth) || 0;
+  const naturalHeight = Number(image.naturalHeight) || 0;
+
+  if (!frameWidth || !frameHeight || !naturalWidth || !naturalHeight) {
+    return null;
+  }
+
+  const style = getComputedStyle(image);
+  const objectFit = style.objectFit || "fill";
+
+  let renderedWidth = frameWidth;
+  let renderedHeight = frameHeight;
+  let offsetX = 0;
+  let offsetY = 0;
+
+  if (objectFit === "cover") {
+    const scale = Math.max(
+      frameWidth / naturalWidth,
+      frameHeight / naturalHeight
+    );
+
+    renderedWidth = naturalWidth * scale;
+    renderedHeight = naturalHeight * scale;
+    offsetX = (frameWidth - renderedWidth) / 2;
+    offsetY = (frameHeight - renderedHeight) / 2;
+  } else if (objectFit === "contain") {
+    const scale = Math.min(
+      frameWidth / naturalWidth,
+      frameHeight / naturalHeight
+    );
+
+    renderedWidth = naturalWidth * scale;
+    renderedHeight = naturalHeight * scale;
+    offsetX = (frameWidth - renderedWidth) / 2;
+    offsetY = (frameHeight - renderedHeight) / 2;
+  }
+
+  return {
+    x: x * renderedWidth + offsetX,
+    y: y * renderedHeight + offsetY
+  };
+}
+
+function syncLandmarkCanvasTransform(canvas, image) {
+  if (!canvas || !image) return;
+
+  const transform = image.style.transform || "none";
+  const origin = image.style.transformOrigin || "50% 50%";
+
+  canvas.style.transformOrigin = origin;
+  canvas.style.transform = transform;
+}
+
 function drawFaceLandmarkNetwork(canvas, view, metric = null, progress = 1) {
   if (!canvas) return;
-  const rect = canvas.getBoundingClientRect();
-  const width = rect.width || canvas.clientWidth;
-  const height = rect.height || canvas.clientHeight;
+
+  const frame = getLandmarkOverlayFrame(canvas);
+  const image = getLandmarkOverlayImage(canvas, frame);
+
+  if (!frame || !image) return;
+
+  const { width, height } =
+    getLandmarkCanvasLayoutSize(canvas, frame);
+
   if (!width || !height) return;
+
+  // Keep the canvas physically aligned with the frame.
+  canvas.style.width = `${width}px`;
+  canvas.style.height = `${height}px`;
+
   const ratio = window.devicePixelRatio || 1;
-  if (canvas.width !== Math.round(width * ratio) || canvas.height !== Math.round(height * ratio)) {
-    canvas.width = Math.max(1, Math.round(width * ratio));
-    canvas.height = Math.max(1, Math.round(height * ratio));
+  const pixelWidth = Math.max(1, Math.round(width * ratio));
+  const pixelHeight = Math.max(1, Math.round(height * ratio));
+
+  if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
+    canvas.width = pixelWidth;
+    canvas.height = pixelHeight;
   }
+
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
+
   ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
   ctx.clearRect(0, 0, width, height);
 
+  // The image may have been auto-aligned. The overlay must follow it.
+  syncLandmarkCanvasTransform(canvas, image);
+
   const viewType = view?.type === "profile" ? "profile" : "front";
-  const points = getOverlayPoints(view);
+  const points = getValidatedOverlayPoints(view);
   const names = Object.keys(points);
+
   if (!names.length) return;
-  const xy = name => ({x:Number(points[name].x)*width, y:Number(points[name].y)*height});
+
+  const xy = name => {
+    if (!points[name]) return null;
+    return landmarkToCanvasPoint(points[name], image, frame);
+  };
 
   const selectedNames = metric
     ? (Array.isArray(metric.value?.landmarks) && metric.value.landmarks.length
@@ -1066,59 +1199,151 @@ function drawFaceLandmarkNetwork(canvas, view, metric = null, progress = 1) {
         : getMetricLandmarkNames(metric.key, viewType))
     : names;
 
+  // Only connect real anatomical landmarks.
+  // No synthetic `mouth_center` point.
   const pairs = viewType === "profile"
-    ? [["profile_forehead","profile_glabella"],["profile_glabella","profile_nasion"],["profile_nasion","profile_pronasale"],["profile_pronasale","profile_subnasale"],["profile_subnasale","profile_labiale_superius"],["profile_labiale_superius","profile_labiale_inferius"],["profile_labiale_inferius","profile_pogonion"],["profile_pogonion","profile_menton"],["profile_menton","profile_chin_neck"]]
-    : [["left_eye_outer","left_eye_inner"],["left_eye_inner","right_eye_inner"],["right_eye_inner","right_eye_outer"],["left_brow_inner","left_brow_outer"],["right_brow_inner","right_brow_outer"],["nose_bridge","nose_tip"],["nose_left","nose_tip"],["nose_tip","nose_right"],["mouth_left","mouth_right"],["forehead_center","nose_bridge"],["nose_bridge","mouth_center"],["mouth_center","chin"],["left_cheekbone","left_jaw"],["left_jaw","chin"],["chin","right_jaw"],["right_jaw","right_cheekbone"]];
+    ? [
+        ["profile_forehead", "profile_glabella"],
+        ["profile_glabella", "profile_nasion"],
+        ["profile_nasion", "profile_pronasale"],
+        ["profile_pronasale", "profile_subnasale"],
+        ["profile_subnasale", "profile_labiale_superius"],
+        ["profile_labiale_superius", "profile_labiale_inferius"],
+        ["profile_labiale_inferius", "profile_pogonion"],
+        ["profile_pogonion", "profile_menton"],
+        ["profile_menton", "profile_chin_neck"]
+      ]
+    : [
+        ["left_eye_outer", "left_eye_inner"],
+        ["left_eye_inner", "right_eye_inner"],
+        ["right_eye_inner", "right_eye_outer"],
+        ["left_brow_inner", "left_brow_outer"],
+        ["right_brow_inner", "right_brow_outer"],
+        ["nose_bridge", "nose_tip"],
+        ["nose_left", "nose_tip"],
+        ["nose_tip", "nose_right"],
+        ["mouth_left", "mouth_right"],
+        ["forehead_center", "nose_bridge"],
+        ["nose_bridge", "upper_lip_center"],
+        ["upper_lip_center", "lower_lip_center"],
+        ["lower_lip_center", "chin"],
+        ["left_cheekbone", "left_jaw"],
+        ["left_jaw", "chin"],
+        ["chin", "right_jaw"],
+        ["right_jaw", "right_cheekbone"]
+      ];
 
-  const visiblePairs = (metric ? getMetricLinePairs(metric.key, viewType, selectedNames) : pairs)
-    .filter(([a,b]) => points[a] && points[b]);
-  const count = Math.max(0, Math.floor(visiblePairs.length * Math.max(0, Math.min(1, progress))));
-  const color = metric ? metricOverlayColor(metric) : "rgba(255,255,255,.78)";
+  const visiblePairs = (
+    metric
+      ? getMetricLinePairs(metric.key, viewType, selectedNames)
+      : pairs
+  ).filter(([a, b]) => xy(a) && xy(b));
+
+  const safeProgress = Math.max(
+    0,
+    Math.min(1, Number(progress) || 0)
+  );
+
+  const count = Math.floor(
+    visiblePairs.length * safeProgress
+  );
+
+  const color = metric
+    ? metricOverlayColor(metric)
+    : "rgba(255,255,255,.78)";
+
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
   ctx.lineWidth = metric ? 2.8 : 1.15;
   ctx.strokeStyle = color;
-  ctx.shadowColor = metric ? color : "rgba(255,255,255,.28)";
+  ctx.shadowColor = metric
+    ? color
+    : "rgba(255,255,255,.28)";
   ctx.shadowBlur = metric ? 15 : 7;
-  for (let i=0;i<count;i++) {
-    const [a,b]=visiblePairs[i]; const A=xy(a), B=xy(b);
-    ctx.beginPath(); ctx.moveTo(A.x,A.y); ctx.lineTo(B.x,B.y); ctx.stroke();
+
+  for (let i = 0; i < count; i++) {
+    const [a, b] = visiblePairs[i];
+    const A = xy(a);
+    const B = xy(b);
+
+    if (!A || !B) continue;
+
+    ctx.beginPath();
+    ctx.moveTo(A.x, A.y);
+    ctx.lineTo(B.x, B.y);
+    ctx.stroke();
   }
+
   ctx.shadowBlur = 0;
 
   const radius = metric ? 3.4 : 2.1;
+
   for (const name of selectedNames) {
-    if (!points[name]) continue;
-    const p=xy(name);
-    ctx.beginPath(); ctx.arc(p.x,p.y,radius,0,Math.PI*2);
-    ctx.fillStyle=color;
+    const p = xy(name);
+    if (!p) continue;
+
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
+    ctx.fillStyle = color;
     ctx.fill();
+
     if (metric) {
-      ctx.beginPath(); ctx.arc(p.x,p.y,radius+4.5,0,Math.PI*2);
-      ctx.strokeStyle="rgba(255,255,255,.58)"; ctx.lineWidth=1; ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, radius + 4.5, 0, Math.PI * 2);
+      ctx.strokeStyle = "rgba(255,255,255,.58)";
+      ctx.lineWidth = 1;
+      ctx.stroke();
     }
   }
 
-  if (metric && selectedNames.some(name => points[name])) {
-    const visible = selectedNames.filter(name => points[name]).map(xy);
-    const cx = visible.reduce((s,p)=>s+p.x,0)/visible.length;
-    const cy = visible.reduce((s,p)=>s+p.y,0)/visible.length;
+  if (metric && selectedNames.some(name => xy(name))) {
+    const visible = selectedNames
+      .map(xy)
+      .filter(Boolean);
+
+    if (!visible.length) return;
+
+    const cx =
+      visible.reduce((sum, p) => sum + p.x, 0) / visible.length;
+    const cy =
+      visible.reduce((sum, p) => sum + p.y, 0) / visible.length;
+
     const value = normalizeMetricValue(metric.value);
-    const label = `${getRussianLabel(metric.key)}${value !== null ? ` · ${formatMetricScore(value)}/10` : ""}`;
+    const label =
+      `${getRussianLabel(metric.key)}${
+        value !== null
+          ? ` · ${formatMetricScore(value)}/10`
+          : ""
+      }`;
+
     ctx.font = "700 10px Inter, Arial, sans-serif";
-    const padX = 9, padY = 6;
+
+    const padX = 9;
     const textW = ctx.measureText(label).width;
-    const boxW = textW + padX*2, boxH = 23;
-    const bx = Math.max(6, Math.min(width-boxW-6, cx-boxW/2));
-    const by = Math.max(8, cy-boxH-18);
+    const boxW = textW + padX * 2;
+    const boxH = 23;
+
+    const bx = Math.max(
+      6,
+      Math.min(width - boxW - 6, cx - boxW / 2)
+    );
+
+    const by = Math.max(
+      8,
+      Math.min(height - boxH - 8, cy - boxH - 18)
+    );
+
     ctx.fillStyle = "rgba(5,6,8,.82)";
     ctx.strokeStyle = color;
     ctx.lineWidth = 1;
+
     ctx.beginPath();
-    ctx.roundRect(bx,by,boxW,boxH,9);
-    ctx.fill(); ctx.stroke();
+    ctx.roundRect(bx, by, boxW, boxH, 9);
+    ctx.fill();
+    ctx.stroke();
+
     ctx.fillStyle = "#fff";
-    ctx.fillText(label, bx+padX, by+15);
+    ctx.fillText(label, bx + padX, by + 15);
   }
 }
 
@@ -1511,13 +1736,8 @@ async function analyzePhoto(file, signal, profileFile = null) {
     );
   }
 
-  // Classification state is read only from the declared frontend state.
-  // There is intentionally no standalone `gender` variable here.
-  const requestGender = selectedGender === "female" ? "female" : "male";
-  const requestAdultConfirmed = adultConfirmed === true;
-
-  formData.append("gender", requestGender);
-  formData.append("adult_confirmed", requestAdultConfirmed ? "true" : "false");
+  formData.append("gender", selectedGender === "female" ? "female" : "male");
+  formData.append("adult_confirmed", adultConfirmed ? "true" : "false");
 
   const userGeminiKey = getGeminiApiKey();
 
@@ -2524,13 +2744,63 @@ function setAlignmentStatus(alignment, state = "done") {
 
 function applyImageAlignment(image, alignment, frameElement = null) {
   if (!image || !alignment?.available) return;
-  const rect = (frameElement || image.parentElement || image).getBoundingClientRect();
-  const tx = (0.5 - Number(alignment.center_x || 0.5)) * rect.width;
-  const ty = (0.5 - Number(alignment.center_y || 0.5)) * rect.height;
-  const rotate = Number(alignment.correction_degrees) || 0;
-  const scale = Number(alignment.scale) || 1;
+
+  const frame =
+    frameElement ||
+    image.parentElement ||
+    image;
+
+  const rect = frame.getBoundingClientRect();
+
+  const tx =
+    (0.5 - Number(alignment.center_x || 0.5)) * rect.width;
+
+  const ty =
+    (0.5 - Number(alignment.center_y || 0.5)) * rect.height;
+
+  const rotate =
+    Number(alignment.correction_degrees) || 0;
+
+  const scale =
+    Number(alignment.scale) || 1;
+
+  const transform =
+    `translate(${tx.toFixed(1)}px, ${ty.toFixed(1)}px) ` +
+    `rotate(${rotate.toFixed(2)}deg) ` +
+    `scale(${scale.toFixed(3)})`;
+
   image.style.transformOrigin = "50% 50%";
-  image.style.transform = `translate(${tx.toFixed(1)}px, ${ty.toFixed(1)}px) rotate(${rotate.toFixed(2)}deg) scale(${scale.toFixed(3)})`;
+  image.style.transform = transform;
+  image.dataset.metricBaseTransform = transform;
+
+  // The landmark canvas must receive exactly the same transform.
+  const canvas =
+    frame.querySelector?.("#landmark-canvas") ||
+    frame.querySelector?.("#result-landmark-canvas") ||
+    (image === analysisImage
+      ? landmarkCanvas
+      : document.getElementById("result-landmark-canvas"));
+
+  if (canvas) {
+    canvas.style.transformOrigin = image.style.transformOrigin;
+    canvas.style.transform = transform;
+  }
+
+  requestAnimationFrame(() => {
+    if (canvas && currentAnalysis) {
+      const view =
+        getActiveView(currentAnalysis) ||
+        currentAnalysis?.frontal ||
+        { landmarks: currentAnalysis?.landmarks || {}, type: "front" };
+
+      drawFaceLandmarkNetwork(
+        canvas,
+        view,
+        image === analysisImage ? null : activeMetric,
+        1
+      );
+    }
+  });
 }
 
 function applyAnalysisAlignment(result) {
@@ -6314,7 +6584,6 @@ function injectStageTwoStyles() {
 ============================================================ */
 
 function initClassificationSettings() {
-  // Restore saved classification settings once, after all lexical declarations exist.
   const saved = getClassificationSettings();
 
   if (saved) {
