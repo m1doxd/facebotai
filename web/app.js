@@ -2,7 +2,7 @@
 // FACE METRIC APP - UNIFIED FRONTEND v2026.08.15-gender-modal-fix
 // ============================================================
 
-window.__FACEMETRIC_APP_VERSION__ = "2026-08-15-landmark-geometry-fix-v3";
+window.__FACEMETRIC_APP_VERSION__ = "2026-08-16-merged-landmark-metric-motion-v1";
 
 
 // ============================================================
@@ -895,10 +895,6 @@ function buildDenseFrontLandmarks(mesh) {
   put("lower_lip_center", 14);
   put("chin", 152);
 
-  // Canonical internal point used by the visual network. It was previously
-  // referenced by the canvas even though the Worker did not return it.
-  put("mouth_center", 13);
-
   return Object.keys(raw).length >= 10 ? raw : null;
 }
 
@@ -1102,7 +1098,7 @@ function startAnalysisScanner() {
       clearInterval(analysisScanTimer);
       analysisScanTimer = null;
     }
-  }, 720);
+  }, 380);
 }
 
 function stopAnalysisScanner(done = false) {
@@ -1204,6 +1200,149 @@ function getMetricLinePairs(key, viewType, selectedNames) {
   return map[k] || selectedNames.slice(0, -1).map((name, i) => [name, selectedNames[i + 1]]);
 }
 
+
+function getMetricFocusConfig(key, viewType = "front") {
+  const k = String(key || "").split(".").pop().toLowerCase();
+  if (viewType === "profile") {
+    const profile = {
+      nasofacial_angle: { landmarks:["profile_glabella","profile_nasion","profile_pronasale"], zoom:2.05 },
+      nasolabial_angle: { landmarks:["profile_pronasale","profile_subnasale","profile_labiale_superius"], zoom:2.35 },
+      gonial_angle: { landmarks:["profile_pogonion","profile_gonion","profile_chin_neck"], zoom:1.9 },
+      nose_chin_projection: { landmarks:["profile_nasion","profile_pronasale","profile_pogonion"], zoom:2.0 },
+      profile_projection_balance: { landmarks:["profile_pronasale","profile_labiale_superius","profile_pogonion"], zoom:1.85 },
+      profile_harmony: { landmarks:["profile_glabella","profile_nasion","profile_pronasale","profile_pogonion","profile_menton"], zoom:1.45 }
+    };
+    return profile[k] || { landmarks:[], zoom:1.35 };
+  }
+  const exact = {
+    face_aspect_ratio:{landmarks:["left_cheekbone","right_cheekbone","forehead_center","chin"],zoom:1.18},
+    total_facial_width_to_height_ratio:{landmarks:["left_cheekbone","right_cheekbone","forehead_center","chin"],zoom:1.18},
+    face_width_to_height_ratio:{landmarks:["left_cheekbone","right_cheekbone","forehead_center","chin"],zoom:1.18},
+    brow_length_to_face_width_ratio:{landmarks:["left_brow_inner","left_brow_outer","right_brow_inner","right_brow_outer"],zoom:1.8},
+    eyebrow_low_settedness:{landmarks:["left_brow_inner","left_brow_outer","right_brow_inner","right_brow_outer","left_eye_inner","right_eye_inner"],zoom:1.95},
+    brow_symmetry:{landmarks:["left_brow_inner","left_brow_outer","right_brow_inner","right_brow_outer"],zoom:1.95},
+    eye_separation_ratio:{landmarks:["left_eye_inner","right_eye_inner"],zoom:2.1},
+    eye_spacing:{landmarks:["left_eye_inner","right_eye_inner"],zoom:2.1},
+    one_eye_apart_test:{landmarks:["left_eye_inner","right_eye_inner","left_eye_outer","right_eye_outer"],zoom:2.0},
+    eye_aspect_ratio:{landmarks:["left_eye_inner","left_eye_outer","right_eye_inner","right_eye_outer"],zoom:2.15},
+    lateral_canthal_tilt:{landmarks:["left_eye_inner","left_eye_outer","right_eye_inner","right_eye_outer"],zoom:2.1},
+    eye_alignment:{landmarks:["left_eye_inner","right_eye_inner"],zoom:2.0},
+    nose_width:{landmarks:["nose_left","nose_right","nose_tip"],zoom:2.2},
+    intercanthal_nasal_width_ratio:{landmarks:["left_eye_inner","right_eye_inner","nose_left","nose_right"],zoom:2.05},
+    mouth_width_to_nose_width_ratio:{landmarks:["mouth_left","mouth_right","nose_left","nose_right"],zoom:2.0},
+    mouth_width:{landmarks:["mouth_left","mouth_right"],zoom:2.35},
+    lower_lip_to_upper_lip_ratio:{landmarks:["upper_lip_center","lower_lip_center","mouth_left","mouth_right"],zoom:2.4},
+    mouth_corner_position:{landmarks:["mouth_left","mouth_right","upper_lip_center","lower_lip_center"],zoom:2.35},
+    mouth_symmetry:{landmarks:["mouth_left","mouth_right","upper_lip_center","lower_lip_center"],zoom:2.25},
+    nose_length:{landmarks:["nose_bridge","nose_tip"],zoom:2.2},
+    nose_tip_position:{landmarks:["nose_bridge","nose_tip","nose_left","nose_right"],zoom:2.25},
+    tip_rotation_angle:{landmarks:["nose_bridge","nose_tip","upper_lip_center"],zoom:2.15},
+    ipsilateral_alar_angle:{landmarks:["nose_left","nose_tip","upper_lip_center"],zoom:2.15},
+    jaw_width:{landmarks:["left_jaw","right_jaw"],zoom:1.65},
+    jaw_symmetry:{landmarks:["left_jaw","right_jaw","chin"],zoom:1.65},
+    jaw_frontal_angle:{landmarks:["left_cheekbone","left_jaw","chin","right_jaw","right_cheekbone"],zoom:1.55},
+    jaw_angle:{landmarks:["left_cheekbone","left_jaw","chin","right_jaw","right_cheekbone"],zoom:1.55},
+    cheekbone_height:{landmarks:["left_cheekbone","right_cheekbone","left_eye_inner","right_eye_inner"],zoom:1.7},
+    cheekbone_prominence:{landmarks:["left_cheekbone","right_cheekbone","left_jaw","right_jaw"],zoom:1.65},
+    cheek_symmetry:{landmarks:["left_cheekbone","right_cheekbone"],zoom:1.7},
+    chin_width:{landmarks:["left_jaw","chin","right_jaw"],zoom:1.75},
+    chin_definition:{landmarks:["left_jaw","chin","right_jaw"],zoom:1.8},
+    chin_to_philtrum_ratio:{landmarks:["upper_lip_center","chin"],zoom:1.95},
+    midface_ratio:{landmarks:["left_eye_inner","right_eye_inner","upper_lip_center","chin"],zoom:1.55},
+    mid_to_lower_face:{landmarks:["left_eye_inner","right_eye_inner","upper_lip_center","chin"],zoom:1.55},
+    top_third:{landmarks:["forehead_center","left_eye_inner","right_eye_inner"],zoom:1.55},
+    upper_to_lower_third:{landmarks:["forehead_center","left_eye_inner","right_eye_inner","chin"],zoom:1.4},
+    symmetry:{landmarks:["left_eye_inner","right_eye_inner","mouth_left","mouth_right","left_jaw","right_jaw"],zoom:1.3},
+    overall_symmetry:{landmarks:["left_eye_inner","right_eye_inner","mouth_left","mouth_right","left_jaw","right_jaw"],zoom:1.3},
+    neck_width:{landmarks:["left_jaw","right_jaw","chin"],zoom:1.25},
+    ear_protrusion_ratio:{landmarks:["left_cheekbone","right_cheekbone"],zoom:1.2},
+    facial_depth:{landmarks:["profile_nasion","profile_pronasale","profile_pogonion"],zoom:1.6}
+  };
+  if (exact[k]) return exact[k];
+  if (/brow|eyebrow/.test(k)) return {landmarks:["left_brow_inner","left_brow_outer","right_brow_inner","right_brow_outer"],zoom:1.9};
+  if (/eye|canthal|intercanthal/.test(k)) return {landmarks:["left_eye_inner","left_eye_outer","right_eye_inner","right_eye_outer"],zoom:2.0};
+  if (/nose|alar|nasal|tip/.test(k)) return {landmarks:["nose_bridge","nose_tip","nose_left","nose_right"],zoom:2.15};
+  if (/mouth|lip|philtrum/.test(k)) return {landmarks:["mouth_left","mouth_right","upper_lip_center","lower_lip_center"],zoom:2.25};
+  if (/jaw|chin|gonial/.test(k)) return {landmarks:["left_cheekbone","left_jaw","chin","right_jaw","right_cheekbone"],zoom:1.6};
+  if (/cheek|midface|third/.test(k)) return {landmarks:["left_cheekbone","right_cheekbone","left_eye_inner","right_eye_inner","chin"],zoom:1.5};
+  return {landmarks:[],zoom:1.25};
+}
+
+function getMetricFocusPoints(metric, view) {
+  const config = getMetricFocusConfig(metric?.key, view?.type === "profile" ? "profile" : "front");
+  const points = getOverlayPoints(view);
+  const names = (Array.isArray(metric?.value?.landmarks) && metric.value.landmarks.length)
+    ? metric.value.landmarks
+    : config.landmarks;
+  return names.filter(name => points[name]).map(name => ({ name, ...points[name] }));
+}
+
+function animateMetricLine(canvas, view, metric, duration = 720) {
+  if (!canvas || !view || !metric) return;
+  const start = performance.now();
+  const ease = t => 1 - Math.pow(1 - t, 3);
+  const frame = now => {
+    const t = Math.min(1, (now - start) / duration);
+    drawFaceLandmarkNetwork(canvas, view, metric, ease(t));
+    if (t < 1) requestAnimationFrame(frame);
+  };
+  requestAnimationFrame(frame);
+}
+
+function animateMetricFocus(metric) {
+  const visual = document.getElementById("result-visual");
+  if (!visual || !currentAnalysis || !metric) return;
+  const media = visual.querySelector(".result-visual__media");
+  const canvas = document.getElementById("result-landmark-canvas");
+  const image = visual.querySelector(".result-visual__image");
+  const view = getActiveView(currentAnalysis) || currentAnalysis.frontal || {};
+  const points = getMetricFocusPoints(metric, view);
+  const config = getMetricFocusConfig(metric.key, view?.type === "profile" ? "profile" : "front");
+  if (!media || !canvas || !points.length) {
+    drawResultMetricOverlay(metric);
+    return;
+  }
+
+  const rect = media.getBoundingClientRect();
+  const px = points.reduce((s,p) => s + Number(p.x), 0) / points.length;
+  const py = points.reduce((s,p) => s + Number(p.y), 0) / points.length;
+  const scale = Math.max(1.05, Math.min(2.65, Number(config.zoom) || 1.25));
+  const tx = (0.5 - px) * rect.width * (scale - 1);
+  const ty = (0.5 - py) * rect.height * (scale - 1);
+
+  media.style.setProperty("--metric-focus-x", `${tx.toFixed(1)}px`);
+  media.style.setProperty("--metric-focus-y", `${ty.toFixed(1)}px`);
+  media.style.setProperty("--metric-focus-scale", scale.toFixed(3));
+  media.classList.remove("metric-focus-zoom");
+  void media.offsetWidth;
+  media.classList.add("metric-focus-zoom");
+
+  image?.classList.add("metric-image-focus");
+  window.setTimeout(() => image?.classList.remove("metric-image-focus"), 900);
+
+  animateMetricLine(canvas, view, metric, 720);
+
+  let hud = visual.querySelector(".metric-focus-hud");
+  if (!hud) {
+    hud = document.createElement("div");
+    hud.className = "metric-focus-hud";
+    media.appendChild(hud);
+  }
+  const numeric = normalizeMetricValue(metric.value);
+  const score = numeric === null ? "—" : `${formatMetricScore(numeric)}/10`;
+  hud.innerHTML = `<span class="metric-focus-hud__eyebrow">LIVE METRIC</span><strong>${getRussianLabel(metric.key)}</strong><b>${score}</b>`;
+  hud.dataset.level = numeric === null ? "neutral" : getMetricLevel(numeric);
+  hud.classList.remove("is-visible");
+  void hud.offsetWidth;
+  hud.classList.add("is-visible");
+
+  window.clearTimeout(animateMetricFocus._timer);
+  animateMetricFocus._timer = window.setTimeout(() => {
+    media.classList.remove("metric-focus-zoom");
+    hud?.classList.remove("is-visible");
+  }, 2200);
+}
+
 function getOverlayImageForCanvas(canvas) {
   if (!canvas) return null;
   if (canvas.id === "result-landmark-canvas") return $(".result-visual__image", canvas.parentElement || document);
@@ -1262,7 +1401,7 @@ function drawFaceLandmarkNetwork(canvas, view, metric = null, progress = 1) {
 
   const pairs = viewType === "profile"
     ? [["profile_forehead","profile_glabella"],["profile_glabella","profile_nasion"],["profile_nasion","profile_pronasale"],["profile_pronasale","profile_subnasale"],["profile_subnasale","profile_labiale_superius"],["profile_labiale_superius","profile_labiale_inferius"],["profile_labiale_inferius","profile_pogonion"],["profile_pogonion","profile_menton"],["profile_menton","profile_chin_neck"]]
-    : [["left_eye_outer","left_eye_inner"],["left_eye_inner","right_eye_inner"],["right_eye_inner","right_eye_outer"],["left_brow_inner","left_brow_outer"],["right_brow_inner","right_brow_outer"],["nose_bridge","nose_tip"],["nose_left","nose_tip"],["nose_tip","nose_right"],["mouth_left","mouth_right"],["forehead_center","nose_bridge"],["nose_bridge","mouth_center"],["mouth_center","chin"],["left_cheekbone","left_jaw"],["left_jaw","chin"],["chin","right_jaw"],["right_jaw","right_cheekbone"]];
+    : [["left_eye_outer","left_eye_inner"],["left_eye_inner","right_eye_inner"],["right_eye_inner","right_eye_outer"],["left_brow_inner","left_brow_outer"],["right_brow_inner","right_brow_outer"],["nose_bridge","nose_tip"],["nose_left","nose_tip"],["nose_tip","nose_right"],["mouth_left","mouth_right"],["forehead_center","nose_bridge"],["nose_bridge","upper_lip_center"],["upper_lip_center","lower_lip_center"],["lower_lip_center","chin"],["left_cheekbone","left_jaw"],["left_jaw","chin"],["chin","right_jaw"],["right_jaw","right_cheekbone"]];
 
   const visiblePairs = (metric ? getMetricLinePairs(metric.key, viewType, selectedNames) : pairs)
     .filter(([a,b]) => points[a] && points[b]);
@@ -1558,12 +1697,11 @@ async function startAnalysis(file, profileFile = null) {
     const result =
       normalizeClientResult(raw);
 
-    // Replace approximate Gemini geometry with dense client landmarks before
-    // alignment and metric rendering. Gemini remains the source of semantic
-    // analysis; the detector is the source of coordinates.
+    // Reuse the exact landmarks detected before the API request.
+    // This avoids running MediaPipe twice for the same image and keeps the
+    // Worker and frontend on one coordinate set.
     try {
-      const dense = await detectDenseFrontLandmarks();
-      mergeClientFrontLandmarks(result, dense);
+      mergeClientFrontLandmarks(result, lastClientLandmarks);
     } catch (error) {
       console.warn("FaceMetric: landmark merge skipped.", error);
     }
@@ -1623,8 +1761,6 @@ async function startAnalysis(file, profileFile = null) {
     revealAnalysisScore(result.score);
 
     saveHistory(result);
-
-    await sleep(900);
 
     if (requestId !== analysisRequestId) {
       return;
@@ -4469,18 +4605,14 @@ function selectMetric(
   );
 
   if (currentAnalysis) {
-    renderMetricInspector(
-      currentAnalysis
-    );
+    renderMetricInspector(currentAnalysis);
     drawMetricOverlay(activeMetric);
+    animateMetricFocus(activeMetric);
   }
 
   const inspector = $("#metric-inspector");
   const visual = $("#result-visual");
-  visual?.classList.add("metric-focus");
-  window.setTimeout(() => visual?.classList.remove("metric-focus"), 900);
 
-  // Focus the actual face image so the selected measurement is immediately visible.
   visual?.scrollIntoView({
     behavior: "smooth",
     block: "center"
@@ -4489,7 +4621,7 @@ function selectMetric(
   window.setTimeout(() => {
     inspector?.classList.add("metric-inspector--focused");
     window.setTimeout(() => inspector?.classList.remove("metric-inspector--focused"), 900);
-  }, 260);
+  }, 180);
 }
 
 
