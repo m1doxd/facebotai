@@ -3070,3 +3070,155 @@ body.metric-reference-open{overflow:hidden}
   font: 400 14px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text",
         Inter, system-ui, sans-serif;
 }
+
+
+/* ============================================================
+   FaceMetric v3 — dark metric viewer + iOS-style modal motion
+   ============================================================ */
+
+#metric-inspector,
+#metric-reference-modal {
+  color-scheme: dark;
+}
+
+#metric-inspector {
+  background: #111113 !important;
+  color: #f5f5f7 !important;
+  border: 1px solid rgba(255,255,255,.08) !important;
+  border-radius: 24px !important;
+  box-shadow: 0 24px 70px rgba(0,0,0,.32) !important;
+}
+
+#metric-inspector .metric-inspector__header,
+#metric-inspector .metric-inspector__body,
+#metric-inspector .metric-inspector__visual,
+#metric-inspector .metric-inspector__empty {
+  color: #f5f5f7 !important;
+}
+
+#metric-reference-modal {
+  background: rgba(0,0,0,.58) !important;
+  backdrop-filter: blur(18px) saturate(125%);
+  -webkit-backdrop-filter: blur(18px) saturate(125%);
+}
+
+#metric-reference-modal .metric-reference-dialog,
+#metric-reference-modal .metric-reference-card,
+#metric-reference-modal .metric-reference-panel {
+  background: #111113 !important;
+  color: #f5f5f7 !important;
+  border-color: rgba(255,255,255,.09) !important;
+  border-radius: 26px !important;
+  box-shadow: 0 30px 90px rgba(0,0,0,.55) !important;
+}
+
+#metric-reference-modal .metric-reference-media,
+#metric-reference-modal .metric-reference-visual,
+#metric-reference-modal .metric-reference-image {
+  background: #08080a !important;
+}
+
+#metric-reference-modal [data-metric-prev],
+#metric-reference-modal [data-metric-next] {
+  z-index: 30;
+  position: relative;
+  min-width: 44px;
+  min-height: 44px;
+  border-radius: 50%;
+  background: rgba(255,255,255,.09);
+  color: #fff;
+  border: 1px solid rgba(255,255,255,.10);
+  box-shadow: 0 8px 28px rgba(0,0,0,.28);
+}
+
+#metric-reference-modal [data-metric-prev]:hover,
+#metric-reference-modal [data-metric-next]:hover {
+  background: rgba(255,255,255,.15);
+}
+
+/* Local zoom: never allow the image stage to cover the info panel. */
+#metric-reference-modal .metric-reference-media,
+#metric-reference-modal .metric-reference-visual {
+  position: relative;
+  overflow: hidden !important;
+  isolation: isolate;
+}
+
+#metric-reference-modal .metric-reference-media img,
+#metric-reference-modal .metric-reference-media canvas,
+#metric-reference-modal .metric-reference-visual img,
+#metric-reference-modal .metric-reference-visual canvas {
+  max-width: none;
+}
+
+/* iOS-like modal entrance */
+#apiKeyModal,
+#classificationModal {
+  opacity: 0;
+  transition: opacity .22s ease;
+}
+
+#apiKeyModal.show,
+#classificationModal.show,
+#apiKeyModal:not([hidden]),
+#classificationModal:not([hidden]) {
+  opacity: 1;
+}
+
+#apiKeyModal .modal-card,
+#apiKeyModal .modal-content,
+#classificationModal .modal-card,
+#classificationModal .modal-content {
+  border-radius: 26px !important;
+  background: rgba(28,28,30,.96) !important;
+  color: #f5f5f7 !important;
+  border: 1px solid rgba(255,255,255,.09) !important;
+  box-shadow: 0 30px 90px rgba(0,0,0,.52) !important;
+  transform: translateY(10px) scale(.965);
+  transition: transform .28s cubic-bezier(.22,1,.36,1),
+              opacity .22s ease;
+}
+
+#apiKeyModal.show .modal-card,
+#apiKeyModal.show .modal-content,
+#classificationModal.show .modal-card,
+#classificationModal.show .modal-content,
+#apiKeyModal:not([hidden]) .modal-card,
+#apiKeyModal:not([hidden]) .modal-content,
+#classificationModal:not([hidden]) .modal-card,
+#classificationModal:not([hidden]) .modal-content {
+  transform: translateY(0) scale(1);
+}
+
+#apiKeyModal input,
+#classificationModal input,
+#classificationModal select {
+  border-radius: 15px !important;
+  background: rgba(118,118,128,.18) !important;
+  border: 1px solid rgba(255,255,255,.08) !important;
+  color: #f5f5f7 !important;
+}
+
+#apiKeyModal button,
+#classificationModal button {
+  border-radius: 15px !important;
+  min-height: 48px;
+}
+
+#apiKeyModal button[type="submit"],
+#classificationModal button[type="submit"] {
+  background: #0a84ff !important;
+  color: #fff !important;
+  box-shadow: 0 8px 24px rgba(10,132,255,.24);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #apiKeyModal,
+  #classificationModal,
+  #apiKeyModal .modal-card,
+  #apiKeyModal .modal-content,
+  #classificationModal .modal-card,
+  #classificationModal .modal-content {
+    transition: none !important;
+  }
+}
