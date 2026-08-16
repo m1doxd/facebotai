@@ -10,10 +10,10 @@ const ALLOWED_TYPES = new Set([
 
 const DEFAULT_MODEL = "gemini-3.6-flash";
 
-// Deployment marker: 2026-08-15-landmark-geometry-fix-v3
+// Deployment marker: 2026-08-16-merged-landmark-metric-motion-v1
 // This intentionally changes the Worker source so Git/Cloudflare
 // detects a new deployment.
-const WORKER_BUILD = "2026-08-15-landmark-geometry-fix-v3";
+const WORKER_BUILD = "2026-08-16-merged-landmark-metric-motion-v1";
 
 const SCORE_MIN = 0;
 const SCORE_MAX = 10;
