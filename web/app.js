@@ -1,3 +1,9 @@
+// ============================================================
+// FACE METRIC APP - UNIFIED FRONTEND v2026.08.15-gender-modal-fix
+// ============================================================
+
+window.__FACEMETRIC_APP_VERSION__ = "2026-08-16-reference-metric-viewer-v2";
+
 
 // ============================================================
 // GEMINI BYOK
@@ -239,6 +245,7 @@ function closeGeminiKeyModal() {
   modal.classList.remove("show");
   modal.hidden = true;
   modal.setAttribute("aria-hidden", "true");
+  maybeOpenClassificationModal();
 }
 
 function initGeminiKeyModal() {
@@ -287,7 +294,7 @@ function initGeminiKeyModal() {
 
     try {
       const response = await fetchWithTimeout(
-        `${VALIDATE_KEY_ENDPOINT}?t=${Date.now()}`,
+        VALIDATE_KEY_ENDPOINT + "?t=" + Date.now(),
         {
           method: "POST",
           headers: {
@@ -405,6 +412,16 @@ const ALLOWED_TYPES = new Set([
 const API_ENDPOINT = "https://facebot-gemini.snow4lyt.workers.dev/api/analyze";
 const HEALTH_ENDPOINT = "https://facebot-gemini.snow4lyt.workers.dev/api/health";
 const VALIDATE_KEY_ENDPOINT = "https://facebot-gemini.snow4lyt.workers.dev/api/validate-key";
+
+// Dense client-side face landmarks. Gemini remains the semantic/analysis
+// engine, while MediaPipe Face Landmarker supplies stable geometric points
+// for alignment and measurement overlays. If the model cannot be loaded,
+// the app safely falls back to the Worker landmarks.
+const FACE_LANDMARKER_VERSION = "0.10.22";
+const FACE_LANDMARKER_WASM_URL = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${FACE_LANDMARKER_VERSION}/wasm`;
+const FACE_LANDMARKER_MODEL_URL = "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task";
+let faceLandmarkerPromise = null;
+let lastClientLandmarks = null;
 const HISTORY_KEY = "facemetric_history_v2";
 
 const tg = window.Telegram?.WebApp || null;
@@ -476,6 +493,12 @@ let selectedProfileObjectUrl = null;
 // Classification settings. Geometric measurements remain independent.
 let selectedGender = "male";
 let adultConfirmed = false;
+
+// Expose read-only diagnostics for debugging the deployed frontend.
+window.FaceMetricClassification = {
+  get gender() { return selectedGender === "female" ? "female" : "male"; },
+  get adultConfirmed() { return adultConfirmed === true; }
+};
 
 let currentAnalysis = null;
 let currentScreen = "home";
@@ -687,6 +710,10 @@ function initTelegram() {
 ============================================================ */
 
 function showScreen(name) {
+  if (name !== "result") {
+    closeMetricReferenceViewer();
+  }
+
   const target = document.getElementById(`screen-${name}`);
 
   if (!target) return;
@@ -794,6 +821,141 @@ function validateFile(file) {
 }
 
 
+async function getFaceLandmarker() {
+  if (faceLandmarkerPromise) return faceLandmarkerPromise;
+  faceLandmarkerPromise = (async () => {
+    try {
+      const vision = await import(`https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${FACE_LANDMARKER_VERSION}`);
+      const fileset = await vision.FilesetResolver.forVisionTasks(FACE_LANDMARKER_WASM_URL);
+      return await vision.FaceLandmarker.createFromOptions(fileset, {
+        baseOptions: {
+          modelAssetPath: FACE_LANDMARKER_MODEL_URL,
+          delegate: "GPU"
+        },
+        runningMode: "IMAGE",
+        numFaces: 1,
+        minFaceDetectionConfidence: 0.55,
+        minFacePresenceConfidence: 0.55,
+        minTrackingConfidence: 0.55
+      });
+    } catch (error) {
+      console.warn("FaceMetric: dense landmark detector unavailable; using Worker landmarks.", error);
+      faceLandmarkerPromise = null;
+      return null;
+    }
+  })();
+  return faceLandmarkerPromise;
+}
+
+function pointFromLm(landmarks, index, confidence = 0.98) {
+  const p = landmarks?.[index];
+  if (!p || !Number.isFinite(p.x) || !Number.isFinite(p.y)) return null;
+  return { x: Math.min(1, Math.max(0, p.x)), y: Math.min(1, Math.max(0, p.y)), confidence };
+}
+
+function sortedPair(a, b) {
+  if (!a || !b) return [a, b];
+  return a.x <= b.x ? [a, b] : [b, a];
+}
+
+function buildDenseFrontLandmarks(mesh) {
+  if (!Array.isArray(mesh) || mesh.length < 400) return null;
+  const raw = {};
+  const put = (name, index, confidence = 0.98) => {
+    const p = pointFromLm(mesh, index, confidence);
+    if (p) raw[name] = p;
+  };
+
+  // MediaPipe Face Mesh stable anchors. Left/right are assigned by image X,
+  // not by anatomical naming, so mirrored photos remain consistent.
+  const eyeA = sortedPair(pointFromLm(mesh, 33), pointFromLm(mesh, 263));
+  const eyeInner = sortedPair(pointFromLm(mesh, 133), pointFromLm(mesh, 362));
+  const browA = sortedPair(pointFromLm(mesh, 70), pointFromLm(mesh, 300));
+  const browOuter = sortedPair(pointFromLm(mesh, 46), pointFromLm(mesh, 276));
+  const mouth = sortedPair(pointFromLm(mesh, 61), pointFromLm(mesh, 291));
+  const noseW = sortedPair(pointFromLm(mesh, 98), pointFromLm(mesh, 327));
+  const jaw = sortedPair(pointFromLm(mesh, 172), pointFromLm(mesh, 397));
+  const cheek = sortedPair(pointFromLm(mesh, 234), pointFromLm(mesh, 454));
+
+  if (eyeA[0]) raw.left_eye_outer = eyeA[0];
+  if (eyeA[1]) raw.right_eye_outer = eyeA[1];
+  if (eyeInner[0]) raw.left_eye_inner = eyeInner[0];
+  if (eyeInner[1]) raw.right_eye_inner = eyeInner[1];
+  if (browA[0]) raw.left_brow_inner = browA[0];
+  if (browA[1]) raw.right_brow_inner = browA[1];
+  if (browOuter[0]) raw.left_brow_outer = browOuter[0];
+  if (browOuter[1]) raw.right_brow_outer = browOuter[1];
+  if (mouth[0]) raw.mouth_left = mouth[0];
+  if (mouth[1]) raw.mouth_right = mouth[1];
+  if (noseW[0]) raw.nose_left = noseW[0];
+  if (noseW[1]) raw.nose_right = noseW[1];
+  if (jaw[0]) raw.left_jaw = jaw[0];
+  if (jaw[1]) raw.right_jaw = jaw[1];
+  if (cheek[0]) raw.left_cheekbone = cheek[0];
+  if (cheek[1]) raw.right_cheekbone = cheek[1];
+
+  put("forehead_center", 10);
+  put("nose_bridge", 168);
+  put("nose_tip", 1);
+  put("upper_lip_center", 13);
+  put("lower_lip_center", 14);
+  put("chin", 152);
+
+  return Object.keys(raw).length >= 10 ? raw : null;
+}
+
+async function detectDenseFrontLandmarks() {
+  if (!analysisImage) return null;
+  if (!analysisImage.complete || !analysisImage.naturalWidth) {
+    await new Promise(resolve => {
+      const done = () => { analysisImage.removeEventListener("load", done); resolve(); };
+      analysisImage.addEventListener("load", done, { once: true });
+    });
+  }
+  const detector = await getFaceLandmarker();
+  if (!detector) return null;
+  try {
+    const result = detector.detect(analysisImage);
+    const mesh = result?.faceLandmarks?.[0];
+    const landmarks = buildDenseFrontLandmarks(mesh);
+    if (landmarks) {
+      lastClientLandmarks = landmarks;
+      return landmarks;
+    }
+  } catch (error) {
+    console.warn("FaceMetric: dense landmark detection failed.", error);
+  }
+  return null;
+}
+
+function mergeClientFrontLandmarks(result, dense) {
+  if (!result || !dense) return result;
+  const front = result.views?.front;
+  if (!front) return result;
+  front.landmarks = { ...(front.landmarks || {}), ...dense };
+  front.landmarks_count = Object.keys(front.landmarks).length;
+  result.landmarks = { ...(result.landmarks || {}), ...dense };
+  result.landmarks_count = Object.keys(result.landmarks).length;
+  result.landmark_source = "mediapipe-face-landmarker";
+  result.landmark_detector = {
+    name: "MediaPipe Face Landmarker",
+    version: FACE_LANDMARKER_VERSION,
+    geometric_points: Object.keys(dense).length
+  };
+  return result;
+}
+
+function applySameAlignmentTransform(element, alignment, frameElement = null) {
+  if (!element || !alignment?.available) return;
+  const rect = (frameElement || element.parentElement || element).getBoundingClientRect();
+  const tx = (0.5 - Number(alignment.center_x || 0.5)) * rect.width;
+  const ty = (0.5 - Number(alignment.center_y || 0.5)) * rect.height;
+  const rotate = Number(alignment.correction_degrees) || 0;
+  const scale = Number(alignment.scale) || 1;
+  element.style.transformOrigin = "50% 50%";
+  element.style.transform = `translate(${tx.toFixed(1)}px, ${ty.toFixed(1)}px) rotate(${rotate.toFixed(2)}deg) scale(${scale.toFixed(3)})`;
+}
+
 function handleFileSelected(file) {
   if (!getGeminiApiKey()) {
     openGeminiKeyModal();
@@ -810,6 +972,16 @@ function handleFileSelected(file) {
 
   cancelActiveAnalysis();
   analysisRequestId++;
+
+  // Every newly uploaded face photo gets a fresh classification confirmation.
+  // Do not reuse gender/18+ from a previous photo. The modal must appear before
+  // the user can start analysis, but confirming it must NOT start analysis.
+  clearClassificationSettings();
+  selectedGender = "male";
+  adultConfirmed = false;
+  if (genderSelect) genderSelect.value = selectedGender;
+  if (adultConfirm) adultConfirm.checked = false;
+
   selectedFile = file;
 
   revokeSelectedObjectUrl();
@@ -831,7 +1003,14 @@ function handleFileSelected(file) {
   setAnalysisState("ГОТОВО К АНАЛИЗУ");
   showProfileUploadControl();
   updateAnalysisButtonState();
-  showToast("Анфас загружен. При желании добавь профиль, затем нажми «Начать анализ».");
+
+  // Open classification only after the face photo is actually loaded.
+  // This is intentionally not tied to the Gemini-key modal.
+  window.setTimeout(() => {
+    if (selectedFile === file) openClassificationModal();
+  }, 120);
+
+  showToast("Анфас загружен. Укажи пол и подтверди 18+, затем при желании добавь профиль.");
 }
 
 function handleProfileFileSelected(file) {
@@ -925,7 +1104,7 @@ function startAnalysisScanner() {
       clearInterval(analysisScanTimer);
       analysisScanTimer = null;
     }
-  }, 720);
+  }, 380);
 }
 
 function stopAnalysisScanner(done = false) {
@@ -984,7 +1163,12 @@ function metricOverlayColor(metric) {
 }
 
 function getOverlayPoints(view) {
-  return getValidatedOverlayPoints(view);
+  const landmarks = view?.landmarks || {};
+  return Object.fromEntries(
+    Object.entries(landmarks).filter(([, p]) =>
+      p && Number.isFinite(Number(p.x)) && Number.isFinite(Number(p.y))
+    )
+  );
 }
 
 function getMetricLinePairs(key, viewType, selectedNames) {
@@ -1022,177 +1206,198 @@ function getMetricLinePairs(key, viewType, selectedNames) {
   return map[k] || selectedNames.slice(0, -1).map((name, i) => [name, selectedNames[i + 1]]);
 }
 
-function getLandmarkOverlayFrame(canvas) {
-  if (!canvas) return null;
 
-  if (canvas.id === "result-landmark-canvas") {
-    return document.getElementById("result-visual");
+function getMetricFocusConfig(key, viewType = "front") {
+  const k = String(key || "").split(".").pop().toLowerCase();
+  if (viewType === "profile") {
+    const profile = {
+      nasofacial_angle: { landmarks:["profile_glabella","profile_nasion","profile_pronasale"], zoom:2.05 },
+      nasolabial_angle: { landmarks:["profile_pronasale","profile_subnasale","profile_labiale_superius"], zoom:2.35 },
+      gonial_angle: { landmarks:["profile_pogonion","profile_gonion","profile_chin_neck"], zoom:1.9 },
+      nose_chin_projection: { landmarks:["profile_nasion","profile_pronasale","profile_pogonion"], zoom:2.0 },
+      profile_projection_balance: { landmarks:["profile_pronasale","profile_labiale_superius","profile_pogonion"], zoom:1.85 },
+      profile_harmony: { landmarks:["profile_glabella","profile_nasion","profile_pronasale","profile_pogonion","profile_menton"], zoom:1.45 }
+    };
+    return profile[k] || { landmarks:[], zoom:1.35 };
   }
-
-  return analysisFrame || canvas.parentElement || null;
-}
-
-function getLandmarkOverlayImage(canvas, frame) {
-  if (!frame) return null;
-
-  if (canvas?.id === "result-landmark-canvas") {
-    return frame.querySelector(".result-visual__image") || frame.querySelector("img");
-  }
-
-  return analysisImage || frame.querySelector("#analysis-image") || frame.querySelector("img");
-}
-
-function getLandmarkCanvasLayoutSize(canvas, frame) {
-  const width =
-    Number(frame?.clientWidth) ||
-    Number(canvas?.offsetWidth) ||
-    Number(canvas?.clientWidth) ||
-    0;
-
-  const height =
-    Number(frame?.clientHeight) ||
-    Number(canvas?.offsetHeight) ||
-    Number(canvas?.clientHeight) ||
-    0;
-
-  return { width, height };
-}
-
-function getValidatedOverlayPoints(view) {
-  const landmarks = view?.landmarks || {};
-  const result = {};
-
-  for (const [name, point] of Object.entries(landmarks)) {
-    if (!point) continue;
-
-    const x = Number(point.x);
-    const y = Number(point.y);
-
-    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
-
-    // MediaPipe-style normalized coordinates.
-    // A small tolerance allows landmarks that touch the image edge.
-    if (x < -0.08 || x > 1.08 || y < -0.08 || y > 1.08) continue;
-
-    if (point.confidence != null) {
-      const confidence = Number(point.confidence);
-      if (Number.isFinite(confidence) && confidence < 0.35) continue;
-    }
-
-    result[name] = { ...point, x, y };
-  }
-
-  return result;
-}
-
-function landmarkToCanvasPoint(point, image, frame) {
-  if (!point || !image || !frame) return null;
-
-  const x = Number(point.x);
-  const y = Number(point.y);
-
-  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
-
-  const frameWidth = Number(frame.clientWidth) || 0;
-  const frameHeight = Number(frame.clientHeight) || 0;
-  const naturalWidth = Number(image.naturalWidth) || 0;
-  const naturalHeight = Number(image.naturalHeight) || 0;
-
-  if (!frameWidth || !frameHeight || !naturalWidth || !naturalHeight) {
-    return null;
-  }
-
-  const style = getComputedStyle(image);
-  const objectFit = style.objectFit || "fill";
-
-  let renderedWidth = frameWidth;
-  let renderedHeight = frameHeight;
-  let offsetX = 0;
-  let offsetY = 0;
-
-  if (objectFit === "cover") {
-    const scale = Math.max(
-      frameWidth / naturalWidth,
-      frameHeight / naturalHeight
-    );
-
-    renderedWidth = naturalWidth * scale;
-    renderedHeight = naturalHeight * scale;
-    offsetX = (frameWidth - renderedWidth) / 2;
-    offsetY = (frameHeight - renderedHeight) / 2;
-  } else if (objectFit === "contain") {
-    const scale = Math.min(
-      frameWidth / naturalWidth,
-      frameHeight / naturalHeight
-    );
-
-    renderedWidth = naturalWidth * scale;
-    renderedHeight = naturalHeight * scale;
-    offsetX = (frameWidth - renderedWidth) / 2;
-    offsetY = (frameHeight - renderedHeight) / 2;
-  }
-
-  return {
-    x: x * renderedWidth + offsetX,
-    y: y * renderedHeight + offsetY
+  const exact = {
+    face_aspect_ratio:{landmarks:["left_cheekbone","right_cheekbone","forehead_center","chin"],zoom:1.18},
+    total_facial_width_to_height_ratio:{landmarks:["left_cheekbone","right_cheekbone","forehead_center","chin"],zoom:1.18},
+    face_width_to_height_ratio:{landmarks:["left_cheekbone","right_cheekbone","forehead_center","chin"],zoom:1.18},
+    brow_length_to_face_width_ratio:{landmarks:["left_brow_inner","left_brow_outer","right_brow_inner","right_brow_outer"],zoom:1.8},
+    eyebrow_low_settedness:{landmarks:["left_brow_inner","left_brow_outer","right_brow_inner","right_brow_outer","left_eye_inner","right_eye_inner"],zoom:1.95},
+    brow_symmetry:{landmarks:["left_brow_inner","left_brow_outer","right_brow_inner","right_brow_outer"],zoom:1.95},
+    eye_separation_ratio:{landmarks:["left_eye_inner","right_eye_inner"],zoom:2.1},
+    eye_spacing:{landmarks:["left_eye_inner","right_eye_inner"],zoom:2.1},
+    one_eye_apart_test:{landmarks:["left_eye_inner","right_eye_inner","left_eye_outer","right_eye_outer"],zoom:2.0},
+    eye_aspect_ratio:{landmarks:["left_eye_inner","left_eye_outer","right_eye_inner","right_eye_outer"],zoom:2.15},
+    lateral_canthal_tilt:{landmarks:["left_eye_inner","left_eye_outer","right_eye_inner","right_eye_outer"],zoom:2.1},
+    eye_alignment:{landmarks:["left_eye_inner","right_eye_inner"],zoom:2.0},
+    nose_width:{landmarks:["nose_left","nose_right","nose_tip"],zoom:2.2},
+    intercanthal_nasal_width_ratio:{landmarks:["left_eye_inner","right_eye_inner","nose_left","nose_right"],zoom:2.05},
+    mouth_width_to_nose_width_ratio:{landmarks:["mouth_left","mouth_right","nose_left","nose_right"],zoom:2.0},
+    mouth_width:{landmarks:["mouth_left","mouth_right"],zoom:2.35},
+    lower_lip_to_upper_lip_ratio:{landmarks:["upper_lip_center","lower_lip_center","mouth_left","mouth_right"],zoom:2.4},
+    mouth_corner_position:{landmarks:["mouth_left","mouth_right","upper_lip_center","lower_lip_center"],zoom:2.35},
+    mouth_symmetry:{landmarks:["mouth_left","mouth_right","upper_lip_center","lower_lip_center"],zoom:2.25},
+    nose_length:{landmarks:["nose_bridge","nose_tip"],zoom:2.2},
+    nose_tip_position:{landmarks:["nose_bridge","nose_tip","nose_left","nose_right"],zoom:2.25},
+    tip_rotation_angle:{landmarks:["nose_bridge","nose_tip","upper_lip_center"],zoom:2.15},
+    ipsilateral_alar_angle:{landmarks:["nose_left","nose_tip","upper_lip_center"],zoom:2.15},
+    jaw_width:{landmarks:["left_jaw","right_jaw"],zoom:1.65},
+    jaw_symmetry:{landmarks:["left_jaw","right_jaw","chin"],zoom:1.65},
+    jaw_frontal_angle:{landmarks:["left_cheekbone","left_jaw","chin","right_jaw","right_cheekbone"],zoom:1.55},
+    jaw_angle:{landmarks:["left_cheekbone","left_jaw","chin","right_jaw","right_cheekbone"],zoom:1.55},
+    cheekbone_height:{landmarks:["left_cheekbone","right_cheekbone","left_eye_inner","right_eye_inner"],zoom:1.7},
+    cheekbone_prominence:{landmarks:["left_cheekbone","right_cheekbone","left_jaw","right_jaw"],zoom:1.65},
+    cheek_symmetry:{landmarks:["left_cheekbone","right_cheekbone"],zoom:1.7},
+    chin_width:{landmarks:["left_jaw","chin","right_jaw"],zoom:1.75},
+    chin_definition:{landmarks:["left_jaw","chin","right_jaw"],zoom:1.8},
+    chin_to_philtrum_ratio:{landmarks:["upper_lip_center","chin"],zoom:1.95},
+    midface_ratio:{landmarks:["left_eye_inner","right_eye_inner","upper_lip_center","chin"],zoom:1.55},
+    mid_to_lower_face:{landmarks:["left_eye_inner","right_eye_inner","upper_lip_center","chin"],zoom:1.55},
+    top_third:{landmarks:["forehead_center","left_eye_inner","right_eye_inner"],zoom:1.55},
+    upper_to_lower_third:{landmarks:["forehead_center","left_eye_inner","right_eye_inner","chin"],zoom:1.4},
+    symmetry:{landmarks:["left_eye_inner","right_eye_inner","mouth_left","mouth_right","left_jaw","right_jaw"],zoom:1.3},
+    overall_symmetry:{landmarks:["left_eye_inner","right_eye_inner","mouth_left","mouth_right","left_jaw","right_jaw"],zoom:1.3},
+    neck_width:{landmarks:["left_jaw","right_jaw","chin"],zoom:1.25},
+    ear_protrusion_ratio:{landmarks:["left_cheekbone","right_cheekbone"],zoom:1.2},
+    facial_depth:{landmarks:["profile_nasion","profile_pronasale","profile_pogonion"],zoom:1.6}
   };
+  if (exact[k]) return exact[k];
+  if (/brow|eyebrow/.test(k)) return {landmarks:["left_brow_inner","left_brow_outer","right_brow_inner","right_brow_outer"],zoom:1.9};
+  if (/eye|canthal|intercanthal/.test(k)) return {landmarks:["left_eye_inner","left_eye_outer","right_eye_inner","right_eye_outer"],zoom:2.0};
+  if (/nose|alar|nasal|tip/.test(k)) return {landmarks:["nose_bridge","nose_tip","nose_left","nose_right"],zoom:2.15};
+  if (/mouth|lip|philtrum/.test(k)) return {landmarks:["mouth_left","mouth_right","upper_lip_center","lower_lip_center"],zoom:2.25};
+  if (/jaw|chin|gonial/.test(k)) return {landmarks:["left_cheekbone","left_jaw","chin","right_jaw","right_cheekbone"],zoom:1.6};
+  if (/cheek|midface|third/.test(k)) return {landmarks:["left_cheekbone","right_cheekbone","left_eye_inner","right_eye_inner","chin"],zoom:1.5};
+  return {landmarks:[],zoom:1.25};
 }
 
-function syncLandmarkCanvasTransform(canvas, image) {
-  if (!canvas || !image) return;
+function getMetricFocusPoints(metric, view) {
+  const config = getMetricFocusConfig(metric?.key, view?.type === "profile" ? "profile" : "front");
+  const points = getOverlayPoints(view);
+  const names = (Array.isArray(metric?.value?.landmarks) && metric.value.landmarks.length)
+    ? metric.value.landmarks
+    : config.landmarks;
+  return names.filter(name => points[name]).map(name => ({ name, ...points[name] }));
+}
 
-  const transform = image.style.transform || "none";
-  const origin = image.style.transformOrigin || "50% 50%";
+function animateMetricLine(canvas, view, metric, duration = 720) {
+  if (!canvas || !view || !metric) return;
+  const start = performance.now();
+  const ease = t => 1 - Math.pow(1 - t, 3);
+  const frame = now => {
+    const t = Math.min(1, (now - start) / duration);
+    drawFaceLandmarkNetwork(canvas, view, metric, ease(t));
+    if (t < 1) requestAnimationFrame(frame);
+  };
+  requestAnimationFrame(frame);
+}
 
-  canvas.style.transformOrigin = origin;
-  canvas.style.transform = transform;
+function animateMetricFocus(metric) {
+  const visual = document.getElementById("result-visual");
+  if (!visual || !currentAnalysis || !metric) return;
+  const media = visual.querySelector(".result-visual__media");
+  const canvas = document.getElementById("result-landmark-canvas");
+  const image = visual.querySelector(".result-visual__image");
+  const view = getActiveView(currentAnalysis) || currentAnalysis.frontal || {};
+  const points = getMetricFocusPoints(metric, view);
+  const config = getMetricFocusConfig(metric.key, view?.type === "profile" ? "profile" : "front");
+  if (!media || !canvas || !points.length) {
+    drawResultMetricOverlay(metric);
+    return;
+  }
+
+  const rect = media.getBoundingClientRect();
+  const px = points.reduce((s,p) => s + Number(p.x), 0) / points.length;
+  const py = points.reduce((s,p) => s + Number(p.y), 0) / points.length;
+  const scale = Math.max(1.05, Math.min(2.65, Number(config.zoom) || 1.25));
+  const tx = (0.5 - px) * rect.width * (scale - 1);
+  const ty = (0.5 - py) * rect.height * (scale - 1);
+
+  media.style.setProperty("--metric-focus-x", `${tx.toFixed(1)}px`);
+  media.style.setProperty("--metric-focus-y", `${ty.toFixed(1)}px`);
+  media.style.setProperty("--metric-focus-scale", scale.toFixed(3));
+  media.classList.remove("metric-focus-zoom");
+  void media.offsetWidth;
+  media.classList.add("metric-focus-zoom");
+
+  image?.classList.add("metric-image-focus");
+  window.setTimeout(() => image?.classList.remove("metric-image-focus"), 900);
+
+  animateMetricLine(canvas, view, metric, 720);
+
+  let hud = visual.querySelector(".metric-focus-hud");
+  if (!hud) {
+    hud = document.createElement("div");
+    hud.className = "metric-focus-hud";
+    media.appendChild(hud);
+  }
+  const numeric = normalizeMetricValue(metric.value);
+  const score = numeric === null ? "—" : `${formatMetricScore(numeric)}/10`;
+  hud.innerHTML = `<span class="metric-focus-hud__eyebrow">LIVE METRIC</span><strong>${getRussianLabel(metric.key)}</strong><b>${score}</b>`;
+  hud.dataset.level = numeric === null ? "neutral" : getMetricLevel(numeric);
+  hud.classList.remove("is-visible");
+  void hud.offsetWidth;
+  hud.classList.add("is-visible");
+
+  window.clearTimeout(animateMetricFocus._timer);
+  animateMetricFocus._timer = window.setTimeout(() => {
+    media.classList.remove("metric-focus-zoom");
+    hud?.classList.remove("is-visible");
+  }, 2200);
+}
+
+function getOverlayImageForCanvas(canvas) {
+  if (!canvas) return null;
+  if (canvas.id === "result-landmark-canvas") return $(".result-visual__image", canvas.parentElement || document);
+  return analysisImage;
+}
+
+function getImageContentBox(image, frameWidth, frameHeight) {
+  if (!image || !image.naturalWidth || !image.naturalHeight) {
+    return { x: 0, y: 0, width: frameWidth, height: frameHeight };
+  }
+  const style = getComputedStyle(image);
+  const fit = style.objectFit || "fill";
+  const iw = image.naturalWidth;
+  const ih = image.naturalHeight;
+  if (fit === "fill") return { x: 0, y: 0, width: frameWidth, height: frameHeight };
+  const containScale = Math.min(frameWidth / iw, frameHeight / ih);
+  const coverScale = Math.max(frameWidth / iw, frameHeight / ih);
+  const scale = fit === "cover" ? coverScale : containScale;
+  const width = iw * scale;
+  const height = ih * scale;
+  return { x: (frameWidth - width) / 2, y: (frameHeight - height) / 2, width, height };
 }
 
 function drawFaceLandmarkNetwork(canvas, view, metric = null, progress = 1) {
   if (!canvas) return;
-
-  const frame = getLandmarkOverlayFrame(canvas);
-  const image = getLandmarkOverlayImage(canvas, frame);
-
-  if (!frame || !image) return;
-
-  const { width, height } =
-    getLandmarkCanvasLayoutSize(canvas, frame);
-
+  const rect = canvas.getBoundingClientRect();
+  const width = rect.width || canvas.clientWidth;
+  const height = rect.height || canvas.clientHeight;
   if (!width || !height) return;
-
-  // Keep the canvas physically aligned with the frame.
-  canvas.style.width = `${width}px`;
-  canvas.style.height = `${height}px`;
-
   const ratio = window.devicePixelRatio || 1;
-  const pixelWidth = Math.max(1, Math.round(width * ratio));
-  const pixelHeight = Math.max(1, Math.round(height * ratio));
-
-  if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
-    canvas.width = pixelWidth;
-    canvas.height = pixelHeight;
+  if (canvas.width !== Math.round(width * ratio) || canvas.height !== Math.round(height * ratio)) {
+    canvas.width = Math.max(1, Math.round(width * ratio));
+    canvas.height = Math.max(1, Math.round(height * ratio));
   }
-
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
-
   ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
   ctx.clearRect(0, 0, width, height);
 
-  // The image may have been auto-aligned. The overlay must follow it.
-  syncLandmarkCanvasTransform(canvas, image);
-
   const viewType = view?.type === "profile" ? "profile" : "front";
-  const points = getValidatedOverlayPoints(view);
+  const points = getOverlayPoints(view);
   const names = Object.keys(points);
-
   if (!names.length) return;
-
-  const xy = name => {
-    if (!points[name]) return null;
-    return landmarkToCanvasPoint(points[name], image, frame);
-  };
+  const overlayImage = getOverlayImageForCanvas(canvas);
+  const contentBox = getImageContentBox(overlayImage, width, height);
+  const xy = name => ({
+    x: contentBox.x + Number(points[name].x) * contentBox.width,
+    y: contentBox.y + Number(points[name].y) * contentBox.height
+  });
 
   const selectedNames = metric
     ? (Array.isArray(metric.value?.landmarks) && metric.value.landmarks.length
@@ -1200,151 +1405,59 @@ function drawFaceLandmarkNetwork(canvas, view, metric = null, progress = 1) {
         : getMetricLandmarkNames(metric.key, viewType))
     : names;
 
-  // Only connect real anatomical landmarks.
-  // No synthetic `mouth_center` point.
   const pairs = viewType === "profile"
-    ? [
-        ["profile_forehead", "profile_glabella"],
-        ["profile_glabella", "profile_nasion"],
-        ["profile_nasion", "profile_pronasale"],
-        ["profile_pronasale", "profile_subnasale"],
-        ["profile_subnasale", "profile_labiale_superius"],
-        ["profile_labiale_superius", "profile_labiale_inferius"],
-        ["profile_labiale_inferius", "profile_pogonion"],
-        ["profile_pogonion", "profile_menton"],
-        ["profile_menton", "profile_chin_neck"]
-      ]
-    : [
-        ["left_eye_outer", "left_eye_inner"],
-        ["left_eye_inner", "right_eye_inner"],
-        ["right_eye_inner", "right_eye_outer"],
-        ["left_brow_inner", "left_brow_outer"],
-        ["right_brow_inner", "right_brow_outer"],
-        ["nose_bridge", "nose_tip"],
-        ["nose_left", "nose_tip"],
-        ["nose_tip", "nose_right"],
-        ["mouth_left", "mouth_right"],
-        ["forehead_center", "nose_bridge"],
-        ["nose_bridge", "upper_lip_center"],
-        ["upper_lip_center", "lower_lip_center"],
-        ["lower_lip_center", "chin"],
-        ["left_cheekbone", "left_jaw"],
-        ["left_jaw", "chin"],
-        ["chin", "right_jaw"],
-        ["right_jaw", "right_cheekbone"]
-      ];
+    ? [["profile_forehead","profile_glabella"],["profile_glabella","profile_nasion"],["profile_nasion","profile_pronasale"],["profile_pronasale","profile_subnasale"],["profile_subnasale","profile_labiale_superius"],["profile_labiale_superius","profile_labiale_inferius"],["profile_labiale_inferius","profile_pogonion"],["profile_pogonion","profile_menton"],["profile_menton","profile_chin_neck"]]
+    : [["left_eye_outer","left_eye_inner"],["left_eye_inner","right_eye_inner"],["right_eye_inner","right_eye_outer"],["left_brow_inner","left_brow_outer"],["right_brow_inner","right_brow_outer"],["nose_bridge","nose_tip"],["nose_left","nose_tip"],["nose_tip","nose_right"],["mouth_left","mouth_right"],["forehead_center","nose_bridge"],["nose_bridge","upper_lip_center"],["upper_lip_center","lower_lip_center"],["lower_lip_center","chin"],["left_cheekbone","left_jaw"],["left_jaw","chin"],["chin","right_jaw"],["right_jaw","right_cheekbone"]];
 
-  const visiblePairs = (
-    metric
-      ? getMetricLinePairs(metric.key, viewType, selectedNames)
-      : pairs
-  ).filter(([a, b]) => xy(a) && xy(b));
-
-  const safeProgress = Math.max(
-    0,
-    Math.min(1, Number(progress) || 0)
-  );
-
-  const count = Math.floor(
-    visiblePairs.length * safeProgress
-  );
-
-  const color = metric
-    ? metricOverlayColor(metric)
-    : "rgba(255,255,255,.78)";
-
+  const visiblePairs = (metric ? getMetricLinePairs(metric.key, viewType, selectedNames) : pairs)
+    .filter(([a,b]) => points[a] && points[b]);
+  const count = Math.max(0, Math.floor(visiblePairs.length * Math.max(0, Math.min(1, progress))));
+  const color = metric ? metricOverlayColor(metric) : "rgba(255,255,255,.78)";
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
   ctx.lineWidth = metric ? 2.8 : 1.15;
   ctx.strokeStyle = color;
-  ctx.shadowColor = metric
-    ? color
-    : "rgba(255,255,255,.28)";
+  ctx.shadowColor = metric ? color : "rgba(255,255,255,.28)";
   ctx.shadowBlur = metric ? 15 : 7;
-
-  for (let i = 0; i < count; i++) {
-    const [a, b] = visiblePairs[i];
-    const A = xy(a);
-    const B = xy(b);
-
-    if (!A || !B) continue;
-
-    ctx.beginPath();
-    ctx.moveTo(A.x, A.y);
-    ctx.lineTo(B.x, B.y);
-    ctx.stroke();
+  for (let i=0;i<count;i++) {
+    const [a,b]=visiblePairs[i]; const A=xy(a), B=xy(b);
+    ctx.beginPath(); ctx.moveTo(A.x,A.y); ctx.lineTo(B.x,B.y); ctx.stroke();
   }
-
   ctx.shadowBlur = 0;
 
   const radius = metric ? 3.4 : 2.1;
-
   for (const name of selectedNames) {
-    const p = xy(name);
-    if (!p) continue;
-
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
-    ctx.fillStyle = color;
+    if (!points[name]) continue;
+    const p=xy(name);
+    ctx.beginPath(); ctx.arc(p.x,p.y,radius,0,Math.PI*2);
+    ctx.fillStyle=color;
     ctx.fill();
-
     if (metric) {
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, radius + 4.5, 0, Math.PI * 2);
-      ctx.strokeStyle = "rgba(255,255,255,.58)";
-      ctx.lineWidth = 1;
-      ctx.stroke();
+      ctx.beginPath(); ctx.arc(p.x,p.y,radius+4.5,0,Math.PI*2);
+      ctx.strokeStyle="rgba(255,255,255,.58)"; ctx.lineWidth=1; ctx.stroke();
     }
   }
 
-  if (metric && selectedNames.some(name => xy(name))) {
-    const visible = selectedNames
-      .map(xy)
-      .filter(Boolean);
-
-    if (!visible.length) return;
-
-    const cx =
-      visible.reduce((sum, p) => sum + p.x, 0) / visible.length;
-    const cy =
-      visible.reduce((sum, p) => sum + p.y, 0) / visible.length;
-
+  if (metric && selectedNames.some(name => points[name])) {
+    const visible = selectedNames.filter(name => points[name]).map(xy);
+    const cx = visible.reduce((s,p)=>s+p.x,0)/visible.length;
+    const cy = visible.reduce((s,p)=>s+p.y,0)/visible.length;
     const value = normalizeMetricValue(metric.value);
-    const label =
-      `${getRussianLabel(metric.key)}${
-        value !== null
-          ? ` · ${formatMetricScore(value)}/10`
-          : ""
-      }`;
-
+    const label = `${getRussianLabel(metric.key)}${value !== null ? ` · ${formatMetricScore(value)}/10` : ""}`;
     ctx.font = "700 10px Inter, Arial, sans-serif";
-
-    const padX = 9;
+    const padX = 9, padY = 6;
     const textW = ctx.measureText(label).width;
-    const boxW = textW + padX * 2;
-    const boxH = 23;
-
-    const bx = Math.max(
-      6,
-      Math.min(width - boxW - 6, cx - boxW / 2)
-    );
-
-    const by = Math.max(
-      8,
-      Math.min(height - boxH - 8, cy - boxH - 18)
-    );
-
+    const boxW = textW + padX*2, boxH = 23;
+    const bx = Math.max(6, Math.min(width-boxW-6, cx-boxW/2));
+    const by = Math.max(8, cy-boxH-18);
     ctx.fillStyle = "rgba(5,6,8,.82)";
     ctx.strokeStyle = color;
     ctx.lineWidth = 1;
-
     ctx.beginPath();
-    ctx.roundRect(bx, by, boxW, boxH, 9);
-    ctx.fill();
-    ctx.stroke();
-
+    ctx.roundRect(bx,by,boxW,boxH,9);
+    ctx.fill(); ctx.stroke();
     ctx.fillStyle = "#fff";
-    ctx.fillText(label, bx + padX, by + 15);
+    ctx.fillText(label, bx+padX, by+15);
   }
 }
 
@@ -1590,6 +1703,23 @@ async function startAnalysis(file, profileFile = null) {
     const result =
       normalizeClientResult(raw);
 
+    // Reuse the exact landmarks detected before the API request.
+    // This avoids running MediaPipe twice for the same image and keeps the
+    // Worker and frontend on one coordinate set.
+    try {
+      mergeClientFrontLandmarks(result, lastClientLandmarks);
+    } catch (error) {
+      console.warn("FaceMetric: landmark merge skipped.", error);
+    }
+
+    // Recalculate alignment from the final geometric landmarks so the image,
+    // canvas and downstream measurements all share the same coordinate frame.
+    result.alignment = normalizeAlignmentSet(
+      result.alignment,
+      result.views?.front?.landmarks || result.landmarks || {},
+      result.views?.profile?.landmarks || {}
+    );
+
     if (
       result.face_count <= 0 ||
       result.score === null
@@ -1637,8 +1767,6 @@ async function startAnalysis(file, profileFile = null) {
     revealAnalysisScore(result.score);
 
     saveHistory(result);
-
-    await sleep(900);
 
     if (requestId !== analysisRequestId) {
       return;
@@ -1729,6 +1857,18 @@ async function analyzePhoto(file, signal, profileFile = null) {
     file.name || "front.jpg"
   );
 
+  // Detect precise front landmarks before the server analysis so the Worker
+  // can use the same coordinates when producing geometry metrics.
+  let denseLandmarks = lastClientLandmarks;
+  try {
+    denseLandmarks = await detectDenseFrontLandmarks();
+  } catch (error) {
+    console.warn("FaceMetric: pre-analysis landmark detection skipped.", error);
+  }
+  if (denseLandmarks) {
+    formData.append("client_landmarks", JSON.stringify(denseLandmarks));
+  }
+
   if (profileFile) {
     formData.append(
       "profile",
@@ -1737,8 +1877,13 @@ async function analyzePhoto(file, signal, profileFile = null) {
     );
   }
 
-  formData.append("gender", selectedGender === "female" ? "female" : "male");
-  formData.append("adult_confirmed", adultConfirmed ? "true" : "false");
+  // Classification state is read only from the declared frontend state.
+  // There is intentionally no standalone `gender` variable here.
+  const requestGender = selectedGender === "female" ? "female" : "male";
+  const requestAdultConfirmed = adultConfirmed === true;
+
+  formData.append("gender", requestGender);
+  formData.append("adult_confirmed", requestAdultConfirmed ? "true" : "false");
 
   const userGeminiKey = getGeminiApiKey();
 
@@ -2745,62 +2890,13 @@ function setAlignmentStatus(alignment, state = "done") {
 
 function applyImageAlignment(image, alignment, frameElement = null) {
   if (!image || !alignment?.available) return;
-
-  const frame =
-    frameElement ||
-    image.parentElement ||
-    image;
-
-  const rect = frame.getBoundingClientRect();
-
-  const tx =
-    (0.5 - Number(alignment.center_x || 0.5)) * rect.width;
-
-  const ty =
-    (0.5 - Number(alignment.center_y || 0.5)) * rect.height;
-
-  const rotate =
-    Number(alignment.correction_degrees) || 0;
-
-  const scale =
-    Number(alignment.scale) || 1;
-
-  const transform =
-    `translate(${tx.toFixed(1)}px, ${ty.toFixed(1)}px) ` +
-    `rotate(${rotate.toFixed(2)}deg) ` +
-    `scale(${scale.toFixed(3)})`;
-
+  const rect = (frameElement || image.parentElement || image).getBoundingClientRect();
+  const tx = (0.5 - Number(alignment.center_x || 0.5)) * rect.width;
+  const ty = (0.5 - Number(alignment.center_y || 0.5)) * rect.height;
+  const rotate = Number(alignment.correction_degrees) || 0;
+  const scale = Number(alignment.scale) || 1;
   image.style.transformOrigin = "50% 50%";
-  image.style.transform = transform;
-
-  // The landmark canvas must receive exactly the same transform.
-  const canvas =
-    frame.querySelector?.("#landmark-canvas") ||
-    frame.querySelector?.("#result-landmark-canvas") ||
-    (image === analysisImage
-      ? landmarkCanvas
-      : document.getElementById("result-landmark-canvas"));
-
-  if (canvas) {
-    canvas.style.transformOrigin = image.style.transformOrigin;
-    canvas.style.transform = transform;
-  }
-
-  requestAnimationFrame(() => {
-    if (canvas && currentAnalysis) {
-      const view =
-        getActiveView(currentAnalysis) ||
-        currentAnalysis?.frontal ||
-        { landmarks: currentAnalysis?.landmarks || {}, type: "front" };
-
-      drawFaceLandmarkNetwork(
-        canvas,
-        view,
-        image === analysisImage ? null : activeMetric,
-        1
-      );
-    }
-  });
+  image.style.transform = `translate(${tx.toFixed(1)}px, ${ty.toFixed(1)}px) rotate(${rotate.toFixed(2)}deg) scale(${scale.toFixed(3)})`;
 }
 
 function applyAnalysisAlignment(result) {
@@ -2819,7 +2915,8 @@ function applyAnalysisAlignment(result) {
   }
 
   requestAnimationFrame(() => {
-    applyImageAlignment(analysisImage, alignment, analysisFrame);
+    applySameAlignmentTransform(analysisImage, alignment, analysisFrame);
+    applySameAlignmentTransform(landmarkCanvas, alignment, analysisFrame);
     setTimeout(() => setAlignmentStatus(alignment, "done"), 450);
   });
 }
@@ -2909,18 +3006,17 @@ function ensureResultFace(result) {
 
     visual.innerHTML = `
       <div class="result-visual__media">
-        <div class="result-visual__media-inner">
-          <img
-            class="result-visual__image"
-            alt="Результат анализа"
-          >
 
-          <canvas
-            id="result-landmark-canvas"
-            class="result-landmark-canvas"
-            aria-hidden="true"
-          ></canvas>
-        </div>
+        <img
+          class="result-visual__image"
+          alt="Результат анализа"
+        >
+
+        <canvas
+          id="result-landmark-canvas"
+          class="result-landmark-canvas"
+          aria-hidden="true"
+        ></canvas>
 
         <div class="result-visual__shade"></div>
 
@@ -2991,7 +3087,11 @@ function ensureResultFace(result) {
     image.src = source;
     const alignment = result?.alignment?.[view?.type === "profile" ? "profile" : "front"];
     if (alignment?.available) {
-      requestAnimationFrame(() => applyImageAlignment(image, alignment, visual));
+      requestAnimationFrame(() => {
+        applySameAlignmentTransform(image, alignment, visual);
+        const resultCanvas = $("#result-landmark-canvas", visual);
+        applySameAlignmentTransform(resultCanvas, alignment, visual);
+      });
     }
   }
 
@@ -4303,8 +4403,6 @@ function renderMetricInspector(
   }
 
   if (!activeMetric) {
-    resetMetricFocusTransform();
-    document.getElementById("result-visual")?.classList.remove("metric-focus");
     inspector.innerHTML = `
       <div class="metric-inspector__empty">
         <span class="metric-inspector__icon">⌖</span>
@@ -4490,75 +4588,255 @@ function drawResultMetricOverlay(metric = null) {
   if (!canvas || !visual || !currentAnalysis) return;
   const view = getActiveView(currentAnalysis) || {};
   drawFaceLandmarkNetwork(canvas, view, metric, 1);
+  const alignment = currentAnalysis?.alignment?.[view?.type === "profile" ? "profile" : "front"];
+  if (alignment?.available) applySameAlignmentTransform(canvas, alignment, visual);
 }
 
-function resetMetricFocusTransform() {
-  const visual = document.getElementById("result-visual");
-  const stage = visual?.querySelector(".result-visual__media-inner");
-  if (!stage) return;
-  stage.style.transform = "translate3d(0,0,0) scale(1)";
-  stage.style.transformOrigin = "50% 50%";
+function getMetricNumericScore(metric) {
+  if (!metric) return null;
+  const raw = isObject(metric.value) && Object.prototype.hasOwnProperty.call(metric.value, "score")
+    ? metric.value.score
+    : metric.value;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 && n <= 10 ? n : null;
 }
 
-function applyMetricFocusTransform(metric) {
-  const visual = document.getElementById("result-visual");
-  const stage = visual?.querySelector(".result-visual__media-inner");
-  if (!visual || !stage || !currentAnalysis || !metric) {
-    resetMetricFocusTransform();
+function getMetricRawLandmarks(metric) {
+  if (!metric || !isObject(metric.value)) return [];
+  return Array.isArray(metric.value.landmarks) ? metric.value.landmarks : [];
+}
+
+function getMetricReferenceItems() {
+  return $$(".scale-card[data-metric]")
+    .map(card => ({
+      key: card.dataset.metric,
+      value: currentAnalysis?.metrics
+        ? getNestedValue(currentAnalysis.metrics, card.dataset.metric)
+        : null
+    }))
+    .filter(item => item.key);
+}
+
+function getNestedValue(object, path) {
+  if (!object || !path) return null;
+  return String(path).split(".").reduce((acc, part) => acc == null ? null : acc[part], object);
+}
+
+function metricReferenceGradient(score) {
+  const value = score == null ? 0 : clamp(score, 0, 10);
+  return `linear-gradient(90deg, #d84d63 0%, #d7a84a 48%, #4fc98b 100%)`;
+}
+
+function metricReferenceGraph(score) {
+  const value = score == null ? 5 : clamp(score, 0, 10);
+  const x = 24 + value * 15.2;
+  return `
+    <svg class="metric-reference-graph" viewBox="0 0 200 76" aria-hidden="true">
+      <path class="metric-reference-axis" d="M12 62H188" />
+      <path class="metric-reference-curve" d="M12 62 C42 62 45 16 100 16 C155 16 158 62 188 62" />
+      <path class="metric-reference-fill" d="M12 62 C42 62 45 16 100 16 C155 16 158 62 188 62 Z" />
+      <line class="metric-reference-marker" x1="${x}" y1="10" x2="${x}" y2="62" />
+      <circle class="metric-reference-dot" cx="${x}" cy="10" r="3.5" />
+    </svg>`;
+}
+
+function animateMetricReferenceScore(element, target) {
+  if (!element) return;
+  if (!Number.isFinite(target)) {
+    element.textContent = "—";
     return;
   }
+  const start = performance.now();
+  const duration = 700;
+  const ease = t => 1 - Math.pow(1 - t, 3);
+  const tick = now => {
+    const p = Math.min(1, (now - start) / duration);
+    element.textContent = `${formatMetricScore(target * ease(p))}`;
+    if (p < 1) requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}
 
-  const canvas = document.getElementById("result-landmark-canvas");
-  const image = visual.querySelector(".result-visual__image");
-  if (!canvas || !image) return;
+function closeMetricReferenceViewer() {
+  const modal = document.getElementById("metric-reference-viewer");
+  if (!modal) return;
+  modal.classList.remove("is-open");
+  document.body.classList.remove("metric-reference-open");
+  if (window.__faceMetricReferenceKeyHandler) {
+    document.removeEventListener("keydown", window.__faceMetricReferenceKeyHandler);
+    window.__faceMetricReferenceKeyHandler = null;
+  }
+  window.setTimeout(() => modal.remove(), 260);
+}
 
-  const view = getActiveView(currentAnalysis) || {};
-  const points = getValidatedOverlayPoints(view);
-  const viewType = view?.type === "profile" ? "profile" : "front";
+function openMetricReferenceViewer(metric) {
+  if (!metric || !currentAnalysis) return;
 
-  const names = Array.isArray(metric.value?.landmarks) && metric.value.landmarks.length
-    ? metric.value.landmarks
-    : getMetricLandmarkNames(metric.key, viewType);
+  closeMetricReferenceViewer();
 
-  const visible = names
-    .filter(name => points[name])
-    .map(name => landmarkToCanvasPoint(points[name], image, visual))
-    .filter(Boolean);
+  const view = getActiveView(currentAnalysis) || currentAnalysis.frontal || { type: "front", landmarks: {} };
+  const source = getViewImageSource(view);
+  const score = getMetricNumericScore(metric);
+  const zone = getMetricZone(metric.key);
+  const focus = getMetricFocusConfig(metric.key, view?.type === "profile" ? "profile" : "front");
+  const points = getMetricFocusPoints(metric, view);
+  const items = getMetricReferenceItems();
+  const index = Math.max(0, items.findIndex(item => item.key === metric.key));
+  const prev = items[index - 1] || null;
+  const next = items[index + 1] || null;
 
-  if (visible.length < 2) {
-    resetMetricFocusTransform();
-    return;
+  const modal = document.createElement("div");
+  modal.id = "metric-reference-viewer";
+  modal.className = "metric-reference-viewer";
+  modal.innerHTML = `
+    <div class="metric-reference-viewer__backdrop" data-close-metric></div>
+    <section class="metric-reference-viewer__dialog" role="dialog" aria-modal="true" aria-label="${escapeHtml(getRussianLabel(metric.key))}">
+      <button class="metric-reference-viewer__close" type="button" data-close-metric aria-label="Закрыть">×</button>
+      <button class="metric-reference-viewer__nav metric-reference-viewer__nav--prev" type="button" data-metric-prev ${prev ? "" : "disabled"} aria-label="Предыдущая метрика">‹</button>
+      <button class="metric-reference-viewer__nav metric-reference-viewer__nav--next" type="button" data-metric-next ${next ? "" : "disabled"} aria-label="Следующая метрика">›</button>
+
+      <div class="metric-reference-viewer__titlebar">
+        <div>
+          <span class="metric-reference-viewer__eyebrow">FACIAL METRIC</span>
+          <h2>${escapeHtml(getRussianLabel(metric.key))}</h2>
+        </div>
+        <span class="metric-reference-viewer__index">${index + 1} / ${Math.max(items.length, 1)}</span>
+      </div>
+
+      <div class="metric-reference-viewer__body">
+        <div class="metric-reference-viewer__visual-wrap">
+          <div class="metric-reference-viewer__visual">
+            <div class="metric-reference-viewer__media">
+              <div class="metric-reference-viewer__zoom-layer">
+                <img class="metric-reference-viewer__image" alt="Фокус метрики" src="${source || ""}">
+                <canvas class="metric-reference-viewer__canvas" aria-hidden="true"></canvas>
+              </div>
+              <div class="metric-reference-viewer__scan"></div>
+              <div class="metric-reference-viewer__corner c1"></div>
+              <div class="metric-reference-viewer__corner c2"></div>
+              <div class="metric-reference-viewer__corner c3"></div>
+              <div class="metric-reference-viewer__corner c4"></div>
+              <div class="metric-reference-viewer__metric-tag">${escapeHtml(getRussianLabel(metric.key))}</div>
+            </div>
+          </div>
+        </div>
+
+        <aside class="metric-reference-viewer__panel">
+          <div class="metric-reference-scoreline">
+            <div>
+              <span>SCORE</span>
+              <strong><b data-metric-score>—</b><small>/10</small></strong>
+            </div>
+            <span class="metric-reference-scoreline__status" data-metric-status>${score == null ? "Недостаточно данных" : getMetricStatus(score)}</span>
+          </div>
+
+          <div class="metric-reference-bar" style="--metric-position:${score == null ? 50 : score * 10}%; --metric-gradient:${metricReferenceGradient(score)}">
+            <i></i>
+          </div>
+
+          <div class="metric-reference-tabs" role="tablist">
+            <button class="is-active" type="button" data-ref-tab="overview">Обзор</button>
+            <button type="button" data-ref-tab="geometry">Геометрия</button>
+            <button type="button" data-ref-tab="interpretation">Интерпретация</button>
+          </div>
+
+          <div class="metric-reference-content is-active" data-ref-panel="overview">
+            <span class="metric-reference-label">ABOUT THIS METRIC</span>
+            <h3>${escapeHtml(zone.label || "Измерение лица")}</h3>
+            <p>${escapeHtml(zone.description || "Метрика рассчитывается по видимым точкам лица и оценивается с учётом качества изображения.")}</p>
+            <div class="metric-reference-mini">
+              <span>LANDMARKS</span>
+              <strong>${points.length || getMetricRawLandmarks(metric).length || "—"}</strong>
+            </div>
+          </div>
+
+          <div class="metric-reference-content" data-ref-panel="geometry">
+            <span class="metric-reference-label">LANDMARK GEOMETRY</span>
+            <div class="metric-reference-landmarks">
+              ${(points.length ? points : getMetricRawLandmarks(metric).map(name => ({name}))).map(p => `<span>${escapeHtml(String(p.name || "landmark"))}</span>`).join("") || `<em>Точки для этой метрики не определены.</em>`}
+            </div>
+            <p>Линии строятся по координатам landmark-модели. Gemini не должен произвольно перемещать эти точки.</p>
+          </div>
+
+          <div class="metric-reference-content" data-ref-panel="interpretation">
+            <span class="metric-reference-label">INTERPRETATION</span>
+            <h3 data-metric-interpretation>${score == null ? "Недостаточно данных" : getMetricStatus(score)}</h3>
+            <p>Значение отображается вместе с визуальной геометрией и шкалой. Для метрик, требующих другого ракурса, используется соответствующий view.</p>
+            ${metricReferenceGraph(score)}
+          </div>
+        </aside>
+      </div>
+    </section>
+  `;
+
+  document.body.appendChild(modal);
+  document.body.classList.add("metric-reference-open");
+
+  const media = modal.querySelector(".metric-reference-viewer__media");
+  const zoomLayer = modal.querySelector(".metric-reference-viewer__zoom-layer");
+  const image = modal.querySelector(".metric-reference-viewer__image");
+  const canvas = modal.querySelector(".metric-reference-viewer__canvas");
+  const tag = modal.querySelector(".metric-reference-viewer__metric-tag");
+  const scoreElement = modal.querySelector("[data-metric-score]");
+
+  const focusApply = () => {
+    if (!media || !zoomLayer || !canvas || !image) return;
+    const frame = media.getBoundingClientRect();
+    const px = points.length ? points.reduce((sum, p) => sum + Number(p.x || 0.5), 0) / points.length : 0.5;
+    const py = points.length ? points.reduce((sum, p) => sum + Number(p.y || 0.5), 0) / points.length : 0.5;
+    const scale = Math.max(1, Math.min(2.25, Number(focus.zoom) || 1.25));
+    const tx = (0.5 - px) * frame.width * (scale - 1);
+    const ty = (0.5 - py) * frame.height * (scale - 1);
+
+    zoomLayer.style.setProperty("--ref-focus-x", `${tx.toFixed(1)}px`);
+    zoomLayer.style.setProperty("--ref-focus-y", `${ty.toFixed(1)}px`);
+    zoomLayer.style.setProperty("--ref-focus-scale", scale.toFixed(3));
+
+    const alignment = currentAnalysis?.alignment?.[view?.type === "profile" ? "profile" : "front"];
+    if (alignment?.available) {
+      applySameAlignmentTransform(zoomLayer, alignment, media);
+    } else {
+      zoomLayer.style.transform = "none";
+    }
+
+    drawFaceLandmarkNetwork(canvas, view, metric, 0);
+    requestAnimationFrame(() => {
+      zoomLayer.classList.add("is-focused");
+      animateMetricLine(canvas, view, metric, 760);
+      tag?.classList.add("is-visible");
+    });
+  };
+
+  if (image?.complete) {
+    requestAnimationFrame(focusApply);
+  } else {
+    image?.addEventListener("load", focusApply, { once: true });
   }
 
-  const stageWidth = visual.clientWidth || 1;
-  const stageHeight = visual.clientHeight || 1;
+  animateMetricReferenceScore(scoreElement, score);
 
-  const minX = Math.min(...visible.map(p => p.x));
-  const maxX = Math.max(...visible.map(p => p.x));
-  const minY = Math.min(...visible.map(p => p.y));
-  const maxY = Math.max(...visible.map(p => p.y));
+  modal.querySelectorAll("[data-close-metric]").forEach(el => el.addEventListener("click", closeMetricReferenceViewer));
+  modal.querySelector("[data-metric-prev]")?.addEventListener("click", () => prev && openMetricReferenceViewer(prev));
+  modal.querySelector("[data-metric-next]")?.addEventListener("click", () => next && openMetricReferenceViewer(next));
+  modal.querySelectorAll("[data-ref-tab]").forEach(button => {
+    button.addEventListener("click", () => {
+      const target = button.dataset.refTab;
+      modal.querySelectorAll("[data-ref-tab]").forEach(b => b.classList.toggle("is-active", b === button));
+      modal.querySelectorAll("[data-ref-panel]").forEach(panel => panel.classList.toggle("is-active", panel.dataset.refPanel === target));
+    });
+  });
 
-  const boxW = Math.max(1, maxX - minX);
-  const boxH = Math.max(1, maxY - minY);
-
-  const scale = Math.max(
-    1,
-    Math.min(
-      1.65,
-      (stageWidth * 0.42) / boxW,
-      (stageHeight * 0.42) / boxH
-    )
-  );
-
-  const cx = (minX + maxX) / 2;
-  const cy = (minY + maxY) / 2;
-
-  const tx = stageWidth / 2 - cx;
-  const ty = stageHeight / 2 - cy;
-
-  stage.style.transformOrigin = "50% 50%";
-  stage.style.transform =
-    `translate3d(${tx.toFixed(1)}px, ${ty.toFixed(1)}px, 0) scale(${scale.toFixed(3)})`;
+  window.__faceMetricReferenceKeyHandler = event => {
+    if (!document.getElementById("metric-reference-viewer")) return;
+    if (event.key === "Escape") closeMetricReferenceViewer();
+    if (event.key === "ArrowLeft" && prev) openMetricReferenceViewer(prev);
+    if (event.key === "ArrowRight" && next) openMetricReferenceViewer(next);
+  };
+  document.addEventListener("keydown", window.__faceMetricReferenceKeyHandler);
+  window.setTimeout(() => {
+    modal.classList.add("is-open");
+    modal.querySelector(".metric-reference-viewer__dialog")?.focus?.();
+  }, 20);
 }
 
 function selectMetric(
@@ -4580,22 +4858,24 @@ function selectMetric(
   );
 
   if (currentAnalysis) {
-    renderMetricInspector(
-      currentAnalysis
-    );
+    renderMetricInspector(currentAnalysis);
     drawMetricOverlay(activeMetric);
+    animateMetricFocus(activeMetric);
+    openMetricReferenceViewer(activeMetric);
   }
 
   const inspector = $("#metric-inspector");
   const visual = $("#result-visual");
 
-  visual?.classList.add("metric-focus");
-  applyMetricFocusTransform(activeMetric);
+  visual?.scrollIntoView({
+    behavior: "smooth",
+    block: "center"
+  });
 
   window.setTimeout(() => {
     inspector?.classList.add("metric-inspector--focused");
     window.setTimeout(() => inspector?.classList.remove("metric-inspector--focused"), 900);
-  }, 260);
+  }, 180);
 }
 
 
@@ -6223,57 +6503,9 @@ function injectStageTwoStyles() {
       background: rgba(255,255,255,.055);
     }
 
-    /* Metric viewer: zoom is clipped to the image stage only. */
-    #result-visual {
-      position: relative;
-      overflow: hidden;
-      isolation: isolate;
-      min-width: 0;
-      max-width: 100%;
-    }
-
-    #result-visual .result-visual__media {
-      position: relative;
-      overflow: hidden;
-      min-width: 0;
-      max-width: 100%;
-      contain: paint;
-    }
-
-    #result-visual .result-visual__media-inner {
-      position: absolute;
-      inset: 0;
-      width: 100%;
-      height: 100%;
-      transform-origin: 50% 50%;
-      transition: transform 720ms cubic-bezier(.22,.8,.2,1);
-      will-change: transform;
-      z-index: 1;
-    }
-
-    #result-visual .result-visual__image,
-    #result-visual #result-landmark-canvas {
-      position: absolute;
-      inset: 0;
-      width: 100%;
-      height: 100%;
-      transform-origin: 50% 50%;
-      will-change: transform;
-      backface-visibility: hidden;
-    }
-
-    #result-visual.metric-focus .result-visual__region-layer,
-    #result-visual.metric-focus .result-region {
-      display: none !important;
-    }
-
     .metric-inspector {
       margin: 18px 0;
       padding: 16px;
-      width: 100%;
-      max-width: 100%;
-      box-sizing: border-box;
-      overflow: hidden;
       border: 1px solid rgba(255,255,255,.08);
       border-radius: 18px;
       background:
@@ -6579,6 +6811,7 @@ function injectStageTwoStyles() {
 ============================================================ */
 
 function initClassificationSettings() {
+  // Restore saved classification settings once, after all lexical declarations exist.
   const saved = getClassificationSettings();
 
   if (saved) {
