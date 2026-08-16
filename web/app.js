@@ -2,7 +2,7 @@
 // FACE METRIC APP - UNIFIED FRONTEND v2026.08.15-gender-modal-fix
 // ============================================================
 
-window.__FACEMETRIC_APP_VERSION__ = "2026-08-16-merged-landmark-metric-motion-v1";
+window.__FACEMETRIC_APP_VERSION__ = "2026-08-16-reference-metric-viewer-v2";
 
 
 // ============================================================
@@ -292,21 +292,21 @@ function initGeminiKeyModal() {
     saveButton.disabled = true;
     saveButton.textContent = "Проверяем ключ…";
 
-   try {
+    try {
       const response = await fetchWithTimeout(
-      VALIDATE_KEY_ENDPOINT + "?t=" + Date.now(),
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-        "X-Gemini-Key": key
-      },
-      body: JSON.stringify({}),
-      cache: "no-store"
-    },
-    HEALTH_TIMEOUT
-  );
+        VALIDATE_KEY_ENDPOINT + "?t=" + Date.now(),
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+            "X-Gemini-Key": key
+          },
+          body: JSON.stringify({}),
+          cache: "no-store"
+        },
+        HEALTH_TIMEOUT
+      );
 
       const text = await response.text();
       let data = null;
@@ -710,6 +710,10 @@ function initTelegram() {
 ============================================================ */
 
 function showScreen(name) {
+  if (name !== "result") {
+    closeMetricReferenceViewer();
+  }
+
   const target = document.getElementById(`screen-${name}`);
 
   if (!target) return;
@@ -4588,6 +4592,246 @@ function drawResultMetricOverlay(metric = null) {
   if (alignment?.available) applySameAlignmentTransform(canvas, alignment, visual);
 }
 
+function getMetricNumericScore(metric) {
+  if (!metric) return null;
+  const raw = isObject(metric.value) && Object.prototype.hasOwnProperty.call(metric.value, "score")
+    ? metric.value.score
+    : metric.value;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 && n <= 10 ? n : null;
+}
+
+function getMetricRawLandmarks(metric) {
+  if (!metric || !isObject(metric.value)) return [];
+  return Array.isArray(metric.value.landmarks) ? metric.value.landmarks : [];
+}
+
+function getMetricReferenceItems() {
+  return $$(".scale-card[data-metric]")
+    .map(card => ({
+      key: card.dataset.metric,
+      value: currentAnalysis?.metrics
+        ? getNestedValue(currentAnalysis.metrics, card.dataset.metric)
+        : null
+    }))
+    .filter(item => item.key);
+}
+
+function getNestedValue(object, path) {
+  if (!object || !path) return null;
+  return String(path).split(".").reduce((acc, part) => acc == null ? null : acc[part], object);
+}
+
+function metricReferenceGradient(score) {
+  const value = score == null ? 0 : clamp(score, 0, 10);
+  return `linear-gradient(90deg, #d84d63 0%, #d7a84a 48%, #4fc98b 100%)`;
+}
+
+function metricReferenceGraph(score) {
+  const value = score == null ? 5 : clamp(score, 0, 10);
+  const x = 24 + value * 15.2;
+  return `
+    <svg class="metric-reference-graph" viewBox="0 0 200 76" aria-hidden="true">
+      <path class="metric-reference-axis" d="M12 62H188" />
+      <path class="metric-reference-curve" d="M12 62 C42 62 45 16 100 16 C155 16 158 62 188 62" />
+      <path class="metric-reference-fill" d="M12 62 C42 62 45 16 100 16 C155 16 158 62 188 62 Z" />
+      <line class="metric-reference-marker" x1="${x}" y1="10" x2="${x}" y2="62" />
+      <circle class="metric-reference-dot" cx="${x}" cy="10" r="3.5" />
+    </svg>`;
+}
+
+function animateMetricReferenceScore(element, target) {
+  if (!element) return;
+  if (!Number.isFinite(target)) {
+    element.textContent = "—";
+    return;
+  }
+  const start = performance.now();
+  const duration = 700;
+  const ease = t => 1 - Math.pow(1 - t, 3);
+  const tick = now => {
+    const p = Math.min(1, (now - start) / duration);
+    element.textContent = `${formatMetricScore(target * ease(p))}`;
+    if (p < 1) requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}
+
+function closeMetricReferenceViewer() {
+  const modal = document.getElementById("metric-reference-viewer");
+  if (!modal) return;
+  modal.classList.remove("is-open");
+  document.body.classList.remove("metric-reference-open");
+  if (window.__faceMetricReferenceKeyHandler) {
+    document.removeEventListener("keydown", window.__faceMetricReferenceKeyHandler);
+    window.__faceMetricReferenceKeyHandler = null;
+  }
+  window.setTimeout(() => modal.remove(), 260);
+}
+
+function openMetricReferenceViewer(metric) {
+  if (!metric || !currentAnalysis) return;
+
+  closeMetricReferenceViewer();
+
+  const view = getActiveView(currentAnalysis) || currentAnalysis.frontal || { type: "front", landmarks: {} };
+  const source = getViewImageSource(view);
+  const score = getMetricNumericScore(metric);
+  const zone = getMetricZone(metric.key);
+  const focus = getMetricFocusConfig(metric.key, view?.type === "profile" ? "profile" : "front");
+  const points = getMetricFocusPoints(metric, view);
+  const items = getMetricReferenceItems();
+  const index = Math.max(0, items.findIndex(item => item.key === metric.key));
+  const prev = items[index - 1] || null;
+  const next = items[index + 1] || null;
+
+  const modal = document.createElement("div");
+  modal.id = "metric-reference-viewer";
+  modal.className = "metric-reference-viewer";
+  modal.innerHTML = `
+    <div class="metric-reference-viewer__backdrop" data-close-metric></div>
+    <section class="metric-reference-viewer__dialog" role="dialog" aria-modal="true" aria-label="${escapeHtml(getRussianLabel(metric.key))}">
+      <button class="metric-reference-viewer__close" type="button" data-close-metric aria-label="Закрыть">×</button>
+      <button class="metric-reference-viewer__nav metric-reference-viewer__nav--prev" type="button" data-metric-prev ${prev ? "" : "disabled"} aria-label="Предыдущая метрика">‹</button>
+      <button class="metric-reference-viewer__nav metric-reference-viewer__nav--next" type="button" data-metric-next ${next ? "" : "disabled"} aria-label="Следующая метрика">›</button>
+
+      <div class="metric-reference-viewer__titlebar">
+        <div>
+          <span class="metric-reference-viewer__eyebrow">FACIAL METRIC</span>
+          <h2>${escapeHtml(getRussianLabel(metric.key))}</h2>
+        </div>
+        <span class="metric-reference-viewer__index">${index + 1} / ${Math.max(items.length, 1)}</span>
+      </div>
+
+      <div class="metric-reference-viewer__body">
+        <div class="metric-reference-viewer__visual-wrap">
+          <div class="metric-reference-viewer__visual">
+            <div class="metric-reference-viewer__media">
+              <img class="metric-reference-viewer__image" alt="Фокус метрики" src="${source || ""}">
+              <canvas class="metric-reference-viewer__canvas" aria-hidden="true"></canvas>
+              <div class="metric-reference-viewer__scan"></div>
+              <div class="metric-reference-viewer__corner c1"></div>
+              <div class="metric-reference-viewer__corner c2"></div>
+              <div class="metric-reference-viewer__corner c3"></div>
+              <div class="metric-reference-viewer__corner c4"></div>
+              <div class="metric-reference-viewer__metric-tag">${escapeHtml(getRussianLabel(metric.key))}</div>
+            </div>
+          </div>
+        </div>
+
+        <aside class="metric-reference-viewer__panel">
+          <div class="metric-reference-scoreline">
+            <div>
+              <span>SCORE</span>
+              <strong><b data-metric-score>—</b><small>/10</small></strong>
+            </div>
+            <span class="metric-reference-scoreline__status" data-metric-status>${score == null ? "Недостаточно данных" : getMetricStatus(score)}</span>
+          </div>
+
+          <div class="metric-reference-bar" style="--metric-position:${score == null ? 50 : score * 10}%; --metric-gradient:${metricReferenceGradient(score)}">
+            <i></i>
+          </div>
+
+          <div class="metric-reference-tabs" role="tablist">
+            <button class="is-active" type="button" data-ref-tab="overview">Обзор</button>
+            <button type="button" data-ref-tab="geometry">Геометрия</button>
+            <button type="button" data-ref-tab="interpretation">Интерпретация</button>
+          </div>
+
+          <div class="metric-reference-content is-active" data-ref-panel="overview">
+            <span class="metric-reference-label">ABOUT THIS METRIC</span>
+            <h3>${escapeHtml(zone.label || "Измерение лица")}</h3>
+            <p>${escapeHtml(zone.description || "Метрика рассчитывается по видимым точкам лица и оценивается с учётом качества изображения.")}</p>
+            <div class="metric-reference-mini">
+              <span>LANDMARKS</span>
+              <strong>${points.length || getMetricRawLandmarks(metric).length || "—"}</strong>
+            </div>
+          </div>
+
+          <div class="metric-reference-content" data-ref-panel="geometry">
+            <span class="metric-reference-label">LANDMARK GEOMETRY</span>
+            <div class="metric-reference-landmarks">
+              ${(points.length ? points : getMetricRawLandmarks(metric).map(name => ({name}))).map(p => `<span>${escapeHtml(String(p.name || "landmark"))}</span>`).join("") || `<em>Точки для этой метрики не определены.</em>`}
+            </div>
+            <p>Линии строятся по координатам landmark-модели. Gemini не должен произвольно перемещать эти точки.</p>
+          </div>
+
+          <div class="metric-reference-content" data-ref-panel="interpretation">
+            <span class="metric-reference-label">INTERPRETATION</span>
+            <h3 data-metric-interpretation>${score == null ? "Недостаточно данных" : getMetricStatus(score)}</h3>
+            <p>Значение отображается вместе с визуальной геометрией и шкалой. Для метрик, требующих другого ракурса, используется соответствующий view.</p>
+            ${metricReferenceGraph(score)}
+          </div>
+        </aside>
+      </div>
+    </section>
+  `;
+
+  document.body.appendChild(modal);
+  document.body.classList.add("metric-reference-open");
+
+  const media = modal.querySelector(".metric-reference-viewer__media");
+  const image = modal.querySelector(".metric-reference-viewer__image");
+  const canvas = modal.querySelector(".metric-reference-viewer__canvas");
+  const tag = modal.querySelector(".metric-reference-viewer__metric-tag");
+  const scoreElement = modal.querySelector("[data-metric-score]");
+
+  const focusApply = () => {
+    if (!media || !canvas || !image) return;
+    const frame = media.getBoundingClientRect();
+    const px = points.length ? points.reduce((sum, p) => sum + Number(p.x || 0.5), 0) / points.length : 0.5;
+    const py = points.length ? points.reduce((sum, p) => sum + Number(p.y || 0.5), 0) / points.length : 0.5;
+    const scale = Math.max(1, Math.min(2.55, Number(focus.zoom) || 1.25));
+    const tx = (0.5 - px) * frame.width * (scale - 1);
+    const ty = (0.5 - py) * frame.height * (scale - 1);
+    media.style.setProperty("--ref-focus-x", `${tx.toFixed(1)}px`);
+    media.style.setProperty("--ref-focus-y", `${ty.toFixed(1)}px`);
+    media.style.setProperty("--ref-focus-scale", scale.toFixed(3));
+    const alignment = currentAnalysis?.alignment?.[view?.type === "profile" ? "profile" : "front"];
+    if (alignment?.available) {
+      applySameAlignmentTransform(image, alignment, media);
+      applySameAlignmentTransform(canvas, alignment, media);
+    }
+    drawFaceLandmarkNetwork(canvas, view, metric, 0);
+    requestAnimationFrame(() => {
+      media.classList.add("is-focused");
+      animateMetricLine(canvas, view, metric, 760);
+      tag?.classList.add("is-visible");
+    });
+  };
+
+  if (image?.complete) {
+    requestAnimationFrame(focusApply);
+  } else {
+    image?.addEventListener("load", focusApply, { once: true });
+  }
+
+  animateMetricReferenceScore(scoreElement, score);
+
+  modal.querySelectorAll("[data-close-metric]").forEach(el => el.addEventListener("click", closeMetricReferenceViewer));
+  modal.querySelector("[data-metric-prev]")?.addEventListener("click", () => prev && openMetricReferenceViewer(prev));
+  modal.querySelector("[data-metric-next]")?.addEventListener("click", () => next && openMetricReferenceViewer(next));
+  modal.querySelectorAll("[data-ref-tab]").forEach(button => {
+    button.addEventListener("click", () => {
+      const target = button.dataset.refTab;
+      modal.querySelectorAll("[data-ref-tab]").forEach(b => b.classList.toggle("is-active", b === button));
+      modal.querySelectorAll("[data-ref-panel]").forEach(panel => panel.classList.toggle("is-active", panel.dataset.refPanel === target));
+    });
+  });
+
+  window.__faceMetricReferenceKeyHandler = event => {
+    if (!document.getElementById("metric-reference-viewer")) return;
+    if (event.key === "Escape") closeMetricReferenceViewer();
+    if (event.key === "ArrowLeft" && prev) openMetricReferenceViewer(prev);
+    if (event.key === "ArrowRight" && next) openMetricReferenceViewer(next);
+  };
+  document.addEventListener("keydown", window.__faceMetricReferenceKeyHandler);
+  window.setTimeout(() => {
+    modal.classList.add("is-open");
+    modal.querySelector(".metric-reference-viewer__dialog")?.focus?.();
+  }, 20);
+}
+
 function selectMetric(
   key,
   value
@@ -4610,6 +4854,7 @@ function selectMetric(
     renderMetricInspector(currentAnalysis);
     drawMetricOverlay(activeMetric);
     animateMetricFocus(activeMetric);
+    openMetricReferenceViewer(activeMetric);
   }
 
   const inspector = $("#metric-inspector");
