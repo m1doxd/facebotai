@@ -86,6 +86,7 @@ function openClassificationModal(options = {}) {
   const saved = getClassificationSettings();
   gender.value = selectedGender === "female" ? "female" : (saved?.gender || "male");
   adult.checked = adultConfirmed || saved?.adultConfirmed === true;
+  syncClassificationModalControls();
   if (error) { error.hidden = true; error.textContent = ""; }
 
   modal.hidden = false;
@@ -93,19 +94,44 @@ function openClassificationModal(options = {}) {
   modal.setAttribute("aria-hidden", "false");
 
   if (options.focus !== false) {
-    window.setTimeout(() => gender.focus(), 0);
+    window.setTimeout(() => {
+      document.querySelector(".classification-gender-option.is-selected")?.focus();
+    }, 0);
   }
   return true;
+}
+
+function syncClassificationModalControls() {
+  const gender = document.getElementById("classificationGender");
+  const adult = document.getElementById("classificationAdult");
+  const adultToggle = document.getElementById("classificationAdultToggle");
+
+  if (gender) {
+    const value = gender.value === "female" ? "female" : "male";
+    document.querySelectorAll(".classification-gender-option").forEach(button => {
+      const active = button.dataset.gender === value;
+      button.classList.toggle("is-selected", active);
+      button.setAttribute("aria-pressed", active ? "true" : "false");
+    });
+  }
+
+  if (adult && adultToggle) {
+    const active = adult.checked === true;
+    adultToggle.classList.toggle("is-selected", active);
+    adultToggle.setAttribute("aria-pressed", active ? "true" : "false");
+  }
 }
 
 function closeClassificationModal() {
   const modal = document.getElementById("classificationModal");
   if (!modal) return;
   modal.classList.remove("show");
+  modal.classList.add("is-closing");
   modal.setAttribute("aria-hidden", "true");
   window.setTimeout(() => {
-    if (!modal.classList.contains("show")) modal.hidden = true;
-  }, 280);
+    modal.hidden = true;
+    modal.classList.remove("is-closing");
+  }, 240);
 }
 
 function initClassificationModal() {
@@ -126,11 +152,29 @@ function initClassificationModal() {
     adultConfirmed = saved.adultConfirmed;
     if (genderSelect) genderSelect.value = selectedGender;
     if (adultConfirm) adultConfirm.checked = adultConfirmed;
+    syncClassificationModalControls();
     modal.hidden = true;
     modal.setAttribute("aria-hidden", "true");
   } else {
     modal.hidden = true;
     modal.setAttribute("aria-hidden", "true");
+  }
+
+  document.querySelectorAll(".classification-gender-option").forEach(button => {
+    button.addEventListener("click", () => {
+      gender.value = button.dataset.gender === "female" ? "female" : "male";
+      if (error) { error.hidden = true; error.textContent = ""; }
+      syncClassificationModalControls();
+    });
+  });
+
+  const adultToggle = document.getElementById("classificationAdultToggle");
+  if (adultToggle) {
+    adultToggle.addEventListener("click", () => {
+      adult.checked = !adult.checked;
+      if (error && adult.checked) { error.hidden = true; error.textContent = ""; }
+      syncClassificationModalControls();
+    });
   }
 
   form.addEventListener("submit", event => {
@@ -1197,6 +1241,18 @@ function getOverlayPoints(view) {
 
 function getMetricLinePairs(key, viewType, selectedNames) {
   const k = String(key || "").split(".").pop();
+
+  // Gemini is allowed to choose the landmark names for the metric.
+  // Once it returns them, the renderer uses those exact client landmark
+  // coordinates instead of guessing a different geometry in the frontend.
+  const aiNames = Array.isArray(selectedNames)
+    ? selectedNames.filter(Boolean)
+    : [];
+
+  if (aiNames.length >= 2) {
+    return aiNames.slice(0, -1).map((name, i) => [name, aiNames[i + 1]]);
+  }
+
   if (viewType === "profile") {
     const map = {
       nasofacial_angle: [["profile_glabella","profile_nasion"],["profile_nasion","profile_pronasale"]],
@@ -1209,25 +1265,6 @@ function getMetricLinePairs(key, viewType, selectedNames) {
   }
   const map = {
     face_aspect_ratio: [["left_cheekbone","right_cheekbone"],["forehead_center","chin"]],
-    total_facial_width_to_height_ratio: [["left_cheekbone","right_cheekbone"],["forehead_center","chin"]],
-    face_width_to_height_ratio: [["left_cheekbone","right_cheekbone"],["forehead_center","chin"]],
-    brow_length_to_face_width_ratio: [["left_brow_inner","left_brow_outer"],["right_brow_inner","right_brow_outer"]],
-    eyebrow_low_settedness: [["left_brow_inner","left_eye_inner"],["right_brow_inner","right_eye_inner"]],
-    brow_symmetry: [["left_brow_inner","left_brow_outer"],["right_brow_inner","right_brow_outer"]],
-    eye_aspect_ratio: [["left_eye_inner","left_eye_outer"],["right_eye_inner","right_eye_outer"]],
-    lateral_canthal_tilt: [["left_eye_inner","left_eye_outer"],["right_eye_inner","right_eye_outer"]],
-    intercanthal_nasal_width_ratio: [["left_eye_inner","right_eye_inner"],["nose_left","nose_right"]],
-    mouth_width_to_nose_width_ratio: [["mouth_left","mouth_right"],["nose_left","nose_right"]],
-    lower_lip_to_upper_lip_ratio: [["upper_lip_center","lower_lip_center"],["mouth_left","mouth_right"]],
-    mouth_corner_position: [["mouth_left","upper_lip_center"],["mouth_right","upper_lip_center"]],
-    nose_tip_position: [["nose_bridge","nose_tip"],["nose_left","nose_right"]],
-    tip_rotation_angle: [["nose_bridge","nose_tip"],["nose_tip","upper_lip_center"]],
-    ipsilateral_alar_angle: [["nose_left","nose_tip"],["nose_tip","upper_lip_center"]],
-    cheekbone_height: [["left_cheekbone","left_eye_inner"],["right_cheekbone","right_eye_inner"]],
-    cheekbone_prominence: [["left_cheekbone","left_jaw"],["right_cheekbone","right_jaw"]],
-    chin_definition: [["left_jaw","chin"],["chin","right_jaw"]],
-    chin_to_philtrum_ratio: [["upper_lip_center","chin"]],
-    midface_ratio: [["left_eye_inner","right_eye_inner"],["upper_lip_center","chin"]],
     eye_alignment: [["left_eye_inner","right_eye_inner"]],
     eye_spacing: [["left_eye_inner","right_eye_inner"]],
     left_eye_width: [["left_eye_inner","left_eye_outer"]],
@@ -1377,7 +1414,7 @@ function animateMetricFocus(metric) {
     hud.className = "metric-focus-hud";
     media.appendChild(hud);
   }
-  const numeric = normalizeMetricValue(metric.value);
+  const numeric = getMetricNumericScore(metric);
   const score = numeric === null ? "—" : `${formatMetricScore(numeric)}/10`;
   hud.innerHTML = `<span class="metric-focus-hud__eyebrow">LIVE METRIC</span><strong>${getRussianLabel(metric.key)}</strong><b>${score}</b>`;
   hud.dataset.level = numeric === null ? "neutral" : getMetricLevel(numeric);
@@ -1485,8 +1522,8 @@ function drawFaceLandmarkNetwork(canvas, view, metric = null, progress = 1) {
     const visible = selectedNames.filter(name => points[name]).map(xy);
     const cx = visible.reduce((s,p)=>s+p.x,0)/visible.length;
     const cy = visible.reduce((s,p)=>s+p.y,0)/visible.length;
-    const scoreValue = getMetricNumericScore(metric);
-    const label = `${getRussianLabel(metric.key)}${scoreValue !== null ? ` · ${formatMetricScore(scoreValue)}/10` : ""}`;
+    const value = getMetricNumericScore(metric);
+    const label = `${getRussianLabel(metric.key)}${value !== null ? ` · ${formatMetricScore(value)}/10` : ""}`;
     ctx.font = "700 10px Inter, Arial, sans-serif";
     const padX = 9, padY = 6;
     const textW = ctx.measureText(label).width;
@@ -4639,10 +4676,24 @@ function drawResultMetricOverlay(metric = null) {
 function getMetricNumericScore(metric) {
   if (!metric) return null;
   const value = metric.value;
-  // Only an explicit score is a /10 score. Never interpret a measurement
-  // such as 1.95 (ratio) as 1.95/10.
-  if (isObject(value)) return normalizeScore(value.score);
-  return normalizeScore(value);
+
+  // The score is the only value that belongs on the 0–10 UI scale.
+  // Never mistake a raw ratio/degree/percentage measurement for a score.
+  if (isObject(value)) {
+    const explicit = normalizeMetricValue(value.score);
+    if (explicit !== null && explicit >= 0 && explicit <= 10) {
+      return explicit;
+    }
+
+    // Graceful fallback for older payloads that omitted `score` but did
+    // provide a qualitative status.
+    const status = String(value.status || "").toLowerCase();
+    if (status === "good") return 8;
+    if (status === "average") return 6;
+    if (status === "poor") return 3.5;
+  }
+
+  return null;
 }
 
 function getMetricRawLandmarks(metric) {
@@ -4772,7 +4823,7 @@ function openMetricReferenceViewer(metric) {
               <span>SCORE</span>
               <strong><b data-metric-score>—</b><small>/10</small></strong>
             </div>
-            <span class="metric-reference-scoreline__status" data-metric-status>${score == null ? (isObject(value) && value.measurement != null ? "Оценка недоступна" : "Недостаточно данных") : getMetricStatus(score)}</span>
+            <span class="metric-reference-scoreline__status" data-metric-status>${score == null ? (value == null || String(value).trim() === "" ? "Недостаточно данных" : "Данные доступны") : getMetricStatus(score)}</span>
           </div>
 
           <div class="metric-reference-bar" style="--metric-position:${score == null ? 50 : score * 10}%; --metric-gradient:${metricReferenceGradient(score)}">
