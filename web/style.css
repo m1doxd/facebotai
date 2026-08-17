@@ -3307,22 +3307,595 @@ body.metric-reference-open{overflow:hidden}
 }
 
 
-/* FaceMetric V6 — dark metric viewer + redesigned gender modal */
-.classification-modal{background:rgba(4,5,7,.80)!important;backdrop-filter:blur(22px) saturate(125%)!important;-webkit-backdrop-filter:blur(22px) saturate(125%)!important;opacity:0;transition:opacity .26s ease!important}
-.classification-modal.show{opacity:1!important}
-.classification-modal .classification-modal-card{width:min(430px,calc(100vw - 28px))!important;max-height:min(88vh,650px)!important;padding:30px!important;border:1px solid rgba(255,255,255,.09)!important;border-radius:26px!important;background:radial-gradient(circle at 50% 0,rgba(255,255,255,.055),transparent 42%),linear-gradient(145deg,#1a1b1f,#0f1012)!important;color:#f5f5f7!important;box-shadow:0 35px 110px rgba(0,0,0,.65),inset 0 1px 0 rgba(255,255,255,.035)!important;transform:translateY(14px) scale(.965)!important;opacity:0;transition:transform .34s cubic-bezier(.22,1,.36,1),opacity .22s ease!important}
-.classification-modal.show .classification-modal-card{transform:none!important;opacity:1}
-.classification-modal #classificationModalTitle{color:#f5f5f7!important;font-size:28px!important;letter-spacing:-.045em!important}
-.classification-modal .classification-modal-card>p{color:#92969e!important;line-height:1.6!important}
-.classification-modal .api-key-label{color:#aeb2ba!important}
-.classification-modal #classificationGender{appearance:none!important;-webkit-appearance:none!important;width:100%!important;min-height:52px!important;padding:0 44px 0 16px!important;border:1px solid rgba(255,255,255,.09)!important;border-radius:16px!important;color:#f5f5f7!important;background:linear-gradient(45deg,transparent 50%,#8d929a 50%) calc(100% - 20px) 23px/5px 5px no-repeat,linear-gradient(135deg,#8d929a 50%,transparent 50%) calc(100% - 15px) 23px/5px 5px no-repeat,#151619!important;font:600 14px -apple-system,BlinkMacSystemFont,"SF Pro Text",Inter,system-ui,sans-serif!important}
-.classification-modal .classification-modal-check{min-height:52px!important;padding:0 14px!important;border:1px solid rgba(255,255,255,.07)!important;border-radius:16px!important;background:rgba(255,255,255,.025)!important;color:#d7d9dd!important}
-.classification-modal .classification-modal-check input{appearance:none!important;width:20px!important;height:20px!important;border:1px solid rgba(255,255,255,.2)!important;border-radius:6px!important;background:#0b0c0e!important}
-.classification-modal .classification-modal-check input:checked{background:#55d98b!important;border-color:#55d98b!important}
-.classification-modal #saveClassificationBtn{width:100%!important;min-height:52px!important;border:0!important;border-radius:16px!important;background:#f2f3f5!important;color:#090a0c!important;font:750 13px -apple-system,BlinkMacSystemFont,"SF Pro Text",Inter,system-ui,sans-serif!important}
-.metric-reference-viewer__dialog{background:#101113!important;color:#f2f3f5!important;border:1px solid rgba(255,255,255,.08)!important;border-radius:22px!important;box-shadow:0 35px 120px rgba(0,0,0,.72)!important}
-.metric-reference-viewer__backdrop{background:rgba(2,3,5,.78)!important;backdrop-filter:blur(18px)!important;-webkit-backdrop-filter:blur(18px)!important}
-.metric-reference-viewer__titlebar{background:#141518!important;border-bottom:1px solid rgba(255,255,255,.07)!important}
-.metric-reference-viewer__titlebar h2{color:#f2f3f5!important}.metric-reference-viewer__eyebrow,.metric-reference-viewer__index{color:#777c85!important}
-.metric-reference-viewer__visual-wrap{background:#0d0e10!important}.metric-reference-viewer__media{background:#070809!important;box-shadow:0 18px 55px rgba(0,0,0,.48)!important}.metric-reference-viewer__panel{background:#111214!important;color:#f2f3f5!important}
-.metric-reference-scoreline strong{color:#f2f3f5!important}.metric-reference-scoreline strong small{color:#777c85!important}.metric-reference-tabs{background:#1a1b1f!important}.metric-reference-tabs button{color:#858a93!important}.metric-reference-tabs button.is-active{background:#292a2e!important;color:#f5f5f7!important;box-shadow:0 1px 7px rgba(0,0,0,.35)!important}.metric-reference-content h3{color:#f0f1f3!important}.metric-reference-content p{color:#8e939c!important}.metric-reference-label{color:#727780!important}.metric-reference-mini{border-color:rgba(255,255,255,.08)!important;color:#777c85!important;background:#151619!important}.metric-reference-mini strong{color:#e2e4e7!important}.metric-reference-landmarks span{background:#1b1c20!important;color:#b7bbc2!important}.metric-reference-viewer__close{background:#1b1c20!important;border-color:rgba(255,255,255,.09)!important;color:#d7d9dd!important}.metric-reference-viewer__nav{background:#1b1c20!important;color:#f2f3f5!important;border:1px solid rgba(255,255,255,.09)!important;box-shadow:0 8px 25px rgba(0,0,0,.42)!important}.metric-reference-viewer__nav--prev{left:10px!important}.metric-reference-viewer__nav--next{right:10px!important}
+/* ============================================================
+   FaceMetric FINAL UI OVERRIDE
+   Actual runtime selectors — do not use the old reference-modal names.
+============================================================ */
+
+/* ---- METRIC VIEWER: DARK ---- */
+.metric-reference-viewer {
+  color-scheme: dark !important;
+}
+
+.metric-reference-viewer__dialog {
+  background: #101113 !important;
+  color: #f5f5f7 !important;
+  border: 1px solid rgba(255,255,255,.085) !important;
+  border-radius: 24px !important;
+  box-shadow:
+    0 35px 110px rgba(0,0,0,.68),
+    inset 0 1px 0 rgba(255,255,255,.025) !important;
+}
+
+.metric-reference-viewer__backdrop {
+  background: rgba(0,0,0,.78) !important;
+  backdrop-filter: blur(20px) saturate(115%) !important;
+  -webkit-backdrop-filter: blur(20px) saturate(115%) !important;
+}
+
+.metric-reference-viewer__titlebar {
+  background: #101113 !important;
+  border-bottom: 1px solid rgba(255,255,255,.07) !important;
+  color: #f5f5f7 !important;
+}
+
+.metric-reference-viewer__titlebar h2,
+.metric-reference-viewer__eyebrow {
+  color: #f5f5f7 !important;
+}
+
+.metric-reference-viewer__eyebrow {
+  color: #70747c !important;
+}
+
+.metric-reference-viewer__index {
+  color: #777c85 !important;
+}
+
+.metric-reference-viewer__body {
+  background: #101113 !important;
+}
+
+.metric-reference-viewer__visual-wrap {
+  background: #0b0c0e !important;
+}
+
+.metric-reference-viewer__visual {
+  background: #0b0c0e !important;
+}
+
+.metric-reference-viewer__media {
+  background: #08090b !important;
+  border: 1px solid rgba(255,255,255,.07) !important;
+  box-shadow: 0 20px 55px rgba(0,0,0,.45) !important;
+}
+
+.metric-reference-viewer__panel {
+  background: #101113 !important;
+  color: #f5f5f7 !important;
+  border-left: 1px solid rgba(255,255,255,.07) !important;
+}
+
+.metric-reference-viewer__close,
+.metric-reference-viewer__nav {
+  background: rgba(28,28,30,.94) !important;
+  color: #f5f5f7 !important;
+  border: 1px solid rgba(255,255,255,.10) !important;
+  box-shadow: 0 8px 24px rgba(0,0,0,.35) !important;
+}
+
+.metric-reference-viewer__close:hover,
+.metric-reference-viewer__nav:hover:not(:disabled) {
+  background: rgba(52,52,55,.98) !important;
+}
+
+.metric-reference-viewer__nav:disabled {
+  opacity: .20 !important;
+}
+
+.metric-reference-scoreline > div > span,
+.metric-reference-scoreline__status,
+.metric-reference-label,
+.metric-reference-content p,
+.metric-reference-viewer__panel small {
+  color: #8f949d !important;
+}
+
+.metric-reference-scoreline strong,
+.metric-reference-content h3,
+.metric-reference-mini strong,
+.metric-reference-viewer__panel strong {
+  color: #f5f5f7 !important;
+}
+
+.metric-reference-scoreline__status {
+  background: rgba(255,255,255,.055) !important;
+  border: 1px solid rgba(255,255,255,.06) !important;
+}
+
+.metric-reference-tabs {
+  background: #191a1d !important;
+  border: 1px solid rgba(255,255,255,.055) !important;
+}
+
+.metric-reference-tabs button {
+  background: transparent !important;
+  color: #8e929a !important;
+  border: 0 !important;
+}
+
+.metric-reference-tabs button.is-active {
+  background: #2a2b2f !important;
+  color: #fff !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.04) !important;
+}
+
+.metric-reference-mini {
+  background: #18191c !important;
+  border-color: rgba(255,255,255,.07) !important;
+  color: #f5f5f7 !important;
+}
+
+.metric-reference-landmarks {
+  background: #151619 !important;
+  border-color: rgba(255,255,255,.07) !important;
+}
+
+.metric-reference-landmarks span {
+  background: #202125 !important;
+  border-color: rgba(255,255,255,.07) !important;
+  color: #dfe1e5 !important;
+}
+
+.metric-reference-graph {
+  background: #151619 !important;
+  border-radius: 14px !important;
+}
+
+.metric-reference-axis {
+  stroke: rgba(255,255,255,.14) !important;
+}
+
+.metric-reference-curve {
+  stroke: rgba(255,255,255,.45) !important;
+}
+
+.metric-reference-fill {
+  fill: rgba(255,255,255,.035) !important;
+}
+
+.metric-reference-marker {
+  stroke: #55d98b !important;
+}
+
+.metric-reference-dot {
+  fill: #55d98b !important;
+}
+
+/* ---- CLASSIFICATION / GENDER MODAL ---- */
+#classificationModal {
+  background: rgba(4,5,7,.80) !important;
+  backdrop-filter: blur(22px) saturate(120%) !important;
+  -webkit-backdrop-filter: blur(22px) saturate(120%) !important;
+}
+
+#classificationModal .classification-modal-card {
+  width: min(390px, calc(100vw - 28px)) !important;
+  padding: 26px !important;
+  border-radius: 25px !important;
+  background:
+    radial-gradient(circle at 50% 0%, rgba(255,255,255,.045), transparent 48%),
+    #17181b !important;
+  color: #f5f5f7 !important;
+  border: 1px solid rgba(255,255,255,.085) !important;
+  box-shadow: 0 32px 90px rgba(0,0,0,.65) !important;
+}
+
+#classificationModal .api-key-eyebrow {
+  color: #70747c !important;
+}
+
+#classificationModal h2 {
+  color: #f5f5f7 !important;
+  font-size: 26px !important;
+  letter-spacing: -.035em !important;
+}
+
+#classificationModal p {
+  color: #969aa2 !important;
+}
+
+#classificationModal .api-key-label {
+  color: #aeb2ba !important;
+}
+
+#classificationModal #classificationGender {
+  width: 100% !important;
+  min-height: 50px !important;
+  border-radius: 15px !important;
+  background: #202125 !important;
+  color: #f5f5f7 !important;
+  border: 1px solid rgba(255,255,255,.09) !important;
+}
+
+#classificationModal .classification-modal-check {
+  border: 1px solid rgba(255,255,255,.065) !important;
+  border-radius: 15px !important;
+  padding: 0 13px !important;
+  background: rgba(255,255,255,.025) !important;
+  color: #d7d9de !important;
+}
+
+#classificationModal #saveClassificationBtn {
+  min-height: 50px !important;
+  border-radius: 15px !important;
+  background: #f2f3f5 !important;
+  color: #0b0c0e !important;
+}
+
+#classificationModal .api-help {
+  color: #6f747c !important;
+  border-top-color: rgba(255,255,255,.06) !important;
+}
+
+/* Keep modal navigation visible on top of the image. */
+.metric-reference-viewer__nav--prev { left: 10px !important; }
+.metric-reference-viewer__nav--next { right: 10px !important; }
+
+/* The zoom layer may transform, but the panel never participates in that transform. */
+.metric-reference-viewer__zoom-layer {
+  transform-origin: center center !important;
+}
+
+
+/* ============================================================
+   FACEMETRIC PROFILE MODAL — LIQUID GLASS PROFILE PICKER V2
+   ============================================================ */
+
+#classificationModal {
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 20px !important;
+  background:
+    radial-gradient(circle at 50% 0%, rgba(255,255,255,.055), transparent 42%),
+    rgba(4,5,7,.72) !important;
+  backdrop-filter: blur(28px) saturate(125%) !important;
+  -webkit-backdrop-filter: blur(28px) saturate(125%) !important;
+  transition: opacity .24s ease, visibility .24s ease !important;
+}
+
+#classificationModal.is-closing {
+  opacity: 0 !important;
+}
+
+#classificationModal .classification-modal-card {
+  width: min(430px, calc(100vw - 32px)) !important;
+  padding: 28px !important;
+  border-radius: 28px !important;
+  background:
+    linear-gradient(145deg, rgba(255,255,255,.055), rgba(255,255,255,.018) 52%, rgba(0,0,0,.12)),
+    rgba(20,21,24,.88) !important;
+  border: 1px solid rgba(255,255,255,.105) !important;
+  box-shadow:
+    0 40px 110px rgba(0,0,0,.72),
+    inset 0 1px 0 rgba(255,255,255,.055) !important;
+  backdrop-filter: blur(30px) saturate(135%) !important;
+  -webkit-backdrop-filter: blur(30px) saturate(135%) !important;
+  overflow: hidden !important;
+}
+
+#classificationModal.show .classification-modal-card {
+  animation: facemetricProfileIn .38s cubic-bezier(.2,.85,.2,1) both;
+}
+
+#classificationModal .api-key-eyebrow {
+  color: #777b84 !important;
+  letter-spacing: .16em !important;
+  font-size: 10px !important;
+}
+
+#classificationModal h2 {
+  margin-top: 8px !important;
+  color: #f5f6f8 !important;
+  font-size: clamp(25px, 6vw, 30px) !important;
+  letter-spacing: -.045em !important;
+}
+
+#classificationModal p {
+  color: #9b9fa7 !important;
+  line-height: 1.58 !important;
+}
+
+/* Gender cards */
+#classificationModal .classification-gender-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin: 0 0 14px;
+}
+
+#classificationModal .classification-gender-option {
+  position: relative;
+  min-height: 82px;
+  padding: 15px;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  text-align: left;
+  border: 1px solid rgba(255,255,255,.085);
+  border-radius: 19px;
+  color: #e9eaed;
+  background:
+    linear-gradient(145deg, rgba(255,255,255,.042), rgba(255,255,255,.012)),
+    rgba(255,255,255,.018);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.035),
+    0 8px 24px rgba(0,0,0,.12);
+  cursor: pointer;
+  transition:
+    transform .2s cubic-bezier(.2,.8,.2,1),
+    background .22s ease,
+    border-color .22s ease,
+    box-shadow .22s ease,
+    color .22s ease;
+}
+
+#classificationModal .classification-gender-option:hover {
+  transform: translateY(-1px);
+  border-color: rgba(255,255,255,.16);
+  background:
+    linear-gradient(145deg, rgba(255,255,255,.065), rgba(255,255,255,.018)),
+    rgba(255,255,255,.022);
+}
+
+#classificationModal .classification-gender-option:active {
+  transform: scale(.985);
+}
+
+#classificationModal .classification-gender-option.is-selected {
+  border-color: rgba(255,255,255,.28);
+  background:
+    linear-gradient(145deg, rgba(255,255,255,.105), rgba(255,255,255,.025)),
+    rgba(255,255,255,.035);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.085),
+    0 0 0 1px rgba(255,255,255,.035),
+    0 12px 32px rgba(0,0,0,.22);
+}
+
+#classificationModal .classification-gender-option.is-selected::after {
+  content: "✓";
+  position: absolute;
+  top: 10px;
+  right: 11px;
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #f4f5f7;
+  color: #111216;
+  font-size: 10px;
+  font-weight: 800;
+  animation: facemetricCheckIn .2s ease both;
+}
+
+#classificationModal .classification-gender-icon {
+  width: 38px;
+  height: 38px;
+  flex: 0 0 38px;
+  display: grid;
+  place-items: center;
+  border-radius: 13px;
+  background: rgba(255,255,255,.055);
+  border: 1px solid rgba(255,255,255,.065);
+  color: #dfe1e5;
+  font-size: 20px;
+  line-height: 1;
+}
+
+#classificationModal .classification-gender-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+#classificationModal .classification-gender-copy strong {
+  color: #f3f4f6;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+#classificationModal .classification-gender-copy small {
+  color: #777b84;
+  font-size: 10px;
+  line-height: 1.3;
+}
+
+/* Adult liquid-glass toggle */
+#classificationModal .classification-adult-toggle {
+  width: 100%;
+  min-height: 70px;
+  margin: 2px 0 10px;
+  padding: 13px 14px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-align: left;
+  border: 1px solid rgba(255,255,255,.075);
+  border-radius: 19px;
+  color: #e9eaed;
+  background:
+    linear-gradient(145deg, rgba(255,255,255,.035), rgba(255,255,255,.012)),
+    rgba(255,255,255,.015);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.03);
+  cursor: pointer;
+  transition:
+    background .22s ease,
+    border-color .22s ease,
+    transform .18s ease;
+}
+
+#classificationModal .classification-adult-toggle:hover {
+  border-color: rgba(255,255,255,.14);
+}
+
+#classificationModal .classification-adult-toggle:active {
+  transform: scale(.99);
+}
+
+#classificationModal .classification-adult-toggle.is-selected {
+  border-color: rgba(255,255,255,.18);
+  background:
+    linear-gradient(145deg, rgba(255,255,255,.075), rgba(255,255,255,.02)),
+    rgba(255,255,255,.025);
+}
+
+#classificationModal .classification-toggle-track {
+  position: relative;
+  width: 45px;
+  height: 27px;
+  flex: 0 0 45px;
+  border-radius: 999px;
+  background: #303238;
+  border: 1px solid rgba(255,255,255,.08);
+  box-shadow: inset 0 1px 2px rgba(0,0,0,.3);
+  transition: background .25s ease, border-color .25s ease;
+}
+
+#classificationModal .classification-toggle-thumb {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 19px;
+  height: 19px;
+  border-radius: 50%;
+  background: #f4f5f7;
+  box-shadow: 0 2px 8px rgba(0,0,0,.35);
+  transition: transform .26s cubic-bezier(.2,.85,.2,1);
+}
+
+#classificationModal .classification-adult-toggle.is-selected .classification-toggle-track {
+  background: #f4f5f7;
+  border-color: rgba(255,255,255,.4);
+}
+
+#classificationModal .classification-adult-toggle.is-selected .classification-toggle-thumb {
+  transform: translateX(18px);
+  background: #15161a;
+}
+
+#classificationModal .classification-adult-copy {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+#classificationModal .classification-adult-copy strong {
+  color: #ededf0;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+#classificationModal .classification-adult-copy small {
+  color: #777b84;
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+#classificationModal .classification-adult-check {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 22px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: #15161a;
+  background: #f4f5f7;
+  font-size: 11px;
+  font-weight: 800;
+  opacity: 0;
+  transform: scale(.7);
+  transition: opacity .2s ease, transform .25s cubic-bezier(.2,.85,.2,1);
+}
+
+#classificationModal .classification-adult-toggle.is-selected .classification-adult-check {
+  opacity: 1;
+  transform: scale(1);
+}
+
+#classificationModal #classificationModalError {
+  margin-top: 5px;
+  color: #ff7d8b !important;
+  font-size: 11px !important;
+  line-height: 1.45 !important;
+}
+
+#classificationModal #saveClassificationBtn {
+  width: 100%;
+  min-height: 54px !important;
+  margin-top: 7px;
+  border-radius: 17px !important;
+  border: 1px solid rgba(255,255,255,.12) !important;
+  background:
+    linear-gradient(180deg, #f5f6f8, #dfe1e5) !important;
+  color: #101115 !important;
+  font-size: 13px !important;
+  font-weight: 750 !important;
+  box-shadow:
+    0 12px 30px rgba(0,0,0,.3),
+    inset 0 1px 0 rgba(255,255,255,.75);
+  transition:
+    transform .18s ease,
+    filter .18s ease,
+    opacity .2s ease;
+}
+
+#classificationModal #saveClassificationBtn:hover {
+  filter: brightness(1.04);
+  transform: translateY(-1px);
+}
+
+#classificationModal #saveClassificationBtn:active {
+  transform: scale(.985);
+}
+
+@keyframes facemetricProfileIn {
+  from { opacity: 0; transform: translateY(18px) scale(.965); filter: blur(5px); }
+  to   { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+}
+
+@keyframes facemetricCheckIn {
+  from { opacity: 0; transform: scale(.55); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+@media (max-width: 520px) {
+  #classificationModal .classification-modal-card {
+    padding: 22px !important;
+    border-radius: 24px !important;
+  }
+
+  #classificationModal .classification-gender-grid {
+    grid-template-columns: 1fr;
+  }
+
+  #classificationModal .classification-gender-option {
+    min-height: 68px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #classificationModal,
+  #classificationModal .classification-modal-card,
+  #classificationModal .classification-gender-option,
+  #classificationModal .classification-adult-toggle,
+  #classificationModal .classification-toggle-thumb {
+    transition: none !important;
+    animation: none !important;
+  }
+}
+
