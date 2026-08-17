@@ -538,6 +538,11 @@ When client landmarks are present, preserve their coordinates in the returned
 landmarks object and base geometry-related metric reasoning on those points.
 Do not replace a supplied point with an approximate Gemini estimate.
 
+For metric visualization, each metric-level `landmarks` array may ONLY contain
+names that exist in CLIENT LANDMARKS. Prefer the smallest set of landmarks
+that directly defines the requested measurement. Never invent a landmark name,
+never substitute a nearby feature, and never add points just to make a pleasing polygon.
+
 ============================================================
 METRIC SYSTEM
 ============================================================
