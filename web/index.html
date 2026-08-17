@@ -1349,16 +1349,55 @@
     <p>Выбери профиль анализа перед началом. Геометрические измерения лица остаются отдельными от классификационного ярлыка.</p>
 
     <form id="classificationForm" novalidate>
-      <label class="api-key-label" for="classificationGender">Профиль</label>
-      <select id="classificationGender" class="classification-modal-select">
-        <option value="male">Мужчина</option>
-        <option value="female">Женщина</option>
-      </select>
+      <label class="api-key-label">Профиль</label>
 
-      <label class="classification-modal-check" for="classificationAdult">
-        <input id="classificationAdult" type="checkbox">
-        <span>Мне уже есть 18 лет</span>
-      </label>
+      <input id="classificationGender" type="hidden" value="male">
+
+      <div class="classification-gender-grid" role="radiogroup" aria-label="Профиль">
+        <button
+          type="button"
+          class="classification-gender-option"
+          data-gender="male"
+          aria-pressed="true"
+        >
+          <span class="classification-gender-icon">♂</span>
+          <span class="classification-gender-copy">
+            <strong>Мужчина</strong>
+            <small>Мужской профиль</small>
+          </span>
+        </button>
+
+        <button
+          type="button"
+          class="classification-gender-option"
+          data-gender="female"
+          aria-pressed="false"
+        >
+          <span class="classification-gender-icon">♀</span>
+          <span class="classification-gender-copy">
+            <strong>Женщина</strong>
+            <small>Женский профиль</small>
+          </span>
+        </button>
+      </div>
+
+      <input id="classificationAdult" type="checkbox" hidden>
+
+      <button
+        type="button"
+        id="classificationAdultToggle"
+        class="classification-adult-toggle"
+        aria-pressed="false"
+      >
+        <span class="classification-toggle-track" aria-hidden="true">
+          <span class="classification-toggle-thumb"></span>
+        </span>
+        <span class="classification-adult-copy">
+          <strong>Мне уже есть 18 лет</strong>
+          <small>Подтверждаю, что мне 18 лет или больше</small>
+        </span>
+        <span class="classification-adult-check" aria-hidden="true">✓</span>
+      </button>
 
       <div id="classificationModalError" class="api-key-error" role="alert" hidden></div>
 
