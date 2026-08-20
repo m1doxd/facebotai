@@ -129,11 +129,11 @@
             <span class="upload-copy">
 
               <strong>
-                Загрузить фотографию
+                Приступить к анализу
               </strong>
 
               <span id="upload-name">
-                JPG, PNG или WEBP · до 15 MB
+                Анфас + профиль · JPG, PNG, WEBP
               </span>
 
             </span>
@@ -466,6 +466,22 @@
           <p class="classification-settings__note">
             Геометрические измерения лица рассчитываются отдельно. Классификационные ярлыки доступны только после подтверждения 18+.
           </p>
+        </div>
+
+        <div class="dual-photo-strip" id="dual-photo-strip" hidden>
+          <div class="dual-photo-card" id="dual-front-card">
+            <div class="dual-photo-card__frame">
+              <img id="dual-front-img" alt="Анфас" />
+            </div>
+            <span class="dual-photo-card__label">АНФАС</span>
+          </div>
+          <div class="dual-photo-card" id="dual-profile-card">
+            <div class="dual-photo-card__frame">
+              <img id="dual-profile-img" alt="Профиль" />
+              <button type="button" class="dual-photo-card__add" id="dual-add-profile" hidden>＋</button>
+            </div>
+            <span class="dual-photo-card__label" id="dual-profile-label">ПРОФИЛЬ</span>
+          </div>
         </div>
 
         <div class="analysis-actions">
@@ -1430,12 +1446,12 @@
   aria-labelledby="classificationModalTitle"
 >
   <div class="api-key-card classification-modal-card">
-    <div class="api-key-eyebrow">FACEMETRIC / PROFILE</div>
-    <h2 id="classificationModalTitle">Настроим анализ</h2>
-    <p>Выбери профиль анализа перед началом. Геометрические измерения лица остаются отдельными от классификационного ярлыка.</p>
+    <div class="api-key-eyebrow">FACEMETRIC / START</div>
+    <h2 id="classificationModalTitle">Кого анализируем?</h2>
+    <p>Выберите пол — от этого зависят нормы диморфизма и часть метрик. Геометрия лица считается одинаково.</p>
 
     <form id="classificationForm" novalidate>
-      <label class="api-key-label">Профиль</label>
+      <label class="api-key-label">Пол</label>
 
       <input id="classificationGender" type="hidden" value="male">
 
@@ -1487,12 +1503,12 @@
 
       <div id="classificationModalError" class="api-key-error" role="alert" hidden></div>
 
-      <button id="saveClassificationBtn" type="submit">Продолжить анализ</button>
+      <button id="saveClassificationBtn" type="submit">Далее — подготовка фото</button>
     </form>
 
     <div class="api-help">
-      <b>Зачем это нужно:</b><br>
-      выбор профиля нужен для корректного отображения классификации. Сами геометрические измерения рассчитываются отдельно.
+      <b>Дальше:</b><br>
+      короткий гайд по съёмке → загрузка анфаса → загрузка профиля (можно пропустить).
     </div>
   </div>
 </div>
