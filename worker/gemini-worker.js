@@ -859,7 +859,7 @@ Example:
 
 LANDMARK SELECTION FOR METRIC VISUALIZATION:
 
-For every metric that has a numeric value, return a `landmarks` array whenever
+For every metric that has a numeric value, return a landmarks array whenever
 the required anatomical points are visible in CLIENT LANDMARKS.
 
 Rules:
