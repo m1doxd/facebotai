@@ -538,11 +538,6 @@ When client landmarks are present, preserve their coordinates in the returned
 landmarks object and base geometry-related metric reasoning on those points.
 Do not replace a supplied point with an approximate Gemini estimate.
 
-For metric visualization, each metric-level `landmarks` array may ONLY contain
-names that exist in CLIENT LANDMARKS. Prefer the smallest set of landmarks
-that directly defines the requested measurement. Never invent a landmark name,
-never substitute a nearby feature, and never add points just to make a pleasing polygon.
-
 ============================================================
 METRIC SYSTEM
 ============================================================
@@ -550,6 +545,10 @@ METRIC SYSTEM
 Every numeric metric score must be between 0 and 10.
 
 Do not give every metric a high score.
+
+COMPLETENESS RULE:
+For each conceptual group below, evaluate every item that is clearly supported by the supplied image(s) and landmarks. Do not return an empty group merely because a metric is difficult to phrase. If a metric truly cannot be measured from the available view, OMIT that metric rather than inventing a placeholder, "insufficient data" object, or guessed score.
+For the front view, prioritize a dense useful set across face geometry, eyes, eyebrows, nose, jaw, chin, cheeks, lips/mouth, midface and symmetry.
 
 Use the following conceptual groups.
 
@@ -651,6 +650,43 @@ MIDFACE
 - midface_length
 - midface_eye_relationship
 - midface_lower_face_relationship
+
+------------------------------------------------------------
+VISIBLE SKIN / HAIR / EYE DETAILS (OPTIONAL)
+------------------------------------------------------------
+
+Return these ONLY when the feature is directly visible and sufficiently clear.
+These are visual appearance descriptors, NOT medical diagnoses.
+Do not infer disease or hidden conditions.
+
+Group skin_hair may include:
+- acne
+- post_acne
+- eczema (only as visible surface irritation/patchiness, otherwise null)
+- hair_loss
+- hair_dryness
+- nasolabial_folds
+- forehead_lines
+- glabellar_lines
+- crow_feet
+- under_eye_area
+- dark_circles
+- eye_bags
+- brow_density
+- brow_color
+- eyelash_visibility
+
+Group visible_features may include:
+- eye_protrusion
+- eye_redness
+- scleral_show
+- sclera_redness
+- eyelid_ptosis
+- upper_eyelid
+- bulbous_nose_tip
+- nostril_visibility
+
+If visibility is insufficient, OMIT the metric instead of returning a placeholder or guessed value.
 
 ============================================================
 ANGULARITY
@@ -820,6 +856,26 @@ Example:
     "right_eye_inner"
   ]
 }
+
+LANDMARK SELECTION FOR METRIC VISUALIZATION:
+
+For every metric that has a numeric value, return a `landmarks` array whenever
+the required anatomical points are visible in CLIENT LANDMARKS.
+
+Rules:
+- Use ONLY landmark names that exist in CLIENT LANDMARKS.
+- Do not invent landmark names.
+- Select the MINIMUM set of points needed to explain the metric.
+- Order the landmarks in the exact geometric order that the frontend should
+  connect them.
+- For a width/length metric use the two endpoints.
+- For an angle use the three points in geometric order A -> vertex -> B.
+- For a symmetry metric use the corresponding left/right points and any center
+  point required to explain the comparison.
+- If the required client landmarks are not visible/reliable, return an empty
+  landmarks array and lower the metric confidence/status instead of guessing.
+- The frontend will draw the visualization from these exact landmark names.
+  Do not return coordinates inside a metric; return landmark names only.
 
 status must be one of:
 
