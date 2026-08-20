@@ -953,7 +953,10 @@ function showScreen(name) {
       void screen.offsetWidth;
       screen.classList.add("screen-enter");
     } else {
+      // Force fully out of layout — prevents home hero / other screens from leaking when scrolling
+      screen.hidden = true;
       screen.setAttribute("aria-hidden", "true");
+      screen.classList.remove("screen-enter");
     }
   });
 
@@ -963,7 +966,7 @@ function showScreen(name) {
 
   window.scrollTo({
     top: 0,
-    behavior: "smooth"
+    behavior: "instant" in document.documentElement.style ? "instant" : "auto"
   });
 
   if (name === "history") {
@@ -7660,11 +7663,13 @@ function openLandmarkEditor(mode) {
       ? selectedProfileObjectUrl
       : selectedObjectUrl;
 
-  // Always start on «Фото» tab so user sees the image
+  // Always start on «Фото» tab so user sees the image + reference card
   $("#tab-photo")?.classList.add("is-active");
   $("#tab-howto")?.classList.remove("is-active");
   $("#panel-photo")?.classList.add("is-active");
   $("#panel-howto")?.classList.remove("is-active");
+  const refCard = document.getElementById("landmark-ref-card");
+  if (refCard) refCard.style.display = "";
 
   if (img && src) {
     img.style.display = "block";
@@ -7723,6 +7728,10 @@ function updateLandmarkEditorUI() {
 
   if (howtoTitle) howtoTitle.textContent = lm.label;
   if (howtoDesc) howtoDesc.textContent = lm.desc || "";
+  const howtoTitleFull = $("#howto-title-full");
+  const howtoDescFull = $("#howto-desc-full");
+  if (howtoTitleFull) howtoTitleFull.textContent = lm.label;
+  if (howtoDescFull) howtoDescFull.textContent = lm.desc || "";
   updateHowtoReference(lm);
 
   const prevBtn = $("#le-prev");
@@ -7740,8 +7749,11 @@ function updateLandmarkEditorUI() {
 
 /** Fill «Как найти» with the user's photo + pin at suggested point (MediaPipe or anatomical fallback) */
 function updateHowtoReference(lm) {
-  const box = document.getElementById("howto-ref-img");
-  if (!box) return;
+  const boxes = [
+    document.getElementById("howto-ref-img"),
+    document.getElementById("howto-ref-img-large")
+  ].filter(Boolean);
+  if (!boxes.length) return;
 
   const src =
     landmarkEditorMode === "profile"
@@ -7756,17 +7768,25 @@ function updateHowtoReference(lm) {
     pt = pointFromLm(autoDetectedMesh, lm.mp);
   }
 
-  box.innerHTML = "";
-  if (!src) {
-    box.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#666;font-size:13px;padding:16px;text-align:center">Нет фото для подсказки</div>';
-    return;
-  }
+  // Anatomical fallback zones will be applied below if still null
 
-  const img = document.createElement("img");
-  img.alt = lm?.label || "Справка";
-  img.draggable = false;
-  img.src = src;
-  box.appendChild(img);
+  boxes.forEach((box) => {
+    box.innerHTML = "";
+    if (!src) {
+      box.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#666;font-size:13px;padding:16px;text-align:center">Нет фото для подсказки</div>';
+      return;
+    }
+
+    const img = document.createElement("img");
+    img.alt = lm?.label || "Справка";
+    img.draggable = false;
+    img.src = src;
+    box.appendChild(img);
+  });
+
+  // Re-get first box for pin logic after potential early return above
+  const box = boxes[0];
+  if (!box || !src) return;
 
   // Anatomical fallback zones (normalized) — used only when no MediaPipe / confirmed point
   const fallbackZones = {
@@ -7858,11 +7878,16 @@ function updateHowtoReference(lm) {
   };
   if (!pt) pt = fallbackZones[lm?.id] || { x: 0.5, y: 0.4 };
 
-  const pin = document.createElement("div");
-  pin.className = "howto-ref__pin";
-  pin.style.left = (Math.min(0.95, Math.max(0.05, pt.x)) * 100) + "%";
-  pin.style.top = (Math.min(0.95, Math.max(0.05, pt.y)) * 100) + "%";
-  box.appendChild(pin);
+  const left = (Math.min(0.95, Math.max(0.05, pt.x)) * 100) + "%";
+  const top = (Math.min(0.95, Math.max(0.05, pt.y)) * 100) + "%";
+  boxes.forEach((b) => {
+    if (!b.querySelector("img")) return;
+    const pin = document.createElement("div");
+    pin.className = "howto-ref__pin";
+    pin.style.left = left;
+    pin.style.top = top;
+    b.appendChild(pin);
+  });
 }
 
 function getConfirmedMap() {
@@ -8069,49 +8094,92 @@ function resetCurrentLandmark() {
 
 function finishLandmarkVerification() {
   landmarkEditorActive = false;
-  // Build the sparse client landmarks expected by the rest of the system
+  // Build the sparse client landmarks expected by the rest of the system (metrics + Worker)
   const sparse = {};
+  // Comprehensive alias map: new camelCase / descriptive ids → classic snake_case keys used by metrics & overlays
   const aliasMap = {
     leftEyeLateralCanthus: "left_eye_outer",
     rightEyeLateralCanthus: "right_eye_outer",
     leftEyeInner: "left_eye_inner",
     rightEyeInner: "right_eye_inner",
+    leftEyeUpper: "left_eye_upper",
+    rightEyeUpper: "right_eye_upper",
+    leftEyeLower: "left_eye_lower",
+    rightEyeLower: "right_eye_lower",
+    leftEyeCenter: "left_eye_center",
+    rightEyeCenter: "right_eye_center",
     leftBrowInner: "left_brow_inner",
     rightBrowInner: "right_brow_inner",
     leftBrowOuter: "left_brow_outer",
     rightBrowOuter: "right_brow_outer",
+    leftBrowPeak: "left_brow_peak",
+    rightBrowPeak: "right_brow_peak",
+    rightBrowArch: "right_brow_arch",
     leftMouthCorner: "mouth_left",
     rightMouthCorner: "mouth_right",
+    mouthMiddle: "mouth_middle",
     leftNostril: "nose_left",
     rightNostril: "nose_right",
+    leftAlar: "nose_left_alar",
+    rightAlar: "nose_right_alar",
     leftJaw: "left_jaw",
     rightJaw: "right_jaw",
+    leftJawline: "left_jawline",
+    rightJawline: "right_jawline",
     leftCheek: "left_cheekbone",
     rightCheek: "right_cheekbone",
+    leftCheekbone: "left_cheekbone",
+    rightCheekbone: "right_cheekbone",
     noseBridge: "nose_bridge",
+    leftNoseBridge: "left_nose_bridge",
+    rightNoseBridge: "right_nose_bridge",
     noseTip: "nose_tip",
+    nasalBase: "nasal_base",
     upperLip: "upper_lip_center",
     lowerLip: "lower_lip_center",
     chinBottom: "chin",
-    foreheadCenter: "forehead_center"
+    menton: "menton",
+    foreheadCenter: "forehead_center",
+    hairline: "hairline",
+    glabella: "glabella",
+    philtrum: "philtrum",
+    leftTemple: "left_temple",
+    rightTemple: "right_temple",
+    leftOuterEar: "left_ear",
+    rightOuterEar: "right_ear",
+    neckLeft: "neck_left",
+    neckRight: "neck_right",
+    leftEyelidHoodEnd: "left_eyelid_hood"
   };
   for (const [newId, oldKey] of Object.entries(aliasMap)) {
     if (confirmedFrontLandmarks[newId]) {
-      sparse[oldKey] = confirmedFrontLandmarks[newId];
-    } else if (confirmedFrontLandmarks[oldKey]) {
-      sparse[oldKey] = confirmedFrontLandmarks[oldKey];
+      sparse[oldKey] = { ...confirmedFrontLandmarks[newId] };
     }
   }
-  // also copy any already sparse
+  // Keep original ids too so nothing is lost
   Object.assign(sparse, confirmedFrontLandmarks);
+  // Ensure classic keys that metrics expect are present even if only under new id
+  if (confirmedFrontLandmarks.chinBottom && !sparse.chin) sparse.chin = confirmedFrontLandmarks.chinBottom;
+  if (confirmedFrontLandmarks.noseTip && !sparse.nose_tip) sparse.nose_tip = confirmedFrontLandmarks.noseTip;
+  if (confirmedFrontLandmarks.noseBridge && !sparse.nose_bridge) sparse.nose_bridge = confirmedFrontLandmarks.noseBridge;
+  if (confirmedFrontLandmarks.foreheadCenter && !sparse.forehead_center) sparse.forehead_center = confirmedFrontLandmarks.foreheadCenter;
+  if (confirmedFrontLandmarks.upperLip && !sparse.upper_lip_center) sparse.upper_lip_center = confirmedFrontLandmarks.upperLip;
+  if (confirmedFrontLandmarks.lowerLip && !sparse.lower_lip_center) sparse.lower_lip_center = confirmedFrontLandmarks.lowerLip;
+
   lastClientLandmarks = sparse;
 
-  // Store full confirmed for potential future use
+  // Store full confirmed for potential future use / debugging
   window.__facemetricConfirmedFront = { ...confirmedFrontLandmarks };
   window.__facemetricConfirmedProfile = { ...confirmedProfileLandmarks };
+  window.__facemetricClientLandmarks = { ...sparse };
 
-  // Proceed to real analysis
+  // Show loading animation then start real analysis (matches FaceTheory flow)
   showScreen("analysis");
+  if (loadingContent) {
+    loadingContent.classList.remove("is-hidden");
+    loadingContent.hidden = false;
+  }
+  setAnalysisState("АНАЛИЗИРУЕМ…");
   startAnalysis(pendingAnalysisFile, pendingProfileFile);
 }
 
@@ -8147,7 +8215,8 @@ function bindLandmarkEditorEvents() {
     $("#tab-howto")?.classList.remove("is-active");
     $("#panel-photo")?.classList.add("is-active");
     $("#panel-howto")?.classList.remove("is-active");
-    // Panel was display:none — layout after it becomes visible
+    const refCard = document.getElementById("landmark-ref-card");
+    if (refCard) refCard.style.display = "";
     requestAnimationFrame(() => {
       layoutEditorImage();
       renderConfirmedDots();
@@ -8158,6 +8227,8 @@ function bindLandmarkEditorEvents() {
     $("#tab-photo")?.classList.remove("is-active");
     $("#panel-howto")?.classList.add("is-active");
     $("#panel-photo")?.classList.remove("is-active");
+    const refCard = document.getElementById("landmark-ref-card");
+    if (refCard) refCard.style.display = "none";
     updateLandmarkEditorUI();
   });
 
