@@ -219,10 +219,9 @@ function initClassificationModal() {
 }
 
 function maybeOpenClassificationModal() {
-  if (!getGeminiApiKey()) return;
-  if (!getClassificationSettings()) {
-    window.setTimeout(() => openClassificationModal(), 120);
-  }
+  // Intentionally disabled: gender modal must open only on explicit user action
+  // (кнопка «Приступить к анализу» / «Начать анализ»).
+  return;
 }
 
 function resetMetricSelection() {
@@ -314,7 +313,7 @@ function closeGeminiKeyModal() {
   modal.classList.remove("show");
   modal.hidden = true;
   modal.setAttribute("aria-hidden", "true");
-  maybeOpenClassificationModal();
+  // Gender modal opens only when user clicks «Приступить к анализу»
 }
 
 function initGeminiKeyModal() {
@@ -457,9 +456,8 @@ function initGeminiKeyModal() {
 
   if (!savedKey) {
     window.setTimeout(() => openGeminiKeyModal(), 0);
-  } else {
-    window.setTimeout(() => maybeOpenClassificationModal(), 120);
   }
+  // Do NOT auto-open gender modal on page load.
 }
 
 window.openGeminiKeyModal = openGeminiKeyModal;
