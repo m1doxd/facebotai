@@ -205,6 +205,8 @@ function initClassificationModal() {
     closeClassificationModal();
     updateAnalysisButtonState();
     showToast("Настройки анализа сохранены.");
+    // The reference flow continues with an optional profile capture.
+    window.setTimeout(() => openProfileCaptureFlow(), 180);
   });
 
   modal.addEventListener("keydown", event => {
@@ -482,6 +484,101 @@ const VALIDATE_KEY_ENDPOINT = "https://facebot-gemini.snow4lyt.workers.dev/api/v
 const FACE_LANDMARKER_VERSION = "0.10.22";
 const FACE_LANDMARKER_WASM_URL = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${FACE_LANDMARKER_VERSION}/wasm`;
 const FACE_LANDMARKER_MODEL_URL = "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task";
+
+/* ============================================================
+   LANDMARK DEFINITIONS — Manual verification system
+   FRONT: 52 points | PROFILE: 31 points
+============================================================ */
+
+const FRONT_LANDMARKS = [
+  { id: "hairline", label: "Линия роста волос", tech: "hairline", mp: 10, desc: "Центр линии роста волос на лбу. Ищите самую верхнюю точку, где волосы встречаются с кожей лба." },
+  { id: "leftTemple", label: "Левый висок", tech: "leftTemple", mp: 54, desc: "Самая боковая точка височной области слева." },
+  { id: "rightTemple", label: "Правый висок", tech: "rightTemple", mp: 284, desc: "Самая боковая точка височной области справа." },
+  { id: "leftBrowOuter", label: "Внешний край левой брови", tech: "leftBrowOuter", mp: 46, desc: "Самый внешний (латеральный) конец левой брови." },
+  { id: "leftBrowPeak", label: "Пик левой брови", tech: "leftBrowPeak", mp: 70, desc: "Самая высокая точка арки левой брови." },
+  { id: "leftBrowInner", label: "Внутренний край левой брови", tech: "leftBrowInner", mp: 55, desc: "Внутренний (медиальный) конец левой брови у переносицы." },
+  { id: "glabella", label: "Глабелла", tech: "glabella", mp: 9, desc: "Точка между бровями на переносице, самая выступающая." },
+  { id: "rightBrowInner", label: "Внутренний край правой брови", tech: "rightBrowInner", mp: 285, desc: "Внутренний конец правой брови." },
+  { id: "rightBrowPeak", label: "Пик правой брови", tech: "rightBrowPeak", mp: 300, desc: "Самая высокая точка арки правой брови." },
+  { id: "rightBrowOuter", label: "Внешний край правой брови", tech: "rightBrowOuter", mp: 276, desc: "Самый внешний конец правой брови." },
+  { id: "rightBrowArch", label: "Арка правой брови", tech: "rightBrowArch", mp: 334, desc: "Средняя точка арки правой брови." },
+  { id: "leftEyeLateralCanthus", label: "Внешний угол левого глаза", tech: "leftEyeLateralCanthus", mp: 33, desc: "Внешний уголок левого глаза (латеральный кант)." },
+  { id: "leftEyeUpper", label: "Верхнее веко левого глаза", tech: "leftEyeUpper", mp: 159, desc: "Центр верхнего века левого глаза." },
+  { id: "leftEyeInner", label: "Внутренний угол левого глаза", tech: "leftEyeInner", mp: 133, desc: "Внутренний уголок левого глаза." },
+  { id: "leftEyeLower", label: "Низ левого глаза", tech: "leftEyeLower", mp: 145, desc: "Центр нижнего века левого глаза." },
+  { id: "leftEyelidHoodEnd", label: "Конец века левого глаза", tech: "leftEyelidHoodEnd", mp: 46, desc: "Конец капюшона верхнего века слева." },
+  { id: "rightEyeInner", label: "Внутренний угол правого глаза", tech: "rightEyeInner", mp: 362, desc: "Внутренний уголок правого глаза." },
+  { id: "rightEyeUpper", label: "Верхнее веко правого глаза", tech: "rightEyeUpper", mp: 386, desc: "Центр верхнего века правого глаза." },
+  { id: "rightEyeLateralCanthus", label: "Внешний угол правого глаза", tech: "rightEyeLateralCanthus", mp: 263, desc: "Внешний уголок правого глаза." },
+  { id: "rightEyeLower", label: "Низ правого глаза", tech: "rightEyeLowerEyelid", mp: 374, desc: "Центр нижнего века правого глаза." },
+  { id: "leftCheek", label: "Левая скула", tech: "leftCheek", mp: 234, desc: "Самая выступающая точка левой скулы." },
+  { id: "rightCheek", label: "Правая скула", tech: "rightCheek", mp: 454, desc: "Самая выступающая точка правой скулы." },
+  { id: "noseBridge", label: "Переносица", tech: "noseBridge", mp: 168, desc: "Центр переносицы между глазами." },
+  { id: "leftNoseBridge", label: "Левая переносица", tech: "leftNoseBridge", mp: 6, desc: "Левая сторона переносицы." },
+  { id: "rightNoseBridge", label: "Правая переносица", tech: "rightNoseBridge", mp: 197, desc: "Правая сторона переносицы." },
+  { id: "noseTip", label: "Кончик носа", tech: "noseTip", mp: 1, desc: "Самый выступающий кончик носа." },
+  { id: "leftNostril", label: "Левое крыло носа", tech: "leftNostril", mp: 98, desc: "Самая боковая точка левого крыла носа." },
+  { id: "rightNostril", label: "Правое крыло носа", tech: "rightNostril", mp: 327, desc: "Самая боковая точка правого крыла носа." },
+  { id: "nasalBase", label: "Под носом", tech: "nasalBase", mp: 2, desc: "Точка под носом (субназале), где нос встречается с верхней губой." },
+  { id: "leftMouthCorner", label: "Левый уголок рта", tech: "leftMouthCorner", mp: 61, desc: "Левый уголок рта." },
+  { id: "mouthMiddle", label: "Центр губ", tech: "mouthMiddle", mp: 13, desc: "Центр линии смыкания губ." },
+  { id: "rightMouthCorner", label: "Правый уголок рта", tech: "rightMouthCorner", mp: 291, desc: "Правый уголок рта." },
+  { id: "upperLip", label: "Верхняя губа", tech: "upperLip", mp: 0, desc: "Центр верхней губы (куприд)." },
+  { id: "lowerLip", label: "Нижняя губа", tech: "lowerLip", mp: 17, desc: "Центр нижней губы." },
+  { id: "chinBottom", label: "Низ подбородка", tech: "chinBottom", mp: 152, desc: "Самая нижняя точка подбородка." },
+  { id: "leftJaw", label: "Левый угол челюсти", tech: "leftJaw", mp: 172, desc: "Угол нижней челюсти слева (гонион)." },
+  { id: "rightJaw", label: "Правый угол челюсти", tech: "rightJaw", mp: 397, desc: "Угол нижней челюсти справа." },
+  { id: "leftOuterEar", label: "Левое ухо (внешнее)", tech: "leftOuterEar", mp: 234, desc: "Самая боковая точка левого уха." },
+  { id: "rightOuterEar", label: "Правое ухо", tech: "rightOuterEar", mp: 454, desc: "Самая боковая точка правого уха." },
+  { id: "neckLeft", label: "Левая сторона шеи", tech: "neckLeft", mp: 176, desc: "Точка на левой стороне шеи под челюстью." },
+  { id: "neckRight", label: "Правая сторона шеи", tech: "neckRight", mp: 400, desc: "Точка на правой стороне шеи под челюстью." },
+  { id: "foreheadCenter", label: "Центр лба", tech: "foreheadCenter", mp: 10, desc: "Центральная точка лба." },
+  { id: "leftEyeCenter", label: "Центр левого глаза", tech: "leftEyeCenter", mp: 468, desc: "Центр зрачка левого глаза." },
+  { id: "rightEyeCenter", label: "Центр правого глаза", tech: "rightEyeCenter", mp: 473, desc: "Центр зрачка правого глаза." },
+  { id: "philtrum", label: "Фильтрум", tech: "philtrum", mp: 164, desc: "Центр фильтрума (бороздка над верхней губой)." },
+  { id: "leftCheekbone", label: "Левая скуловая дуга", tech: "leftCheekbone", mp: 116, desc: "Точка на левой скуловой дуге." },
+  { id: "rightCheekbone", label: "Правая скуловая дуга", tech: "rightCheekbone", mp: 345, desc: "Точка на правой скуловой дуге." },
+  { id: "leftJawline", label: "Левая линия челюсти", tech: "leftJawline", mp: 150, desc: "Средняя точка левой линии челюсти." },
+  { id: "rightJawline", label: "Правая линия челюсти", tech: "rightJawline", mp: 379, desc: "Средняя точка правой линии челюсти." },
+  { id: "menton", label: "Ментон", tech: "menton", mp: 175, desc: "Самая нижняя точка подбородка в центре." },
+  { id: "leftAlar", label: "Левое крыло (аляр)", tech: "leftAlar", mp: 48, desc: "Точка крепления левого крыла носа." },
+  { id: "rightAlar", label: "Правое крыло (аляр)", tech: "rightAlar", mp: 278, desc: "Точка крепления правого крыла носа." }
+];
+
+const PROFILE_LANDMARKS = [
+  { id: "profile_glabella", label: "Глабелла", tech: "glabella", mp: null, desc: "Точка между бровями на профиле." },
+  { id: "profile_nasion", label: "Насион", tech: "nasion", mp: null, desc: "Точка впадины у корня носа." },
+  { id: "profile_supratip", label: "Супратип", tech: "supratip", mp: null, desc: "Точка на спинке носа чуть выше кончика." },
+  { id: "profile_pronasale", label: "Кончик носа", tech: "pronasale", mp: null, desc: "Самый выступающий кончик носа." },
+  { id: "profile_columella", label: "Колумелла", tech: "columella", mp: null, desc: "Нижняя точка колумеллы носа." },
+  { id: "profile_subnasale", label: "Субназале", tech: "subnasale", mp: null, desc: "Точка, где нос встречается с верхней губой." },
+  { id: "profile_labiale_superius", label: "Верхняя губа", tech: "labialeSuperius", mp: null, desc: "Самая передняя точка верхней губы." },
+  { id: "profile_labiale_inferius", label: "Нижняя губа", tech: "labialeInferius", mp: null, desc: "Самая передняя точка нижней губы." },
+  { id: "profile_pogonion", label: "Погонион", tech: "pogonion", mp: null, desc: "Самая выступающая точка подбородка." },
+  { id: "profile_menton", label: "Ментон", tech: "menton", mp: null, desc: "Самая нижняя точка подбородка." },
+  { id: "profile_gonion", label: "Угол челюсти", tech: "gonion", mp: null, desc: "Угол нижней челюсти." },
+  { id: "profile_chin_neck", label: "Шейная точка", tech: "chinNeck", mp: null, desc: "Точка перехода подбородка в шею." },
+  { id: "profile_orbitale", label: "Орбитале", tech: "orbitale", mp: null, desc: "Самая нижняя точка глазницы." },
+  { id: "profile_tragion", label: "Межкозелковкая вырезка", tech: "tragion", mp: null, desc: "Точка в межкозелковой вырезке уха." },
+  { id: "profile_zygomatic", label: "Скуловой бугор", tech: "zygomatic", mp: null, desc: "Выступающая точка скулы на профиле." },
+  { id: "profile_lower_eyelid", label: "Нижнее веко", tech: "lowerEyelid", mp: null, desc: "Точка нижнего века." },
+  { id: "profile_upper_eyelid", label: "Верхнее веко", tech: "upperEyelid", mp: null, desc: "Точка верхнего века." },
+  { id: "profile_forehead", label: "Лоб (профиль)", tech: "forehead", mp: null, desc: "Выступающая точка лба." },
+  { id: "profile_nose_bridge", label: "Спинка носа", tech: "noseBridge", mp: null, desc: "Средняя точка спинки носа." },
+  { id: "profile_ala", label: "Крыло носа", tech: "ala", mp: null, desc: "Крыло носа на профиле." },
+  { id: "profile_stomion", label: "Стомион", tech: "stomion", mp: null, desc: "Точка смыкания губ." },
+  { id: "profile_soft_tissue_gnathion", label: "Мягкотканный гнатион", tech: "gnathion", mp: null, desc: "Нижняя передняя точка подбородка." },
+  { id: "profile_cervical", label: "Шейная точка (низ)", tech: "cervical", mp: null, desc: "Точка на шее." },
+  { id: "profile_ear_top", label: "Верх уха", tech: "earTop", mp: null, desc: "Верхняя точка уха." },
+  { id: "profile_ear_bottom", label: "Низ уха", tech: "earBottom", mp: null, desc: "Нижняя точка уха." },
+  { id: "profile_jaw_angle_low", label: "Угол челюсти (низ)", tech: "jawAngleLow", mp: null, desc: "Нижняя точка угла челюсти." },
+  { id: "profile_sublabiale", label: "Сублабиале", tech: "sublabiale", mp: null, desc: "Точка под нижней губой." },
+  { id: "profile_trichion", label: "Трихион", tech: "trichion", mp: null, desc: "Точка линии роста волос на профиле." },
+  { id: "profile_sellion", label: "Селлион", tech: "sellion", mp: null, desc: "Самая глубокая точка корня носа." },
+  { id: "profile_rhinion", label: "Ринион", tech: "rhinion", mp: null, desc: "Точка на спинке носа." },
+  { id: "profile_infraorbitale", label: "Инфраорбитале", tech: "infraorbitale", mp: null, desc: "Точка под глазом." }
+];
+
 let faceLandmarkerPromise = null;
 let lastClientLandmarks = null;
 const HISTORY_KEY = "facemetric_history_v2";
@@ -574,7 +671,58 @@ let analysisScanTimer = null;
 let analysisScanStartedAt = 0;
 
 let activeResultView = "front";
+
 let activeMetric = null;
+
+/* Landmark Editor state */
+let landmarkEditorActive = false;
+let landmarkEditorMode = "front"; // "front" | "profile"
+let landmarkEditorIndex = 0;
+let confirmedFrontLandmarks = {};
+let confirmedProfileLandmarks = {};
+let editorImageScale = 1;
+let editorImageTx = 0;
+let editorImageTy = 0;
+let editorIsDragging = false;
+let editorDragStartX = 0;
+let editorDragStartY = 0;
+let editorDragStartTx = 0;
+let editorDragStartTy = 0;
+let pendingAnalysisFile = null;
+let pendingProfileFile = null;
+let autoDetectedFront = null;
+let autoDetectedProfile = null;
+
+
+
+/* Capture / onboarding flow. This sits in front of the existing uploader and
+   deliberately does not change the Worker request contract. */
+const captureFlow = document.getElementById("captureFlow");
+const captureFlowBody = document.getElementById("captureFlowBody");
+const captureFlowTitle = document.getElementById("captureFlowTitle");
+const captureFlowCounter = document.getElementById("captureFlowCounter");
+const captureFlowProgress = document.getElementById("captureFlowProgress");
+const captureFlowNext = document.getElementById("captureFlowNext");
+const captureFlowBack = document.getElementById("captureFlowBack");
+const captureFlowClose = document.getElementById("captureFlowClose");
+let captureMode = "front";
+let captureStep = 0;
+
+const CAPTURE_GUIDES = {
+  front: [
+    { title:"Камера на уровне лица", good:"Камера строго напротив лица", bad:"Снизу или сверху", text:"Держите камеру прямо перед лицом, на уровне глаз. Так пропорции не искажаются." },
+    { title:"Используйте основную камеру", good:"Чёткое и естественное изображение", bad:"Размытое селфи", text:"Основная камера обычно даёт более чистую геометрию. Если нужно видеть себя — используйте зеркало." },
+    { title:"Отойдите и включите зум", good:"Около 2 м · зум ×2–×3", bad:"Селфи с вытянутой руки", text:"Большая дистанция уменьшает перспективное искажение лица." },
+    { title:"Покажите контур лица", good:"Уши и линия роста волос видны", bad:"Волосы закрывают лицо", text:"Откройте овал лица, уши и линию роста волос. Не используйте сильные тени." },
+    { title:"Без мимики", good:"Спокойное лицо · рот закрыт", bad:"Улыбка или нахмуренные брови", text:"Смотрите прямо и расслабленно. Лёгкая естественная мимика допустима, но нейтральное лицо точнее." }
+  ],
+  profile: [
+    { title:"Профиль ровно 90°", good:"Виден чистый боковой контур", bad:"Голова повернута под углом", text:"Поверните голову строго в сторону. В кадре должен быть один читаемый профиль." },
+    { title:"Волосы и контур лица", good:"Контур открыт", bad:"Лицо перекрыто волосами", text:"Уберите волосы от лица, чтобы были видны лоб, нос, губы, челюсть и подбородок." },
+    { title:"Свет и фон", good:"Ровное освещение", bad:"Жёсткие тени", text:"Используйте нейтральный фон и ровный свет. Не снимайте в контровом свете." },
+    { title:"Проверьте профиль", good:"Нос направлен вправо", bad:"Сильный наклон головы", text:"После загрузки можно будет автоматически выровнять кадр перед анализом." }
+  ]
+};
 
 
 /* ============================================================
@@ -836,15 +984,74 @@ function updateNavigation(name) {
    FILE
 ============================================================ */
 
-function openFilePicker() {
+function openFrontFilePickerDirect() {
   if (!fileInput) {
     showToast("Не найден загрузчик фотографии.");
     return;
   }
-
   fileInput.value = "";
   fileInput.click();
 }
+
+function openCaptureFlow(mode = "front") {
+  if (!captureFlow || !captureFlowBody) {
+    if (mode === "front") openFrontFilePickerDirect();
+    else profileFileInput?.click();
+    return;
+  }
+  captureMode = mode === "profile" ? "profile" : "front";
+  captureStep = 0;
+  captureFlow.hidden = false;
+  captureFlow.setAttribute("aria-hidden", "false");
+  requestAnimationFrame(() => captureFlow.classList.add("is-open"));
+  renderCaptureFlow();
+}
+
+function closeCaptureFlow() {
+  if (!captureFlow) return;
+  captureFlow.classList.remove("is-open");
+  captureFlow.setAttribute("aria-hidden", "true");
+  window.setTimeout(() => { if (!captureFlow.classList.contains("is-open")) captureFlow.hidden = true; }, 220);
+}
+
+function renderCaptureFlow() {
+  if (!captureFlowBody) return;
+  const guides = CAPTURE_GUIDES[captureMode] || CAPTURE_GUIDES.front;
+  const isUpload = captureStep >= guides.length;
+  const guide = guides[Math.min(captureStep, guides.length - 1)];
+  const total = guides.length + 1;
+  if (captureFlowTitle) captureFlowTitle.textContent = captureMode === "front" ? "Подготовим анфас" : "Подготовим профиль";
+  if (captureFlowCounter) captureFlowCounter.textContent = `${Math.min(captureStep + 1, total)} / ${total}`;
+  if (captureFlowProgress) captureFlowProgress.style.width = `${((Math.min(captureStep + 1, total)) / total) * 100}%`;
+  if (captureFlowBack) captureFlowBack.disabled = captureStep === 0;
+  if (captureFlowNext) captureFlowNext.innerHTML = isUpload ? (captureMode === "front" ? `Загрузить анфас <span>→</span>` : `Загрузить профиль <span>→</span>`) : `Далее <span>→</span>`;
+
+  if (isUpload) {
+    captureFlowBody.innerHTML = `
+      <div class="capture-upload-state">
+        <div class="capture-upload-state__icon">⌁</div>
+        <div class="eyebrow">${captureMode === "front" ? "FRONT VIEW" : "PROFILE VIEW"}</div>
+        <h2>${captureMode === "front" ? "Загрузите фото анфас" : "Загрузите фото профиля"}</h2>
+        <p>${captureMode === "front" ? "Чёткое фото прямо в камеру, без сильного наклона и перспективных искажений." : "Чистый боковой ракурс. Контур носа, губ и челюсти должен быть виден полностью."}</p>
+        <div class="capture-upload-state__drop"><span>↑</span><strong>Выбрать изображение</strong><small>JPG, PNG или WEBP</small></div>
+        ${captureMode === "profile" ? '<button type="button" class="capture-skip-profile">Пропустить профиль</button>' : ''}
+      </div>`;
+  } else {
+    captureFlowBody.innerHTML = `
+      <article class="capture-guide-card">
+        <div class="capture-guide-card__step">ШАГ ${captureStep + 1} ИЗ ${guides.length}</div>
+        <h2>${escapeHtml(guide.title)}</h2>
+        <div class="capture-guide-compare">
+          <div class="capture-guide-visual capture-guide-visual--good"><div class="capture-face capture-face--${captureMode}"></div><b>✓ ${escapeHtml(guide.good)}</b></div>
+          <div class="capture-guide-visual capture-guide-visual--bad"><div class="capture-face capture-face--bad"></div><b>× ${escapeHtml(guide.bad)}</b></div>
+        </div>
+        <p>${escapeHtml(guide.text)}</p>
+      </article>`;
+  }
+}
+
+function openFilePicker() { openCaptureFlow("front"); }
+function openProfileCaptureFlow() { openCaptureFlow("profile"); }
 
 
 function validateFile(file) {
@@ -1019,6 +1226,7 @@ function applySameAlignmentTransform(element, alignment, frameElement = null) {
 }
 
 function handleFileSelected(file) {
+  closeCaptureFlow();
   if (!getGeminiApiKey()) {
     openGeminiKeyModal();
     showToast("Сначала введи Gemini API ключ.");
@@ -1076,6 +1284,7 @@ function handleFileSelected(file) {
 }
 
 function handleProfileFileSelected(file) {
+  closeCaptureFlow();
   if (!getGeminiApiKey()) {
     openGeminiKeyModal();
     showToast("Сначала введи Gemini API ключ.");
@@ -3044,7 +3253,7 @@ function renderResult(result) {
     result.production_features
   );
 
-  renderHealth();
+  renderHealth(result.metrics);
 
   renderViewSelector(result);
 
@@ -3964,7 +4173,10 @@ function extractMetricLeaves(object, prefix = "") {
   Object.entries(object).forEach(([key, value]) => {
     const path = prefix ? `${prefix}.${key}` : key;
     if (isObject(value) && Object.prototype.hasOwnProperty.call(value, "score") && Object.prototype.hasOwnProperty.call(value, "status")) {
-      result.push([path, value]);
+      const hasScore = Number.isFinite(Number(value.score));
+      const hasValue = Number.isFinite(Number(value.value));
+      // Do not render placeholder/insufficient rows as if they were measurements.
+      if (hasScore || hasValue) result.push([path, value]);
       return;
     }
     if (isObject(value)) result.push(...extractMetricLeaves(value, path));
@@ -5132,12 +5344,22 @@ function renderClassification(
    HEALTH
 ============================================================ */
 
-function renderHealth() {
+function renderHealth(metrics = {}) {
   if (!healthContent) {
     return;
   }
 
   healthContent.innerHTML = "";
+
+  const visible = [
+    ...getGroup(metrics, ["skin_hair"]),
+    ...getGroup(metrics, ["visible_features"]),
+    ...getGroup(metrics, ["health"])
+  ];
+  if (visible.length) {
+    renderFeaturePanel(healthContent, "Видимые признаки", "Только визуальные признаки, которые различимы на фотографии; это не медицинская диагностика.", visible);
+    return;
+  }
 
   const icon =
     document.createElement(
@@ -5669,10 +5891,12 @@ function startNewAnalysis() {
   analysisRequestId++;
 
   cancelActiveAnalysis();
+  clearLandmarkEditorState();
 
   selectedFile = null;
   selectedProfileFile = null;
   currentAnalysis = null;
+  lastClientLandmarks = null;
 
   activeResultView = "front";
   activeMetric = null;
@@ -6983,8 +7207,12 @@ function bindEvents() {
         showToast("Сначала добавь фотографию анфас.");
         return;
       }
+      if (!getClassificationSettings() || !adultConfirmed) {
+        openClassificationModal();
+        return;
+      }
       startAnalysisButton.disabled = true;
-      startAnalysis(selectedFile, selectedProfileFile);
+      beginLandmarkVerification(selectedFile, selectedProfileFile);
     }
   );
 
@@ -6996,7 +7224,7 @@ function bindEvents() {
         showToast("Сначала добавь фотографию анфас.");
         return;
       }
-      profileFileInput?.click();
+      openProfileCaptureFlow();
     }
   );
 
@@ -7008,6 +7236,32 @@ function bindEvents() {
       );
     }
   );
+
+  captureFlowNext?.addEventListener("click", () => {
+    const guides = CAPTURE_GUIDES[captureMode] || CAPTURE_GUIDES.front;
+    if (captureStep < guides.length) {
+      captureStep++;
+      renderCaptureFlow();
+      return;
+    }
+    if (captureMode === "front") openFrontFilePickerDirect();
+    else profileFileInput?.click();
+  });
+  captureFlowBack?.addEventListener("click", () => {
+    if (captureStep > 0) { captureStep--; renderCaptureFlow(); }
+  });
+  captureFlowClose?.addEventListener("click", closeCaptureFlow);
+  captureFlow?.querySelector(".capture-flow__backdrop")?.addEventListener("click", closeCaptureFlow);
+  captureFlowBody?.addEventListener("click", event => {
+    if (event.target.closest(".capture-upload-state__drop")) {
+      if (captureMode === "front") openFrontFilePickerDirect();
+      else profileFileInput?.click();
+    }
+    if (event.target.closest(".capture-skip-profile")) {
+      closeCaptureFlow();
+      showToast("Профиль пропущен — анфас будет проанализирован отдельно.");
+    }
+  });
 
   uploadZone?.addEventListener(
     "dragover",
@@ -7142,6 +7396,436 @@ function init() {
     300
   );
 }
+
+
+
+/* ============================================================
+   LANDMARK VERIFICATION EDITOR
+============================================================ */
+
+function getLandmarkList(mode) {
+  return mode === "profile" ? PROFILE_LANDMARKS : FRONT_LANDMARKS;
+}
+
+function clearLandmarkEditorState() {
+  confirmedFrontLandmarks = {};
+  confirmedProfileLandmarks = {};
+  landmarkEditorIndex = 0;
+  landmarkEditorMode = "front";
+  landmarkEditorActive = false;
+  editorImageScale = 1;
+  editorImageTx = 0;
+  editorImageTy = 0;
+  autoDetectedFront = null;
+  autoDetectedProfile = null;
+  pendingAnalysisFile = null;
+  pendingProfileFile = null;
+}
+
+async function beginLandmarkVerification(file, profileFile = null) {
+  clearLandmarkEditorState();
+  pendingAnalysisFile = file;
+  pendingProfileFile = profileFile;
+
+  // Auto-detect dense landmarks first
+  try {
+    if (analysisImage && selectedObjectUrl) {
+      // ensure image is loaded
+      if (!analysisImage.complete) {
+        await new Promise((res, rej) => {
+          analysisImage.onload = res;
+          analysisImage.onerror = rej;
+          setTimeout(res, 2000);
+        });
+      }
+      autoDetectedFront = await detectDenseFrontLandmarks();
+    }
+  } catch (e) {
+    console.warn("Auto landmark detect failed", e);
+  }
+
+  // Map auto-detected sparse points into confirmed as initial suggestions
+  if (autoDetectedFront) {
+    const map = {
+      forehead_center: "foreheadCenter",
+      left_eye_outer: "leftEyeLateralCanthus",
+      right_eye_outer: "rightEyeLateralCanthus",
+      left_eye_inner: "leftEyeInner",
+      right_eye_inner: "rightEyeInner",
+      left_brow_inner: "leftBrowInner",
+      right_brow_inner: "rightBrowInner",
+      left_brow_outer: "leftBrowOuter",
+      right_brow_outer: "rightBrowOuter",
+      mouth_left: "leftMouthCorner",
+      mouth_right: "rightMouthCorner",
+      nose_left: "leftNostril",
+      nose_right: "rightNostril",
+      left_jaw: "leftJaw",
+      right_jaw: "rightJaw",
+      left_cheekbone: "leftCheek",
+      right_cheekbone: "rightCheek",
+      nose_bridge: "noseBridge",
+      nose_tip: "noseTip",
+      upper_lip_center: "upperLip",
+      lower_lip_center: "lowerLip",
+      chin: "chinBottom"
+    };
+    for (const [oldKey, newId] of Object.entries(map)) {
+      if (autoDetectedFront[oldKey]) {
+        confirmedFrontLandmarks[newId] = { ...autoDetectedFront[oldKey] };
+      }
+    }
+  }
+
+  openLandmarkEditor("front");
+}
+
+function openLandmarkEditor(mode) {
+  landmarkEditorMode = mode;
+  landmarkEditorIndex = 0;
+  landmarkEditorActive = true;
+  editorImageScale = 1.4;
+  editorImageTx = 0;
+  editorImageTy = 0;
+
+  const list = getLandmarkList(mode);
+  const img = $("#landmark-editor-image");
+  if (img) {
+    if (mode === "front" && selectedObjectUrl) {
+      img.src = selectedObjectUrl;
+    } else if (mode === "profile" && selectedProfileObjectUrl) {
+      img.src = selectedProfileObjectUrl;
+    }
+  }
+
+  showScreen("landmark-editor");
+  updateLandmarkEditorUI();
+  bindLandmarkEditorEvents();
+  applyEditorTransform();
+}
+
+function updateLandmarkEditorUI() {
+  const list = getLandmarkList(landmarkEditorMode);
+  const total = list.length;
+  const idx = Math.min(landmarkEditorIndex, total - 1);
+  const lm = list[idx];
+  if (!lm) return;
+
+  const stepEl = $("#landmark-step-label");
+  const titleEl = $("#landmark-title");
+  const techEl = $("#landmark-tech");
+  const pctEl = $("#landmark-pct");
+  const howtoTitle = $("#howto-title");
+  const howtoDesc = $("#howto-desc");
+  const header = document.querySelector(".landmark-editor__header");
+
+  if (stepEl) stepEl.textContent = `${idx + 1} из ${total}`;
+  if (titleEl) titleEl.textContent = lm.label;
+  if (techEl) techEl.textContent = `${lm.tech} (${landmarkEditorMode === "front" ? "анфас" : "профиль"})`;
+  const pct = ((idx + 1) / total * 100).toFixed(1);
+  if (pctEl) pctEl.textContent = `${pct}%`;
+  if (header) header.style.setProperty("--le-progress", `${pct}%`);
+
+  if (howtoTitle) howtoTitle.textContent = lm.label;
+  if (howtoDesc) howtoDesc.textContent = lm.desc || "";
+
+  const prevBtn = $("#le-prev");
+  const nextBtn = $("#le-next");
+  if (prevBtn) prevBtn.disabled = idx === 0;
+  if (nextBtn) {
+    nextBtn.textContent = idx >= total - 1 ? "ГОТОВО" : "ДАЛЕЕ";
+  }
+
+  // Render confirmed dots
+  renderConfirmedDots();
+  // Center image on current landmark if already confirmed or auto
+  centerOnCurrentLandmark();
+}
+
+function getConfirmedMap() {
+  return landmarkEditorMode === "front" ? confirmedFrontLandmarks : confirmedProfileLandmarks;
+}
+
+function renderConfirmedDots() {
+  const container = $("#landmark-confirmed-dots");
+  if (!container) return;
+  container.innerHTML = "";
+  const map = getConfirmedMap();
+  const list = getLandmarkList(landmarkEditorMode);
+  const img = $("#landmark-editor-image");
+  if (!img || !img.naturalWidth) return;
+
+  // Dots are placed in image-wrap coordinate space; transform is on the wrap
+  // so we use normalized coords relative to image natural size later via transform.
+  // For simplicity we place absolute dots based on current transform later if needed.
+  // Simple approach: dots are children of image-wrap, positioned by % of image.
+  list.forEach((lm, i) => {
+    const p = map[lm.id];
+    if (!p) return;
+    const dot = document.createElement("div");
+    dot.className = "dot";
+    // Position relative to the image element
+    // We need the image dimensions inside the wrap
+    // Use percentage of the image's own size
+    dot.style.left = (p.x * 100) + "%";
+    dot.style.top = (p.y * 100) + "%";
+    // But the wrap may be larger; for now attach to image
+    container.appendChild(dot);
+  });
+}
+
+function centerOnCurrentLandmark() {
+  const list = getLandmarkList(landmarkEditorMode);
+  const lm = list[landmarkEditorIndex];
+  if (!lm) return;
+  const map = getConfirmedMap();
+  const p = map[lm.id];
+  if (!p) return;
+  // Rough center: move so that landmark is at viewport center
+  // This is approximate; full math depends on image size.
+  // For first version keep current transform.
+}
+
+function applyEditorTransform() {
+  const wrap = $("#landmark-image-wrap");
+  if (!wrap) return;
+  wrap.style.transform = `translate(${editorImageTx}px, ${editorImageTy}px) scale(${editorImageScale})`;
+  const zoomLabel = $("#le-zoom-label");
+  if (zoomLabel) zoomLabel.textContent = editorImageScale.toFixed(1).replace(/\.0$/, "") + "×";
+}
+
+function getCrosshairNormalizedPoint() {
+  // The crosshair is fixed at center of viewport.
+  // We need to compute the normalized (0-1) image coordinate under the crosshair.
+  const viewport = $("#landmark-viewport");
+  const img = $("#landmark-editor-image");
+  if (!viewport || !img || !img.naturalWidth) return null;
+
+  const vr = viewport.getBoundingClientRect();
+  const cx = vr.left + vr.width / 2;
+  const cy = vr.top + vr.height / 2;
+
+  // Image is inside wrap which has transform. Get image bounding rect after transform.
+  const ir = img.getBoundingClientRect();
+  if (ir.width <= 0 || ir.height <= 0) return null;
+
+  const nx = (cx - ir.left) / ir.width;
+  const ny = (cy - ir.top) / ir.height;
+
+  if (nx < 0 || nx > 1 || ny < 0 || ny > 1) {
+    // still allow, clamp
+  }
+  return {
+    x: Math.min(1, Math.max(0, nx)),
+    y: Math.min(1, Math.max(0, ny)),
+    confidence: 1
+  };
+}
+
+function confirmCurrentLandmark() {
+  const list = getLandmarkList(landmarkEditorMode);
+  const lm = list[landmarkEditorIndex];
+  if (!lm) return;
+  const pt = getCrosshairNormalizedPoint();
+  if (!pt) {
+    showToast("Не удалось определить координату. Попробуйте изменить зум.");
+    return;
+  }
+  const map = getConfirmedMap();
+  map[lm.id] = pt;
+  // Also keep sparse aliases for existing metric system
+  if (landmarkEditorMode === "front") {
+    const alias = {
+      leftEyeLateralCanthus: "left_eye_outer",
+      rightEyeLateralCanthus: "right_eye_outer",
+      leftEyeInner: "left_eye_inner",
+      rightEyeInner: "right_eye_inner",
+      leftBrowInner: "left_brow_inner",
+      rightBrowInner: "right_brow_inner",
+      leftBrowOuter: "left_brow_outer",
+      rightBrowOuter: "right_brow_outer",
+      leftMouthCorner: "mouth_left",
+      rightMouthCorner: "mouth_right",
+      leftNostril: "nose_left",
+      rightNostril: "nose_right",
+      leftJaw: "left_jaw",
+      rightJaw: "right_jaw",
+      leftCheek: "left_cheekbone",
+      rightCheek: "right_cheekbone",
+      noseBridge: "nose_bridge",
+      noseTip: "nose_tip",
+      upperLip: "upper_lip_center",
+      lowerLip: "lower_lip_center",
+      chinBottom: "chin",
+      foreheadCenter: "forehead_center"
+    };
+    if (alias[lm.id]) {
+      // store under both for compatibility
+      confirmedFrontLandmarks[alias[lm.id]] = pt;
+    }
+  }
+  renderConfirmedDots();
+}
+
+function goNextLandmark() {
+  confirmCurrentLandmark();
+  const list = getLandmarkList(landmarkEditorMode);
+  if (landmarkEditorIndex >= list.length - 1) {
+    // finished this mode
+    if (landmarkEditorMode === "front") {
+      if (pendingProfileFile && selectedProfileObjectUrl) {
+        // switch to profile
+        openLandmarkEditor("profile");
+        return;
+      } else {
+        finishLandmarkVerification();
+        return;
+      }
+    } else {
+      finishLandmarkVerification();
+      return;
+    }
+  }
+  landmarkEditorIndex++;
+  updateLandmarkEditorUI();
+}
+
+function goPrevLandmark() {
+  if (landmarkEditorIndex <= 0) return;
+  landmarkEditorIndex--;
+  updateLandmarkEditorUI();
+}
+
+function resetCurrentLandmark() {
+  const list = getLandmarkList(landmarkEditorMode);
+  const lm = list[landmarkEditorIndex];
+  if (!lm) return;
+  const map = getConfirmedMap();
+  delete map[lm.id];
+  renderConfirmedDots();
+  showToast("Точка сброшена");
+}
+
+function finishLandmarkVerification() {
+  landmarkEditorActive = false;
+  // Build the sparse client landmarks expected by the rest of the system
+  const sparse = {};
+  const aliasMap = {
+    leftEyeLateralCanthus: "left_eye_outer",
+    rightEyeLateralCanthus: "right_eye_outer",
+    leftEyeInner: "left_eye_inner",
+    rightEyeInner: "right_eye_inner",
+    leftBrowInner: "left_brow_inner",
+    rightBrowInner: "right_brow_inner",
+    leftBrowOuter: "left_brow_outer",
+    rightBrowOuter: "right_brow_outer",
+    leftMouthCorner: "mouth_left",
+    rightMouthCorner: "mouth_right",
+    leftNostril: "nose_left",
+    rightNostril: "nose_right",
+    leftJaw: "left_jaw",
+    rightJaw: "right_jaw",
+    leftCheek: "left_cheekbone",
+    rightCheek: "right_cheekbone",
+    noseBridge: "nose_bridge",
+    noseTip: "nose_tip",
+    upperLip: "upper_lip_center",
+    lowerLip: "lower_lip_center",
+    chinBottom: "chin",
+    foreheadCenter: "forehead_center"
+  };
+  for (const [newId, oldKey] of Object.entries(aliasMap)) {
+    if (confirmedFrontLandmarks[newId]) {
+      sparse[oldKey] = confirmedFrontLandmarks[newId];
+    } else if (confirmedFrontLandmarks[oldKey]) {
+      sparse[oldKey] = confirmedFrontLandmarks[oldKey];
+    }
+  }
+  // also copy any already sparse
+  Object.assign(sparse, confirmedFrontLandmarks);
+  lastClientLandmarks = sparse;
+
+  // Store full confirmed for potential future use
+  window.__facemetricConfirmedFront = { ...confirmedFrontLandmarks };
+  window.__facemetricConfirmedProfile = { ...confirmedProfileLandmarks };
+
+  // Proceed to real analysis
+  showScreen("analysis");
+  startAnalysis(pendingAnalysisFile, pendingProfileFile);
+}
+
+let landmarkEventsBound = false;
+function bindLandmarkEditorEvents() {
+  if (landmarkEventsBound) return;
+  landmarkEventsBound = true;
+
+  $("#le-next")?.addEventListener("click", () => goNextLandmark());
+  $("#le-prev")?.addEventListener("click", () => goPrevLandmark());
+  $("#le-undo")?.addEventListener("click", () => resetCurrentLandmark());
+  $("#landmark-confirm-btn")?.addEventListener("click", () => {
+    confirmCurrentLandmark();
+    goNextLandmark();
+  });
+  $("#le-zoom-in")?.addEventListener("click", () => {
+    editorImageScale = Math.min(4, editorImageScale + 0.25);
+    applyEditorTransform();
+  });
+  $("#le-zoom-out")?.addEventListener("click", () => {
+    editorImageScale = Math.max(0.5, editorImageScale - 0.25);
+    applyEditorTransform();
+  });
+
+  $("#tab-photo")?.addEventListener("click", () => {
+    $("#tab-photo")?.classList.add("is-active");
+    $("#tab-howto")?.classList.remove("is-active");
+    $("#panel-photo")?.classList.add("is-active");
+    $("#panel-howto")?.classList.remove("is-active");
+  });
+  $("#tab-howto")?.addEventListener("click", () => {
+    $("#tab-howto")?.classList.add("is-active");
+    $("#tab-photo")?.classList.remove("is-active");
+    $("#panel-howto")?.classList.add("is-active");
+    $("#panel-photo")?.classList.remove("is-active");
+  });
+
+  $("#landmark-editor-close")?.addEventListener("click", () => {
+    landmarkEditorActive = false;
+    startAnalysisButton?.removeAttribute("disabled");
+    showScreen("analysis");
+    showToast("Разметка отменена");
+  });
+
+  // Drag / pan
+  const viewport = $("#landmark-viewport");
+  if (viewport) {
+    viewport.addEventListener("pointerdown", (e) => {
+      editorIsDragging = true;
+      editorDragStartX = e.clientX;
+      editorDragStartY = e.clientY;
+      editorDragStartTx = editorImageTx;
+      editorDragStartTy = editorImageTy;
+      viewport.setPointerCapture?.(e.pointerId);
+    });
+    viewport.addEventListener("pointermove", (e) => {
+      if (!editorIsDragging) return;
+      editorImageTx = editorDragStartTx + (e.clientX - editorDragStartX);
+      editorImageTy = editorDragStartTy + (e.clientY - editorDragStartY);
+      applyEditorTransform();
+    });
+    viewport.addEventListener("pointerup", () => { editorIsDragging = false; });
+    viewport.addEventListener("pointercancel", () => { editorIsDragging = false; });
+
+    // Pinch / wheel zoom
+    viewport.addEventListener("wheel", (e) => {
+      e.preventDefault();
+      const delta = e.deltaY > 0 ? -0.1 : 0.1;
+      editorImageScale = Math.min(4, Math.max(0.5, editorImageScale + delta));
+      applyEditorTransform();
+    }, { passive: false });
+  }
+}
+
+// Extend startNewAnalysis to clear landmark state
 
 
 if (document.readyState === "loading") {
