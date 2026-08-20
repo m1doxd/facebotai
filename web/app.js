@@ -703,6 +703,8 @@ let editorDragStartTy = 0;
 let pendingAnalysisFile = null;
 let pendingProfileFile = null;
 let autoDetectedFront = null;
+let autoDetectedMesh = null; // full MediaPipe 478-point mesh (normalized) for precise howto pins & mapping
+
 let autoDetectedProfile = null;
 
 
@@ -1209,6 +1211,7 @@ async function detectDenseFrontLandmarks() {
   try {
     const result = detector.detect(analysisImage);
     const mesh = result?.faceLandmarks?.[0];
+    autoDetectedMesh = Array.isArray(mesh) && mesh.length >= 400 ? mesh : null;
     const landmarks = buildDenseFrontLandmarks(mesh);
     if (landmarks) {
       lastClientLandmarks = landmarks;
@@ -1216,6 +1219,7 @@ async function detectDenseFrontLandmarks() {
     }
   } catch (error) {
     console.warn("FaceMetric: dense landmark detection failed.", error);
+    autoDetectedMesh = null;
   }
   return null;
 }
@@ -7569,6 +7573,7 @@ function clearLandmarkEditorState() {
   editorImageTy = 0;
   autoDetectedFront = null;
   autoDetectedProfile = null;
+  autoDetectedMesh = null;
   pendingAnalysisFile = null;
   pendingProfileFile = null;
 }
@@ -7595,7 +7600,7 @@ async function beginLandmarkVerification(file, profileFile = null) {
     console.warn("Auto landmark detect failed", e);
   }
 
-  // Map auto-detected sparse points into confirmed as initial suggestions
+  // Map auto-detected sparse points + full mesh (via mp index) into confirmed as initial suggestions
   if (autoDetectedFront) {
     const map = {
       forehead_center: "foreheadCenter",
@@ -7626,6 +7631,14 @@ async function beginLandmarkVerification(file, profileFile = null) {
         confirmedFrontLandmarks[newId] = { ...autoDetectedFront[oldKey] };
       }
     }
+  }
+  // Full mesh → precise initial positions for every FRONT_LANDMARK that has mp
+  if (autoDetectedMesh) {
+    FRONT_LANDMARKS.forEach((lm) => {
+      if (lm.mp == null || confirmedFrontLandmarks[lm.id]) return;
+      const pt = pointFromLm(autoDetectedMesh, lm.mp);
+      if (pt) confirmedFrontLandmarks[lm.id] = pt;
+    });
   }
 
   openLandmarkEditor("front");
@@ -7725,7 +7738,7 @@ function updateLandmarkEditorUI() {
   centerOnCurrentLandmark();
 }
 
-/** Fill «Как найти» with the user's photo + pin at suggested point */
+/** Fill «Как найти» with the user's photo + pin at suggested point (MediaPipe or anatomical fallback) */
 function updateHowtoReference(lm) {
   const box = document.getElementById("howto-ref-img");
   if (!box) return;
@@ -7738,13 +7751,9 @@ function updateHowtoReference(lm) {
   const map = getConfirmedMap();
   let pt = map[lm?.id] || null;
 
-  // Fallback: MediaPipe index from definition
-  if (!pt && lm?.mp != null) {
-    const dense = landmarkEditorMode === "profile" ? autoDetectedProfile : autoDetectedFront;
-    // autoDetectedFront is sparse named map, not mesh — try id match variants
-  }
-  if (!pt && lm?.id && autoDetectedFront && landmarkEditorMode === "front") {
-    // try common aliases already mapped into confirmed during beginLandmarkVerification
+  // Precise: MediaPipe mesh index from landmark definition
+  if (!pt && lm?.mp != null && autoDetectedMesh && landmarkEditorMode === "front") {
+    pt = pointFromLm(autoDetectedMesh, lm.mp);
   }
 
   box.innerHTML = "";
@@ -7759,21 +7768,93 @@ function updateHowtoReference(lm) {
   img.src = src;
   box.appendChild(img);
 
-  // Pin position: confirmed / auto point, else a sensible default zone by landmark id
+  // Anatomical fallback zones (normalized) — used only when no MediaPipe / confirmed point
   const fallbackZones = {
-    hairline: { x: 0.5, y: 0.12 },
-    glabella: { x: 0.5, y: 0.28 },
-    noseTip: { x: 0.5, y: 0.48 },
-    noseBridge: { x: 0.5, y: 0.36 },
-    chin: { x: 0.5, y: 0.88 },
+    // Front
+    hairline: { x: 0.50, y: 0.10 },
+    leftTemple: { x: 0.16, y: 0.26 },
+    rightTemple: { x: 0.84, y: 0.26 },
+    leftBrowOuter: { x: 0.22, y: 0.30 },
+    leftBrowPeak: { x: 0.32, y: 0.27 },
+    leftBrowInner: { x: 0.42, y: 0.30 },
+    glabella: { x: 0.50, y: 0.30 },
+    rightBrowInner: { x: 0.58, y: 0.30 },
+    rightBrowPeak: { x: 0.68, y: 0.27 },
+    rightBrowOuter: { x: 0.78, y: 0.30 },
+    rightBrowArch: { x: 0.68, y: 0.29 },
+    leftEyeLateralCanthus: { x: 0.26, y: 0.38 },
+    leftEyeUpper: { x: 0.34, y: 0.36 },
+    leftEyeInner: { x: 0.42, y: 0.38 },
+    leftEyeLower: { x: 0.34, y: 0.41 },
+    leftEyelidHoodEnd: { x: 0.22, y: 0.35 },
+    rightEyeInner: { x: 0.58, y: 0.38 },
+    rightEyeUpper: { x: 0.66, y: 0.36 },
+    rightEyeLateralCanthus: { x: 0.74, y: 0.38 },
+    rightEyeLower: { x: 0.66, y: 0.41 },
     leftCheek: { x: 0.22, y: 0.52 },
     rightCheek: { x: 0.78, y: 0.52 },
-    leftTemple: { x: 0.18, y: 0.28 },
-    rightTemple: { x: 0.82, y: 0.28 },
-    leftEyeLateralCanthus: { x: 0.28, y: 0.38 },
-    rightEyeLateralCanthus: { x: 0.72, y: 0.38 },
-    leftBrowPeak: { x: 0.32, y: 0.30 },
-    rightBrowPeak: { x: 0.68, y: 0.30 },
+    noseBridge: { x: 0.50, y: 0.40 },
+    leftNoseBridge: { x: 0.46, y: 0.40 },
+    rightNoseBridge: { x: 0.54, y: 0.40 },
+    noseTip: { x: 0.50, y: 0.50 },
+    leftNostril: { x: 0.44, y: 0.52 },
+    rightNostril: { x: 0.56, y: 0.52 },
+    nasalBase: { x: 0.50, y: 0.55 },
+    leftMouthCorner: { x: 0.38, y: 0.64 },
+    mouthMiddle: { x: 0.50, y: 0.64 },
+    rightMouthCorner: { x: 0.62, y: 0.64 },
+    upperLip: { x: 0.50, y: 0.61 },
+    lowerLip: { x: 0.50, y: 0.68 },
+    chinBottom: { x: 0.50, y: 0.88 },
+    leftJaw: { x: 0.20, y: 0.72 },
+    rightJaw: { x: 0.80, y: 0.72 },
+    leftOuterEar: { x: 0.08, y: 0.48 },
+    rightOuterEar: { x: 0.92, y: 0.48 },
+    neckLeft: { x: 0.28, y: 0.92 },
+    neckRight: { x: 0.72, y: 0.92 },
+    foreheadCenter: { x: 0.50, y: 0.18 },
+    leftEyeCenter: { x: 0.34, y: 0.38 },
+    rightEyeCenter: { x: 0.66, y: 0.38 },
+    philtrum: { x: 0.50, y: 0.58 },
+    leftCheekbone: { x: 0.26, y: 0.48 },
+    rightCheekbone: { x: 0.74, y: 0.48 },
+    leftJawline: { x: 0.28, y: 0.78 },
+    rightJawline: { x: 0.72, y: 0.78 },
+    menton: { x: 0.50, y: 0.90 },
+    leftAlar: { x: 0.44, y: 0.53 },
+    rightAlar: { x: 0.56, y: 0.53 },
+    // Profile (approximate for typical right-facing profile)
+    profile_glabella: { x: 0.55, y: 0.28 },
+    profile_nasion: { x: 0.52, y: 0.32 },
+    profile_supratip: { x: 0.68, y: 0.42 },
+    profile_pronasale: { x: 0.72, y: 0.48 },
+    profile_columella: { x: 0.68, y: 0.52 },
+    profile_subnasale: { x: 0.62, y: 0.54 },
+    profile_labiale_superius: { x: 0.62, y: 0.58 },
+    profile_labiale_inferius: { x: 0.60, y: 0.66 },
+    profile_pogonion: { x: 0.58, y: 0.78 },
+    profile_menton: { x: 0.52, y: 0.86 },
+    profile_gonion: { x: 0.30, y: 0.70 },
+    profile_chin_neck: { x: 0.42, y: 0.90 },
+    profile_orbitale: { x: 0.50, y: 0.40 },
+    profile_tragion: { x: 0.22, y: 0.48 },
+    profile_zygomatic: { x: 0.48, y: 0.48 },
+    profile_lower_eyelid: { x: 0.52, y: 0.42 },
+    profile_upper_eyelid: { x: 0.52, y: 0.36 },
+    profile_forehead: { x: 0.48, y: 0.18 },
+    profile_nose_bridge: { x: 0.60, y: 0.40 },
+    profile_ala: { x: 0.62, y: 0.50 },
+    profile_stomion: { x: 0.60, y: 0.62 },
+    profile_soft_tissue_gnathion: { x: 0.54, y: 0.84 },
+    profile_cervical: { x: 0.38, y: 0.94 },
+    profile_ear_top: { x: 0.20, y: 0.38 },
+    profile_ear_bottom: { x: 0.24, y: 0.58 },
+    profile_jaw_angle_low: { x: 0.28, y: 0.76 },
+    profile_sublabiale: { x: 0.58, y: 0.70 },
+    profile_trichion: { x: 0.48, y: 0.10 },
+    profile_sellion: { x: 0.52, y: 0.34 },
+    profile_rhinion: { x: 0.64, y: 0.38 },
+    profile_infraorbitale: { x: 0.50, y: 0.44 }
   };
   if (!pt) pt = fallbackZones[lm?.id] || { x: 0.5, y: 0.4 };
 
@@ -7904,6 +7985,8 @@ function confirmCurrentLandmark() {
   const list = getLandmarkList(landmarkEditorMode);
   const lm = list[landmarkEditorIndex];
   if (!lm) return;
+  // Ensure layout is up-to-date so % coords match the visible image under crosshair
+  layoutEditorImage();
   const pt = getCrosshairNormalizedPoint();
   if (!pt) {
     showToast("Не удалось определить координату. Попробуйте изменить зум.");
