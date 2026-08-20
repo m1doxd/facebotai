@@ -7647,27 +7647,38 @@ function openLandmarkEditor(mode) {
       ? selectedProfileObjectUrl
       : selectedObjectUrl;
 
+  // Always start on «Фото» tab so user sees the image
+  $("#tab-photo")?.classList.add("is-active");
+  $("#tab-howto")?.classList.remove("is-active");
+  $("#panel-photo")?.classList.add("is-active");
+  $("#panel-howto")?.classList.remove("is-active");
+
   if (img && src) {
+    img.style.display = "block";
+    img.style.visibility = "visible";
     const apply = () => {
       editorImageScale = 1;
       editorImageTx = 0;
       editorImageTy = 0;
+      layoutEditorImage();
       applyEditorTransform();
       updateLandmarkEditorUI();
+      // Auto-center on first auto-detected point if any
+      centerOnCurrentLandmark();
     };
-    if (img.src === src && img.complete && img.naturalWidth > 0) {
+    if (img.getAttribute("src") === src && img.complete && img.naturalWidth > 0) {
       apply();
     } else {
       img.onload = () => apply();
       img.onerror = () => {
-        console.warn("Landmark editor image failed to load");
+        console.warn("Landmark editor image failed to load", src);
         showToast("Не удалось загрузить фото в редактор.");
       };
       img.src = src;
     }
   } else {
     console.warn("No image URL for landmark editor", mode, !!src);
-    showToast("Фото не найдено для разметки.");
+    showToast("Фото не найдено для разметки. Загрузите анфас заново.");
   }
 
   updateLandmarkEditorUI();
@@ -7699,6 +7710,7 @@ function updateLandmarkEditorUI() {
 
   if (howtoTitle) howtoTitle.textContent = lm.label;
   if (howtoDesc) howtoDesc.textContent = lm.desc || "";
+  updateHowtoReference(lm);
 
   const prevBtn = $("#le-prev");
   const nextBtn = $("#le-next");
@@ -7713,8 +7725,99 @@ function updateLandmarkEditorUI() {
   centerOnCurrentLandmark();
 }
 
+/** Fill «Как найти» with the user's photo + pin at suggested point */
+function updateHowtoReference(lm) {
+  const box = document.getElementById("howto-ref-img");
+  if (!box) return;
+
+  const src =
+    landmarkEditorMode === "profile"
+      ? selectedProfileObjectUrl
+      : selectedObjectUrl;
+
+  const map = getConfirmedMap();
+  let pt = map[lm?.id] || null;
+
+  // Fallback: MediaPipe index from definition
+  if (!pt && lm?.mp != null) {
+    const dense = landmarkEditorMode === "profile" ? autoDetectedProfile : autoDetectedFront;
+    // autoDetectedFront is sparse named map, not mesh — try id match variants
+  }
+  if (!pt && lm?.id && autoDetectedFront && landmarkEditorMode === "front") {
+    // try common aliases already mapped into confirmed during beginLandmarkVerification
+  }
+
+  box.innerHTML = "";
+  if (!src) {
+    box.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#666;font-size:13px;padding:16px;text-align:center">Нет фото для подсказки</div>';
+    return;
+  }
+
+  const img = document.createElement("img");
+  img.alt = lm?.label || "Справка";
+  img.draggable = false;
+  img.src = src;
+  box.appendChild(img);
+
+  // Pin position: confirmed / auto point, else a sensible default zone by landmark id
+  const fallbackZones = {
+    hairline: { x: 0.5, y: 0.12 },
+    glabella: { x: 0.5, y: 0.28 },
+    noseTip: { x: 0.5, y: 0.48 },
+    noseBridge: { x: 0.5, y: 0.36 },
+    chin: { x: 0.5, y: 0.88 },
+    leftCheek: { x: 0.22, y: 0.52 },
+    rightCheek: { x: 0.78, y: 0.52 },
+    leftTemple: { x: 0.18, y: 0.28 },
+    rightTemple: { x: 0.82, y: 0.28 },
+    leftEyeLateralCanthus: { x: 0.28, y: 0.38 },
+    rightEyeLateralCanthus: { x: 0.72, y: 0.38 },
+    leftBrowPeak: { x: 0.32, y: 0.30 },
+    rightBrowPeak: { x: 0.68, y: 0.30 },
+  };
+  if (!pt) pt = fallbackZones[lm?.id] || { x: 0.5, y: 0.4 };
+
+  const pin = document.createElement("div");
+  pin.className = "howto-ref__pin";
+  pin.style.left = (Math.min(0.95, Math.max(0.05, pt.x)) * 100) + "%";
+  pin.style.top = (Math.min(0.95, Math.max(0.05, pt.y)) * 100) + "%";
+  box.appendChild(pin);
+}
+
 function getConfirmedMap() {
   return landmarkEditorMode === "front" ? confirmedFrontLandmarks : confirmedProfileLandmarks;
+}
+
+/** Size the image-wrap exactly to the fitted image so % coords match the photo */
+function layoutEditorImage() {
+  const viewport = $("#landmark-viewport");
+  const wrap = $("#landmark-image-wrap");
+  const img = $("#landmark-editor-image");
+  if (!viewport || !wrap || !img || !img.naturalWidth) return false;
+
+  const vw = viewport.clientWidth;
+  const vh = viewport.clientHeight;
+  if (vw <= 0 || vh <= 0) return false;
+
+  const nw = img.naturalWidth;
+  const nh = img.naturalHeight;
+  const fit = Math.min((vw * 0.92) / nw, (vh * 0.92) / nh);
+  const dw = Math.max(1, nw * fit);
+  const dh = Math.max(1, nh * fit);
+
+  wrap.style.width = dw + "px";
+  wrap.style.height = dh + "px";
+  wrap.style.left = "50%";
+  wrap.style.top = "50%";
+
+  img.style.width = "100%";
+  img.style.height = "100%";
+  img.style.maxWidth = "none";
+  img.style.maxHeight = "none";
+  img.style.objectFit = "fill";
+
+  applyEditorTransform();
+  return true;
 }
 
 function renderConfirmedDots() {
@@ -7723,24 +7826,18 @@ function renderConfirmedDots() {
   container.innerHTML = "";
   const map = getConfirmedMap();
   const list = getLandmarkList(landmarkEditorMode);
-  const img = $("#landmark-editor-image");
-  if (!img || !img.naturalWidth) return;
 
-  // Dots are placed in image-wrap coordinate space; transform is on the wrap
-  // so we use normalized coords relative to image natural size later via transform.
-  // For simplicity we place absolute dots based on current transform later if needed.
-  // Simple approach: dots are children of image-wrap, positioned by % of image.
-  list.forEach((lm, i) => {
+  list.forEach((lm) => {
     const p = map[lm.id];
-    if (!p) return;
+    if (!p || !Number.isFinite(p.x) || !Number.isFinite(p.y)) return;
     const dot = document.createElement("div");
     dot.className = "dot";
-    // Position relative to the image element
-    // We need the image dimensions inside the wrap
-    // Use percentage of the image's own size
+    // wrap is now exactly the image size → % matches photo pixels
     dot.style.left = (p.x * 100) + "%";
     dot.style.top = (p.y * 100) + "%";
-    // But the wrap may be larger; for now attach to image
+    if (lm.id === getLandmarkList(landmarkEditorMode)[landmarkEditorIndex]?.id) {
+      dot.classList.add("is-current");
+    }
     container.appendChild(dot);
   });
 }
@@ -7750,18 +7847,25 @@ function centerOnCurrentLandmark() {
   const lm = list[landmarkEditorIndex];
   if (!lm) return;
   const map = getConfirmedMap();
-  const p = map[lm.id];
+  let p = map[lm.id];
   if (!p) return;
-  // Rough center: move so that landmark is at viewport center
-  // This is approximate; full math depends on image size.
-  // For first version keep current transform.
+
+  const wrap = $("#landmark-image-wrap");
+  if (!wrap) return;
+  const w = wrap.offsetWidth || 1;
+  const h = wrap.offsetHeight || 1;
+  // Point under crosshair (viewport center): tx = -(nx-0.5)*w*s
+  editorImageTx = -(p.x - 0.5) * w * editorImageScale;
+  editorImageTy = -(p.y - 0.5) * h * editorImageScale;
+  applyEditorTransform();
 }
 
 function applyEditorTransform() {
   const wrap = $("#landmark-image-wrap");
   if (!wrap) return;
-  // Center the wrap, then apply user pan/zoom from center
-  wrap.style.transform = `translate(calc(-50% + ${editorImageTx}px), calc(-50% + ${editorImageTy}px)) scale(${editorImageScale})`;
+  wrap.style.transformOrigin = "center center";
+  wrap.style.transform =
+    `translate(calc(-50% + ${editorImageTx}px), calc(-50% + ${editorImageTy}px)) scale(${editorImageScale})`;
   const zoomLabel = $("#le-zoom-label");
   if (zoomLabel) {
     const z = Math.round(editorImageScale * 10) / 10;
@@ -7770,26 +7874,25 @@ function applyEditorTransform() {
 }
 
 function getCrosshairNormalizedPoint() {
-  // The crosshair is fixed at center of viewport.
-  // We need to compute the normalized (0-1) image coordinate under the crosshair.
+  // Crosshair is fixed at the center of the viewport.
+  // Map that screen point onto the image using its transformed bounding box.
   const viewport = $("#landmark-viewport");
   const img = $("#landmark-editor-image");
+  const wrap = $("#landmark-image-wrap");
   if (!viewport || !img || !img.naturalWidth) return null;
 
   const vr = viewport.getBoundingClientRect();
   const cx = vr.left + vr.width / 2;
   const cy = vr.top + vr.height / 2;
 
-  // Image is inside wrap which has transform. Get image bounding rect after transform.
-  const ir = img.getBoundingClientRect();
+  // Prefer wrap rect if it matches image size; fallback to img
+  const target = (wrap && wrap.offsetWidth > 0) ? wrap : img;
+  const ir = target.getBoundingClientRect();
   if (ir.width <= 0 || ir.height <= 0) return null;
 
   const nx = (cx - ir.left) / ir.width;
   const ny = (cy - ir.top) / ir.height;
 
-  if (nx < 0 || nx > 1 || ny < 0 || ny > 1) {
-    // still allow, clamp
-  }
   return {
     x: Math.min(1, Math.max(0, nx)),
     y: Math.min(1, Math.max(0, ny)),
@@ -7941,26 +8044,38 @@ function bindLandmarkEditorEvents() {
     confirmCurrentLandmark();
     goNextLandmark();
   });
-  $("#le-zoom-in")?.addEventListener("click", () => {
-    editorImageScale = Math.min(4, editorImageScale + 0.25);
+  function zoomEditorBy(delta) {
+    const prev = editorImageScale;
+    const next = Math.min(4, Math.max(0.5, prev + delta));
+    if (next === prev) return;
+    // Keep the same image point under the crosshair while zooming
+    const ratio = next / prev;
+    editorImageTx *= ratio;
+    editorImageTy *= ratio;
+    editorImageScale = next;
     applyEditorTransform();
-  });
-  $("#le-zoom-out")?.addEventListener("click", () => {
-    editorImageScale = Math.max(0.5, editorImageScale - 0.25);
-    applyEditorTransform();
-  });
+  }
+
+  $("#le-zoom-in")?.addEventListener("click", () => zoomEditorBy(0.25));
+  $("#le-zoom-out")?.addEventListener("click", () => zoomEditorBy(-0.25));
 
   $("#tab-photo")?.addEventListener("click", () => {
     $("#tab-photo")?.classList.add("is-active");
     $("#tab-howto")?.classList.remove("is-active");
     $("#panel-photo")?.classList.add("is-active");
     $("#panel-howto")?.classList.remove("is-active");
+    // Panel was display:none — layout after it becomes visible
+    requestAnimationFrame(() => {
+      layoutEditorImage();
+      renderConfirmedDots();
+    });
   });
   $("#tab-howto")?.addEventListener("click", () => {
     $("#tab-howto")?.classList.add("is-active");
     $("#tab-photo")?.classList.remove("is-active");
     $("#panel-howto")?.classList.add("is-active");
     $("#panel-photo")?.classList.remove("is-active");
+    updateLandmarkEditorUI();
   });
 
   $("#landmark-editor-close")?.addEventListener("click", () => {
@@ -7994,7 +8109,13 @@ function bindLandmarkEditorEvents() {
     viewport.addEventListener("wheel", (e) => {
       e.preventDefault();
       const delta = e.deltaY > 0 ? -0.1 : 0.1;
-      editorImageScale = Math.min(4, Math.max(0.5, editorImageScale + delta));
+      const prev = editorImageScale;
+      const next = Math.min(4, Math.max(0.5, prev + delta));
+      if (next === prev) return;
+      const ratio = next / prev;
+      editorImageTx *= ratio;
+      editorImageTy *= ratio;
+      editorImageScale = next;
       applyEditorTransform();
     }, { passive: false });
   }
