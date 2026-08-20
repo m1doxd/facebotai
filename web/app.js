@@ -90,6 +90,7 @@ function openClassificationModal(options = {}) {
   if (error) { error.hidden = true; error.textContent = ""; }
 
   modal.hidden = false;
+  modal.style.pointerEvents = "";
   modal.classList.add("show");
   modal.setAttribute("aria-hidden", "false");
 
@@ -128,9 +129,12 @@ function closeClassificationModal() {
   modal.classList.remove("show");
   modal.classList.add("is-closing");
   modal.setAttribute("aria-hidden", "true");
+  // Immediately stop intercepting clicks; hide after animation
+  modal.style.pointerEvents = "none";
   window.setTimeout(() => {
     modal.hidden = true;
     modal.classList.remove("is-closing");
+    modal.style.pointerEvents = "";
   }, 240);
 }
 
@@ -285,6 +289,7 @@ function openGeminiKeyModal(options = {}) {
   }
 
   modal.hidden = false;
+  modal.style.pointerEvents = "";
   modal.classList.add("show");
   modal.setAttribute("aria-hidden", "false");
 
@@ -1002,6 +1007,7 @@ function openCaptureFlow(mode = "front") {
   captureMode = mode === "profile" ? "profile" : "front";
   captureStep = 0;
   captureFlow.hidden = false;
+  captureFlow.style.pointerEvents = "";
   captureFlow.setAttribute("aria-hidden", "false");
   requestAnimationFrame(() => captureFlow.classList.add("is-open"));
   renderCaptureFlow();
@@ -1011,7 +1017,14 @@ function closeCaptureFlow() {
   if (!captureFlow) return;
   captureFlow.classList.remove("is-open");
   captureFlow.setAttribute("aria-hidden", "true");
-  window.setTimeout(() => { if (!captureFlow.classList.contains("is-open")) captureFlow.hidden = true; }, 220);
+  // Stop blocking clicks immediately while fade-out runs
+  captureFlow.style.pointerEvents = "none";
+  window.setTimeout(() => {
+    if (!captureFlow.classList.contains("is-open")) {
+      captureFlow.hidden = true;
+      captureFlow.style.pointerEvents = "";
+    }
+  }, 220);
 }
 
 function renderCaptureFlow() {
