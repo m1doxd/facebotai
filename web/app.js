@@ -84,6 +84,15 @@ function openClassificationModal(options = {}) {
   }
 
   const saved = getClassificationSettings();
+  // Already configured — do not reopen unless force: true
+  if (!options.force && saved?.adultConfirmed && (saved.gender === "male" || saved.gender === "female")) {
+    selectedGender = saved.gender;
+    adultConfirmed = true;
+    if (genderSelect) genderSelect.value = selectedGender;
+    if (adultConfirm) adultConfirm.checked = true;
+    return false;
+  }
+
   gender.value = selectedGender === "female" ? "female" : (saved?.gender || "male");
   adult.checked = adultConfirmed || saved?.adultConfirmed === true;
   syncClassificationModalControls();
@@ -1256,14 +1265,15 @@ function handleFileSelected(file) {
   cancelActiveAnalysis();
   analysisRequestId++;
 
-  // Every newly uploaded face photo gets a fresh classification confirmation.
-  // Do not reuse gender/18+ from a previous photo. The modal must appear before
-  // the user can start analysis, but confirming it must NOT start analysis.
-  clearClassificationSettings();
-  selectedGender = "male";
-  adultConfirmed = false;
-  if (genderSelect) genderSelect.value = selectedGender;
-  if (adultConfirm) adultConfirm.checked = false;
+  // Keep previously chosen gender/18+ so the modal does not reopen every time.
+  // User already confirmed it at the start of the flow.
+  const savedClass = getClassificationSettings();
+  if (savedClass) {
+    selectedGender = savedClass.gender === "female" ? "female" : "male";
+    adultConfirmed = savedClass.adultConfirmed === true;
+    if (genderSelect) genderSelect.value = selectedGender;
+    if (adultConfirm) adultConfirm.checked = adultConfirmed;
+  }
 
   selectedFile = file;
 
