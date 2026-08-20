@@ -944,13 +944,14 @@ function showScreen(name) {
     const active = screen === target;
 
     screen.classList.toggle("active", active);
-
     if (active) {
+      screen.hidden = false;
+      screen.removeAttribute("aria-hidden");
       screen.classList.remove("screen-enter");
-
       void screen.offsetWidth;
-
       screen.classList.add("screen-enter");
+    } else {
+      screen.setAttribute("aria-hidden", "true");
     }
   });
 
@@ -1277,6 +1278,12 @@ function handleFileSelected(file) {
 
   selectedFile = file;
 
+  // New front photo → clear previous profile so it does not carry over
+  selectedProfileFile = null;
+  revokeSelectedProfileObjectUrl();
+  if (profileUploadName) profileUploadName.textContent = "Необязательно · профиль войдёт в общий рейтинг";
+  if (profileFileInput) profileFileInput.value = "";
+
   revokeSelectedObjectUrl();
   selectedObjectUrl = URL.createObjectURL(file);
 
@@ -1291,14 +1298,19 @@ function handleFileSelected(file) {
 
   clearAnalysisError();
   resetAnalysisPreview();
+  // Hide loading block until user starts analysis
+  if (loadingContent) {
+    loadingContent.classList.add("is-hidden");
+    loadingContent.hidden = true;
+  }
   showScreen("analysis");
 
   setAnalysisState("ГОТОВО К АНАЛИЗУ");
   showProfileUploadControl();
+  updateDualPhotoStrip();
   updateAnalysisButtonState();
 
-  // Gender already chosen before upload. Offer profile next.
-  updateDualPhotoStrip();
+  // Offer profile guide only if no profile yet
   window.setTimeout(() => {
     if (selectedFile === file && !selectedProfileFile) {
       openProfileCaptureFlow();
@@ -1362,23 +1374,39 @@ function updateDualPhotoStrip() {
   const profileLabel = document.getElementById("dual-profile-label");
   const addBtn = document.getElementById("dual-add-profile");
   const profileCard = document.getElementById("profile-upload-card");
+  const mainPreview = document.querySelector("#screen-analysis .analysis-preview");
 
   if (!strip) return;
 
   if (!selectedObjectUrl) {
     strip.hidden = true;
+    strip.classList.remove("has-profile");
+    if (mainPreview) mainPreview.hidden = false;
     return;
   }
 
+  // Dual strip replaces the large single preview until analysis runs
   strip.hidden = false;
-  if (frontImg) frontImg.src = selectedObjectUrl;
+  if (mainPreview) mainPreview.hidden = true;
 
-  if (selectedProfileObjectUrl) {
+  if (frontImg) {
+    frontImg.src = selectedObjectUrl;
+    frontImg.hidden = false;
+  }
+
+  const hasProfile = Boolean(selectedProfileFile && selectedProfileObjectUrl);
+  strip.classList.toggle("has-profile", hasProfile);
+
+  if (hasProfile) {
     if (profileImg) {
       profileImg.src = selectedProfileObjectUrl;
       profileImg.hidden = false;
     }
-    if (addBtn) addBtn.hidden = true;
+    if (addBtn) {
+      addBtn.hidden = true;
+      addBtn.style.display = "none";
+      addBtn.setAttribute("aria-hidden", "true");
+    }
     if (profileLabel) profileLabel.textContent = "ПРОФИЛЬ";
     if (profileCard) profileCard.hidden = true;
   } else {
@@ -1386,11 +1414,15 @@ function updateDualPhotoStrip() {
       profileImg.removeAttribute("src");
       profileImg.hidden = true;
     }
-    if (addBtn) addBtn.hidden = false;
-    if (profileLabel) profileLabel.textContent = "ПРОФИЛЬ · нет";
+    if (addBtn) {
+      addBtn.hidden = false;
+      addBtn.style.display = "";
+      addBtn.removeAttribute("aria-hidden");
+    }
+    if (profileLabel) profileLabel.textContent = "ПРОФИЛЬ";
     if (profileCard) {
-      profileCard.hidden = false;
-      profileCard.classList.add("is-ready");
+      profileCard.hidden = true; // dual strip already has +
+      profileCard.classList.remove("is-ready");
     }
   }
 }
@@ -5993,13 +6025,33 @@ function startNewAnalysis() {
   }
 
   const profileCard = document.getElementById("profile-upload-card");
-  profileCard?.classList.remove("is-ready");
+  if (profileCard) {
+    profileCard.classList.remove("is-ready");
+    profileCard.hidden = true;
+  }
   const dualStrip = document.getElementById("dual-photo-strip");
-  if (dualStrip) dualStrip.hidden = true;
+  if (dualStrip) {
+    dualStrip.hidden = true;
+    dualStrip.classList.remove("has-profile");
+  }
   const dualFront = document.getElementById("dual-front-img");
   const dualProf = document.getElementById("dual-profile-img");
+  const dualAdd = document.getElementById("dual-add-profile");
   if (dualFront) dualFront.removeAttribute("src");
-  if (dualProf) dualProf.removeAttribute("src");
+  if (dualProf) {
+    dualProf.removeAttribute("src");
+    dualProf.hidden = true;
+  }
+  if (dualAdd) {
+    dualAdd.hidden = false;
+    dualAdd.style.display = "";
+  }
+  const mainPreview = document.querySelector("#screen-analysis .analysis-preview");
+  if (mainPreview) mainPreview.hidden = false;
+  if (loadingContent) {
+    loadingContent.classList.add("is-hidden");
+    loadingContent.hidden = true;
+  }
 
   startAnalysisButton?.setAttribute("disabled", "disabled");
 
@@ -7251,11 +7303,18 @@ function initClassificationSettings() {
 
 function updateAnalysisButtonState() {
   if (!startAnalysisButton) return;
-  const ready = Boolean(selectedFile) && adultConfirmed && Boolean(getClassificationSettings());
+  // Sync memory from localStorage so button is not stuck disabled
+  const saved = getClassificationSettings();
+  if (saved?.adultConfirmed) {
+    adultConfirmed = true;
+    selectedGender = saved.gender === "female" ? "female" : "male";
+  }
+  const ready = Boolean(selectedFile) && adultConfirmed && Boolean(saved || getClassificationSettings());
   startAnalysisButton.disabled = !ready;
-  startAnalysisButton.title = !adultConfirmed
-    ? "Настройте профиль анализа и подтвердите 18+"
-    : "";
+  startAnalysisButton.removeAttribute("aria-disabled");
+  startAnalysisButton.title = !ready
+    ? (!selectedFile ? "Сначала загрузите анфас" : "Подтвердите пол и 18+")
+    : "Начать анализ";
 }
 
 function bindEvents() {
