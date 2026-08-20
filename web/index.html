@@ -628,6 +628,71 @@
       </section>
 
 
+
+      <!-- =======================================================
+           LANDMARK EDITOR
+      ======================================================== -->
+
+      <section
+        class="screen"
+        id="screen-landmark-editor"
+        aria-labelledby="landmark-editor-title"
+      >
+        <div class="landmark-editor">
+          <header class="landmark-editor__header">
+            <button type="button" class="landmark-editor__close" id="landmark-editor-close" aria-label="Закрыть">×</button>
+            <div class="landmark-editor__progress-wrap">
+              <div class="landmark-editor__step" id="landmark-step-label">1 из 52</div>
+              <div class="landmark-editor__title" id="landmark-title">Линия роста волос</div>
+              <div class="landmark-editor__tech" id="landmark-tech">hairline (анфас)</div>
+            </div>
+            <div class="landmark-editor__pct" id="landmark-pct">1.9%</div>
+            <button type="button" class="landmark-editor__check" id="landmark-confirm-btn" aria-label="Подтвердить">✓</button>
+          </header>
+
+          <div class="landmark-editor__tabs">
+            <button type="button" class="landmark-editor__tab is-active" data-tab="photo" id="tab-photo">Фото</button>
+            <button type="button" class="landmark-editor__tab" data-tab="howto" id="tab-howto">Как найти</button>
+          </div>
+
+          <div class="landmark-editor__body">
+            <div class="landmark-editor__panel is-active" id="panel-photo">
+              <div class="landmark-editor__viewport" id="landmark-viewport">
+                <div class="landmark-editor__image-wrap" id="landmark-image-wrap">
+                  <img id="landmark-editor-image" alt="Фото для разметки" draggable="false" />
+                  <div class="landmark-editor__confirmed-dots" id="landmark-confirmed-dots"></div>
+                </div>
+                <div class="landmark-editor__crosshair" id="landmark-crosshair">
+                  <span class="ch-h"></span>
+                  <span class="ch-v"></span>
+                  <span class="ch-dot"></span>
+                </div>
+                <div class="landmark-editor__hint">Тяните, чтобы двигать</div>
+              </div>
+              <div class="landmark-editor__controls">
+                <button type="button" class="le-btn" id="le-undo" title="Сбросить точку">↺</button>
+                <button type="button" class="le-btn" id="le-zoom-out" title="Отдалить">−</button>
+                <button type="button" class="le-btn" id="le-zoom-in" title="Приблизить">+</button>
+                <span class="le-zoom-label" id="le-zoom-label">1×</span>
+              </div>
+            </div>
+
+            <div class="landmark-editor__panel" id="panel-howto">
+              <div class="landmark-editor__howto" id="landmark-howto">
+                <div class="howto-ref" id="howto-ref-img"></div>
+                <h3 id="howto-title">Линия роста волос</h3>
+                <p id="howto-desc">Центр линии роста волос на лбу. Ищите самую верхнюю точку, где волосы встречаются с кожей лба.</p>
+              </div>
+            </div>
+          </div>
+
+          <footer class="landmark-editor__footer">
+            <button type="button" class="le-nav-btn" id="le-prev">НАЗАД</button>
+            <button type="button" class="le-nav-btn le-nav-btn--primary" id="le-next">ДАЛЕЕ</button>
+          </footer>
+        </div>
+      </section>
+
       <!-- =======================================================
            RESULT
       ======================================================== -->
@@ -1332,6 +1397,27 @@
     aria-live="polite"
   ></div>
 
+
+
+<!-- =========================================================
+     FACEMETRIC CAPTURE FLOW — REFERENCE INSPIRED
+========================================================== -->
+<div id="captureFlow" class="capture-flow" hidden aria-hidden="true" role="dialog" aria-modal="true" aria-label="Подготовка фотографий">
+  <div class="capture-flow__backdrop"></div>
+  <section class="capture-flow__sheet" aria-live="polite">
+    <header class="capture-flow__header">
+      <button type="button" class="capture-flow__close" id="captureFlowClose" aria-label="Закрыть">×</button>
+      <div><span>FACEMETRIC / CAPTURE</span><strong id="captureFlowTitle">Подготовим анфас</strong></div>
+      <div class="capture-flow__counter" id="captureFlowCounter">1 / 5</div>
+    </header>
+    <div class="capture-flow__progress"><i id="captureFlowProgress"></i></div>
+    <div class="capture-flow__body" id="captureFlowBody"></div>
+    <footer class="capture-flow__footer">
+      <button type="button" class="capture-flow__back" id="captureFlowBack">Назад</button>
+      <button type="button" class="capture-flow__next" id="captureFlowNext">Далее <span>→</span></button>
+    </footer>
+  </section>
+</div>
 
 
 <div
