@@ -3159,10 +3159,14 @@ body.metric-reference-open{overflow:hidden}
 }
 
 #apiKeyModal.show,
-#classificationModal.show,
-#apiKeyModal:not([hidden]),
-#classificationModal:not([hidden]) {
+#classificationModal.show {
   opacity: 1;
+  pointer-events: auto;
+}
+
+#apiKeyModal:not(.show),
+#classificationModal:not(.show) {
+  pointer-events: none !important;
 }
 
 #apiKeyModal .modal-card,
@@ -3921,8 +3925,8 @@ body.metric-reference-open{overflow:hidden}
    V10 CAPTURE FLOW + REFERENCE INSPIRED REPORT
 ============================================================ */
 .capture-flow[hidden]{display:none!important}
-.capture-flow{position:fixed;z-index:1000;inset:0;display:grid;place-items:center;padding:20px;opacity:0;transition:opacity .22s ease;isolation:isolate}
-.capture-flow.is-open{opacity:1}
+.capture-flow{position:fixed;z-index:1000;inset:0;display:grid;place-items:center;padding:20px;opacity:0;pointer-events:none;transition:opacity .22s ease;isolation:isolate}
+.capture-flow.is-open{opacity:1;pointer-events:auto}
 .capture-flow__backdrop{position:absolute;inset:0;background:rgba(2,3,5,.76);backdrop-filter:blur(18px) saturate(125%);-webkit-backdrop-filter:blur(18px) saturate(125%)}
 .capture-flow__sheet{position:relative;z-index:1;width:min(760px,100%);max-height:min(860px,calc(100dvh - 36px));display:flex;flex-direction:column;overflow:hidden;border:1px solid rgba(255,255,255,.1);border-radius:30px;background:radial-gradient(circle at 15% 0%,rgba(255,255,255,.06),transparent 34%),linear-gradient(145deg,rgba(22,24,29,.98),rgba(10,11,14,.98));box-shadow:0 40px 120px rgba(0,0,0,.7),inset 0 1px 0 rgba(255,255,255,.06);transform:translateY(18px) scale(.98);transition:transform .28s cubic-bezier(.2,.85,.2,1)}
 .capture-flow.is-open .capture-flow__sheet{transform:none}
@@ -3991,7 +3995,7 @@ body.metric-reference-open{overflow:hidden}
   position: fixed;
   inset: 0;
   z-index: 80;
-  display: none;
+  display: none !important;
   flex-direction: column;
   min-height: 100vh;
   min-height: 100dvh;
@@ -4001,11 +4005,15 @@ body.metric-reference-open{overflow:hidden}
   margin: 0 !important;
   width: 100% !important;
   max-width: none !important;
-  opacity: 1 !important;
+  opacity: 1;
+  pointer-events: none;
+  visibility: hidden;
 }
 
 #screen-landmark-editor.active {
   display: flex !important;
+  pointer-events: auto;
+  visibility: visible;
 }
 
 #screen-landmark-editor > .landmark-editor {
