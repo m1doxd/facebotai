@@ -7747,7 +7747,7 @@ function updateLandmarkEditorUI() {
   centerOnCurrentLandmark();
 }
 
-/** Fill «Как найти» with the user's photo + pin at suggested point (MediaPipe or anatomical fallback) */
+/** Fill «Как найти»: cropped close-up around the suggested point + centered red pin (FaceTheory style) */
 function updateHowtoReference(lm) {
   const boxes = [
     document.getElementById("howto-ref-img"),
@@ -7768,7 +7768,7 @@ function updateHowtoReference(lm) {
     pt = pointFromLm(autoDetectedMesh, lm.mp);
   }
 
-  // Anatomical fallback zones will be applied below if still null
+  // Anatomical fallback applied later if still null
 
   boxes.forEach((box) => {
     box.innerHTML = "";
@@ -7777,14 +7777,19 @@ function updateHowtoReference(lm) {
       return;
     }
 
+    // Cropped close-up container (object-fit + object-position = zoom on the point)
     const img = document.createElement("img");
     img.alt = lm?.label || "Справка";
     img.draggable = false;
     img.src = src;
+    img.style.width = "100%";
+    img.style.height = "100%";
+    img.style.objectFit = "cover";
+    // Default center; will be refined once pt is known
+    img.style.objectPosition = "50% 40%";
     box.appendChild(img);
   });
 
-  // Re-get first box for pin logic after potential early return above
   const box = boxes[0];
   if (!box || !src) return;
 
@@ -7878,14 +7883,38 @@ function updateHowtoReference(lm) {
   };
   if (!pt) pt = fallbackZones[lm?.id] || { x: 0.5, y: 0.4 };
 
-  const left = (Math.min(0.95, Math.max(0.05, pt.x)) * 100) + "%";
-  const top = (Math.min(0.95, Math.max(0.05, pt.y)) * 100) + "%";
+  // Scale factor of the ref image (matches CSS width/height 260%)
+  const SCALE = 2.6;
+
   boxes.forEach((b) => {
-    if (!b.querySelector("img")) return;
+    const img = b.querySelector("img");
+    if (!img) return;
+
+    // After image loads, position so (pt.x, pt.y) lands at the center of the box
+    const place = () => {
+      const bw = b.clientWidth || 1;
+      const bh = b.clientHeight || 1;
+      // Image is SCALE times the box; point at (pt.x * imgW, pt.y * imgH) should go to box center
+      const imgW = bw * SCALE;
+      const imgH = bh * SCALE;
+      const tx = bw / 2 - pt.x * imgW;
+      const ty = bh / 2 - pt.y * imgH;
+      img.style.width = imgW + "px";
+      img.style.height = imgH + "px";
+      img.style.transform = `translate(${tx}px, ${ty}px)`;
+    };
+
+    if (img.complete && img.naturalWidth) {
+      place();
+    } else {
+      img.onload = place;
+    }
+
+    // Pin always dead-center of the crop card
     const pin = document.createElement("div");
     pin.className = "howto-ref__pin";
-    pin.style.left = left;
-    pin.style.top = top;
+    pin.style.left = "50%";
+    pin.style.top = "50%";
     b.appendChild(pin);
   });
 }
@@ -7953,14 +7982,34 @@ function centerOnCurrentLandmark() {
   const lm = list[landmarkEditorIndex];
   if (!lm) return;
   const map = getConfirmedMap();
-  let p = map[lm.id];
-  if (!p) return;
+  let p = map[lm.id] || null;
+  // Fallback to mesh index if not yet confirmed
+  if (!p && lm.mp != null && autoDetectedMesh && landmarkEditorMode === "front") {
+    p = pointFromLm(autoDetectedMesh, lm.mp);
+  }
+  if (!p || !Number.isFinite(p.x) || !Number.isFinite(p.y)) return;
+
+  // Auto-zoom a bit for fine features so the point is easy to refine (like FaceTheory)
+  const fineIds = new Set([
+    "leftEyeLateralCanthus","rightEyeLateralCanthus","leftEyeInner","rightEyeInner",
+    "leftEyeUpper","rightEyeUpper","leftEyeLower","rightEyeLower","leftEyelidHoodEnd",
+    "leftBrowPeak","rightBrowPeak","rightBrowArch","leftBrowInner","rightBrowInner",
+    "noseTip","leftNostril","rightNostril","nasalBase","philtrum","mouthMiddle",
+    "leftAlar","rightAlar","glabella","leftNoseBridge","rightNoseBridge"
+  ]);
+  if (editorImageScale < 1.4 && fineIds.has(lm.id)) {
+    editorImageScale = 1.6;
+  } else if (editorImageScale < 1.1) {
+    editorImageScale = 1.25;
+  }
 
   const wrap = $("#landmark-image-wrap");
   if (!wrap) return;
+  // Ensure layout so offsetWidth is valid
+  layoutEditorImage();
   const w = wrap.offsetWidth || 1;
   const h = wrap.offsetHeight || 1;
-  // Point under crosshair (viewport center): tx = -(nx-0.5)*w*s
+  // Point under crosshair (viewport center)
   editorImageTx = -(p.x - 0.5) * w * editorImageScale;
   editorImageTy = -(p.y - 0.5) * h * editorImageScale;
   applyEditorTransform();
