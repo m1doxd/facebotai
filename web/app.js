@@ -32,6 +32,11 @@ function writeStorage(key, value) {
   }
 }
 
+
+function getMaleClassification(score){return getGenderClassification(score,["Low LTN","LTN","High LTN","Low MTN","MTN","High MTN","Low HTN","HTN","High HTN","Low Chad Lite","Chad Lite","High Chad Lite","Low Chad","Chad","High Chad","Adam Lite","True Adam"]);}
+function getFemaleClassification(score){return getGenderClassification(score,["Low LTB","LTB","High LTB","Low MTB","MTB","High MTB","Low HTB","HTB","High HTB","Low Stacy Lite","Stacy Lite","High Stacy Lite","Low Stacy","Stacy","High Stacy","Eve Lite","True Eve"]);}
+function getGenderClassification(score,n){const x=Number(score);if(!Number.isFinite(x))return null;if(x<=2)return"Sub 3";if(x<4)return x<3?"Sub 5":null;if(x<4.5)return n[0];if(x<4.8)return n[1];if(x<5)return n[2];if(x<5.5)return n[3];if(x<5.8)return n[4];if(x<6)return n[5];if(x<6.5)return n[6];if(x<6.8)return n[7];if(x<7)return n[8];if(x<7.5)return n[9];if(x<7.8)return n[10];if(x<8)return n[11];if(x<8.5)return n[12];if(x<8.8)return n[13];if(x<9)return n[14];if(x===9)return n[15];if(x===10)return n[16];return null;}
+
 function getClassificationSettings() {
   try {
     const raw = window.localStorage.getItem(CLASSIFICATION_STORAGE_KEY);
@@ -1802,6 +1807,40 @@ function getImageContentBox(image, frameWidth, frameHeight) {
   return { x: (frameWidth - width) / 2, y: (frameHeight - height) / 2, width, height };
 }
 
+
+/* ============================================================
+   CONFIRMED LANDMARK METRIC PIPELINE
+   The Landmark Editor is the authoritative geometric source.
+============================================================ */
+const METRIC_DEFINITIONS = {
+  jaw_width:{view:"front",landmarks:["left_jaw","right_jaw"],measurement:"distance"},
+  nose_width:{view:"front",landmarks:["nose_left","nose_right"],measurement:"distance"},
+  nose_length:{view:"front",landmarks:["nose_bridge","nose_tip"],measurement:"distance"},
+  mouth_width:{view:"front",landmarks:["mouth_left","mouth_right"],measurement:"distance"},
+  eye_spacing:{view:"front",landmarks:["left_eye_inner","right_eye_inner"],measurement:"distance"},
+  face_aspect_ratio:{view:"front",landmarks:["left_cheekbone","right_cheekbone","forehead_center","chin"],measurement:"ratio"},
+  nasofacial_angle:{view:"profile",landmarks:["profile_glabella","profile_nasion","profile_pronasale"],measurement:"angle"},
+  nasolabial_angle:{view:"profile",landmarks:["profile_pronasale","profile_subnasale","profile_labiale_superius"],measurement:"angle"},
+  gonial_angle:{view:"profile",landmarks:["profile_pogonion","profile_gonion","profile_chin_neck"],measurement:"angle"},
+  nose_chin_projection:{view:"profile",landmarks:["profile_nasion","profile_pronasale","profile_pogonion"],measurement:"projection"}
+};
+function fmDist(a,b){return Math.hypot(Number(a.x)-Number(b.x),Number(a.y)-Number(b.y));}
+function fmAngle(a,b,c){const u={x:a.x-b.x,y:a.y-b.y},v={x:c.x-b.x,y:c.y-b.y};const d=Math.hypot(u.x,u.y)*Math.hypot(v.x,v.y);return d?Math.acos(clamp((u.x*v.x+u.y*v.y)/d,-1,1))*180/Math.PI:null;}
+function fmMeasure(def,pts){if(def.measurement==="distance")return fmDist(pts[0],pts[1]);if(def.measurement==="ratio"){const w=fmDist(pts[0],pts[1]),h=fmDist(pts[2],pts[3]);return h?w/h:null;}if(def.measurement==="angle")return fmAngle(pts[0],pts[1],pts[2]);if(def.measurement==="projection")return fmDist(pts[0],pts[1])/(fmDist(pts[0],pts[2])||1);return null;}
+function enrichMetricsFromConfirmedLandmarks(result){
+  if(!result||!result.metrics)return result;
+  const views=result.views||{};
+  const walk=(obj,path=[])=>{if(!obj||typeof obj!=="object")return;
+    Object.entries(obj).forEach(([k,v])=>{const def=METRIC_DEFINITIONS[k];if(def&&v&&typeof v==="object"){
+      const lm=(def.view==="profile"?views.profile:views.front)?.landmarks||{};
+      const pts=def.landmarks.map(n=>lm[n]); const ok=pts.every(p=>p&&Number.isFinite(+p.x)&&Number.isFinite(+p.y));
+      v.landmarks=[...def.landmarks]; v.view=def.view;
+      if(ok){const measurement=fmMeasure(def,pts); if(measurement!==null){v.measurement=measurement;v.measurement_source="confirmed_landmarks";v.status=v.status||"measured";}}
+      else if(!v.score && v.status==="insufficient data") v.status="insufficient data";
+    } else if(v&&typeof v==="object")walk(v,path.concat(k));});
+  };walk(result.metrics);return result;
+}
+
 function drawFaceLandmarkNetwork(canvas, view, metric = null, progress = 1) {
   if (!canvas) return;
   const rect = canvas.getBoundingClientRect();
@@ -2186,6 +2225,8 @@ async function startAnalysis(file, profileFile = null) {
 
       return;
     }
+
+    enrichMetricsFromConfirmedLandmarks(result);
 
     currentAnalysis = result;
     resetMetricSelection();
