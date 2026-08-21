@@ -2,7 +2,7 @@
 // FACE METRIC APP - UNIFIED FRONTEND v2026.08.15-gender-modal-fix
 // ============================================================
 
-window.__FACEMETRIC_APP_VERSION__ = "2026-08-21-howto-static-refs-v13";
+window.__FACEMETRIC_APP_VERSION__ = "2026-08-21-manual-points-classification-v14";
 
 
 // ============================================================
@@ -70,6 +70,37 @@ function clearClassificationSettings() {
   } catch (error) {
     console.warn("FaceMetric: could not clear classification settings.", error);
   }
+}
+
+// Application-owned score classification. The backend score remains the source
+// of truth; the display tier is derived deterministically from the selected profile.
+function getScoreClassification(score, gender = selectedGender) {
+  const value = Number(score);
+  if (!Number.isFinite(value) || value < 0 || value > 10) return null;
+  const female = gender === "female";
+  const tiers = female ? [
+    [0, 2, "Sub 3"], [2, 3, "Sub 5"],
+    [4, 4.4, "Low LTB"], [4.5, 4.7, "LTB"], [4.8, 4.9, "High LTB"],
+    [5, 5.4, "Low MTB"], [5.5, 5.7, "MTB"], [5.8, 5.9, "High MTB"],
+    [6, 6.4, "Low HTB"], [6.5, 6.7, "HTB"], [6.8, 6.9, "High HTB"],
+    [7, 7.4, "Low Stacy Lite"], [7.5, 7.7, "Stacy Lite"], [7.8, 7.9, "High Stacy Lite"],
+    [8, 8.4, "Low Stacy"], [8.5, 8.7, "Stacy"], [8.8, 8.9, "High Stacy"],
+    [9, 9, "Eve Lite"], [10, 10, "True Eve"]
+  ] : [
+    [0, 2, "Sub 3"], [2, 3, "Sub 5"],
+    [4, 4.4, "Low LTN"], [4.5, 4.7, "LTN"], [4.8, 4.9, "High LTN"],
+    [5, 5.4, "Low MTN"], [5.5, 5.7, "MTN"], [5.8, 5.9, "High MTN"],
+    [6, 6.4, "Low HTN"], [6.5, 6.7, "HTN"], [6.8, 6.9, "High HTN"],
+    [7, 7.4, "Low Chad Lite"], [7.5, 7.7, "Chad Lite"], [7.8, 7.9, "High Chad Lite"],
+    [8, 8.4, "Low Chad"], [8.5, 8.7, "Chad"], [8.8, 8.9, "High Chad"],
+    [9, 9, "Adam Lite"], [10, 10, "True Adam"]
+  ];
+  const rounded = Math.round(value * 10) / 10;
+  for (const [min,max,label] of tiers) {
+    const lowerOk = min === 2 && label === "Sub 5" ? rounded > 2 : rounded >= min;
+    if (lowerOk && rounded <= max) return { label, score: rounded, band: `${min}–${max}` };
+  }
+  return { label: null, score: rounded, band: null };
 }
 
 function openClassificationModal(options = {}) {
@@ -2111,6 +2142,27 @@ async function startAnalysis(file, profileFile = null) {
       console.warn("FaceMetric: landmark merge skipped.", error);
     }
 
+    // The profile editor already has user-confirmed coordinates. Keep them in
+    // the final result so the profile view cannot silently disappear after a
+    // successful two-photo analysis.
+    if (
+      profileFile &&
+      confirmedProfileLandmarks &&
+      Object.keys(confirmedProfileLandmarks).length
+    ) {
+      result.views = result.views || {};
+      result.views.profile = result.views.profile || {};
+      result.views.profile.landmarks = {
+        ...(result.views.profile.landmarks || {}),
+        ...confirmedProfileLandmarks
+      };
+      result.views.profile.available = true;
+      result.views.profile.confirmed = true;
+      result.profile = result.profile || {};
+      result.profile.available = true;
+      result.profile.confirmed = true;
+    }
+
     // Recalculate alignment from the final geometric landmarks so the image,
     // canvas and downstream measurements all share the same coordinate frame.
     result.alignment = normalizeAlignmentSet(
@@ -2259,13 +2311,17 @@ async function analyzePhoto(file, signal, profileFile = null) {
 
   // Detect precise front landmarks before the server analysis so the Worker
   // can use the same coordinates when producing geometry metrics.
-  let denseLandmarks = lastClientLandmarks;
-  try {
-    denseLandmarks = await detectDenseFrontLandmarks();
-  } catch (error) {
-    console.warn("FaceMetric: pre-analysis landmark detection skipped.", error);
+  // Confirmed manual landmarks are authoritative. Never overwrite them with a
+  // second automatic MediaPipe pass after the user has placed the points.
+  let denseLandmarks = window.__facemetricClientLandmarks || lastClientLandmarks;
+  if (!denseLandmarks || !Object.keys(denseLandmarks).length) {
+    try {
+      denseLandmarks = await detectDenseFrontLandmarks();
+    } catch (error) {
+      console.warn("FaceMetric: pre-analysis landmark detection skipped.", error);
+    }
   }
-  if (denseLandmarks) {
+  if (denseLandmarks && Object.keys(denseLandmarks).length) {
     formData.append("client_landmarks", JSON.stringify(denseLandmarks));
   }
 
@@ -2275,6 +2331,21 @@ async function analyzePhoto(file, signal, profileFile = null) {
       profileFile,
       profileFile.name || "profile.jpg"
     );
+
+    // The profile landmark editor stores coordinates separately from front
+    // landmarks. Send the confirmed profile geometry with the actual profile
+    // image so the Worker can use both views in the same analysis.
+    if (
+      confirmedProfileLandmarks &&
+      Object.keys(confirmedProfileLandmarks).length
+    ) {
+      formData.append(
+        "client_profile_landmarks",
+        JSON.stringify(confirmedProfileLandmarks)
+      );
+    }
+
+    formData.append("profile_confirmed", "true");
   }
 
   // Classification state is read only from the declared frontend state.
@@ -2726,7 +2797,12 @@ function normalizeClientResult(data) {
     ),
 
     classification:
-      normalizeClassification(
+      getScoreClassification(
+        score,
+        source.gender === "female" || source.gender === "male"
+          ? source.gender
+          : selectedGender
+      ) || normalizeClassification(
         source.classification ||
         source.rating ||
         source.looksmax_rating ||
@@ -5284,6 +5360,13 @@ function selectMetric(
   );
 
   if (currentAnalysis) {
+    const metricNames = Array.isArray(value?.landmarks) ? value.landmarks : [];
+    const isProfileMetric = metricNames.some(name => String(name).startsWith("profile_"));
+    if (isProfileMetric && currentAnalysis.has_profile && activeResultView !== "profile") {
+      activeResultView = "profile";
+      ensureResultFace(currentAnalysis);
+      renderViewSelector(currentAnalysis);
+    }
     renderMetricInspector(currentAnalysis);
     drawMetricOverlay(activeMetric);
     animateMetricFocus(activeMetric);
@@ -7334,12 +7417,10 @@ function bindEvents() {
         showToast("Сначала введи Gemini API ключ.");
         return;
       }
-      // 1) Gender first, then guide + upload
-      if (!getClassificationSettings() || !adultConfirmed) {
-        openClassificationModal();
-        return;
-      }
-      openCaptureFlow("front");
+      // Every new analysis starts with an explicit profile/18+ confirmation.
+      // Saved values only prefill the modal; they do not silently skip it.
+      openClassificationModal({ force: true });
+      return;
     }
   );
 
