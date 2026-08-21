@@ -252,6 +252,23 @@ async function analyze(request, env) {
   }
 
   const file = formData.get("file");
+  const profileFile = formData.get("profile");
+  const analysisGender = formData.get("gender") === "female" ? "female" : "male";
+
+  let clientProfileLandmarks = {};
+  let profileProvided = Boolean(profileFile && typeof profileFile.arrayBuffer === "function");
+
+  try {
+    const rawClientProfileLandmarks = formData.get("client_profile_landmarks");
+    if (typeof rawClientProfileLandmarks === "string" && rawClientProfileLandmarks.trim()) {
+      const parsedClientProfileLandmarks = JSON.parse(rawClientProfileLandmarks);
+      if (parsedClientProfileLandmarks && typeof parsedClientProfileLandmarks === "object" && !Array.isArray(parsedClientProfileLandmarks)) {
+        clientProfileLandmarks = parsedClientProfileLandmarks;
+      }
+    }
+  } catch (error) {
+    console.warn("CLIENT PROFILE LANDMARK PARSE ERROR:", error);
+  }
 
   let clientLandmarks = {};
   try {
@@ -347,6 +364,23 @@ async function analyze(request, env) {
     );
   }
 
+  // Optional profile image -> BASE64.
+  let profileBase64 = null;
+  let profileMimeType = null;
+  if (profileProvided) {
+    profileMimeType = profileFile.type || "image/jpeg";
+    if (ALLOWED_TYPES.has(profileMimeType) && profileFile.size > 0) {
+      try {
+        profileBase64 = uint8ToBase64(new Uint8Array(await profileFile.arrayBuffer()));
+      } catch (error) {
+        console.warn("PROFILE IMAGE READ ERROR:", error);
+        profileProvided = false;
+      }
+    } else {
+      profileProvided = false;
+    }
+  }
+
   // ========================================================
   // GEMINI PROMPT
   // ========================================================
@@ -356,6 +390,17 @@ You are the visual facial-analysis engine for FaceBot.
 
 Your job is to analyze the visible facial geometry in the supplied
 photograph and return structured JSON.
+
+INPUT VIEWS:
+- FIRST image: frontal view.
+- ${profileProvided && profileBase64 ? "SECOND image: real profile view of the same person. It MUST be used for profile analysis." : "No usable profile image was supplied."}
+
+CONFIRMED PROFILE LANDMARKS:
+${profileProvided && Object.keys(clientProfileLandmarks).length ? JSON.stringify(clientProfileLandmarks) : "None"}
+
+If a usable second profile image is present, profile.available MUST be true.
+Do not infer profile availability from the frontal image.
+Use supplied profile landmarks as confirmed geometric anchors.
 
 IMPORTANT:
 
@@ -537,6 +582,14 @@ ${JSON.stringify(clientLandmarks)}
 When client landmarks are present, preserve their coordinates in the returned
 landmarks object and base geometry-related metric reasoning on those points.
 Do not replace a supplied point with an approximate Gemini estimate.
+
+AUTHORITATIVE PROFILE LANDMARKS
+For profile-related metrics, use the manually confirmed profile landmarks below.
+They are the canonical anchors for profile visualization and must never be
+replaced with frontal points or guessed alternatives.
+
+CLIENT PROFILE LANDMARKS:
+${JSON.stringify(clientProfileLandmarks)}
 
 ============================================================
 METRIC SYSTEM
@@ -1029,15 +1082,23 @@ with the remaining fields populated as reasonably as possible.
       {
         role: "user",
         parts: [
+          { text: "FIRST IMAGE: FRONTAL VIEW" },
           {
             inline_data: {
               mime_type: mimeType,
               data: base64
             }
           },
-          {
-            text: prompt
-          }
+          ...(profileProvided && profileBase64 ? [
+            { text: "SECOND IMAGE: PROFILE VIEW OF THE SAME PERSON. USE THIS FOR PROFILE ANALYSIS." },
+            {
+              inline_data: {
+                mime_type: profileMimeType,
+                data: profileBase64
+              }
+            }
+          ] : []),
+          { text: prompt }
         ]
       }
     ],
@@ -1175,16 +1236,18 @@ with the remaining fields populated as reasonably as possible.
   // them into the model payload before normalization so frontend overlays and
   // server-side metric inputs cannot drift apart.
   if (Object.keys(clientLandmarks).length) {
-    geminiData.landmarks = {
-      ...(geminiData.landmarks || {}),
-      ...clientLandmarks
-    };
+    geminiData.landmarks = { ...(geminiData.landmarks || {}), ...clientLandmarks };
     if (geminiData.frontal && typeof geminiData.frontal === "object") {
-      geminiData.frontal.landmarks = {
-        ...(geminiData.frontal.landmarks || {}),
-        ...clientLandmarks
-      };
+      geminiData.frontal.landmarks = { ...(geminiData.frontal.landmarks || {}), ...clientLandmarks };
     }
+  }
+  if (profileProvided && Object.keys(clientProfileLandmarks).length) {
+    geminiData.profile = {
+      ...(geminiData.profile && typeof geminiData.profile === "object" ? geminiData.profile : {}),
+      available: true,
+      landmarks: { ...((geminiData.profile && geminiData.profile.landmarks) || {}), ...clientProfileLandmarks },
+      confirmed_landmarks: clientProfileLandmarks
+    };
   }
 
   // ========================================================
@@ -1518,7 +1581,16 @@ function normalizeAnalysis(
       true
     );
 
-  const landmarks =
+  
+    if (profileProvided && profileBase64) {
+      profile.available = true;
+      profile.landmarks = {
+        ...(profile.landmarks || {}),
+        ...clientProfileLandmarks
+      };
+      profile.confirmed_landmarks = clientProfileLandmarks;
+    }
+const landmarks =
     normalizeLandmarks(
       data.landmarks
     );
@@ -1558,11 +1630,14 @@ function normalizeAnalysis(
 
   const tier =
     getTier(
-      normalizedScore
+      normalizedScore,
+      analysisGender
     );
 
   return {
     success: true,
+
+    gender: analysisGender,
 
     score:
       normalizedScore,
@@ -2182,126 +2257,20 @@ function calculateFallbackOverallScore(
 // ============================================================
 
 function getTier(
-  score
+  score,
+  gender = "male"
 ) {
-  if (
-    score === null ||
-    !Number.isFinite(
-      Number(score)
-    )
-  ) {
-    return {
-      name: null,
-      level: null
-    };
-  }
-
-  const value =
-    Number(score);
-
-  if (value < 2) {
-    return {
-      name: "Sub 3",
-      level: getTierLevel(
-        value,
-        1,
-        2
-      )
-    };
-  }
-
-  if (value < 4) {
-    return {
-      name: "Sub 5",
-      level: getTierLevel(
-        value,
-        2,
-        4
-      )
-    };
-  }
-
-  if (value < 5) {
-    return {
-      name: "LTN",
-      level: getTierLevel(
-        value,
-        4,
-        5
-      )
-    };
-  }
-
-  if (value < 5.5) {
-    return {
-      name: "MTN",
-      level: getTierLevel(
-        value,
-        5,
-        5.5
-      )
-    };
-  }
-
-  if (value < 6.5) {
-    return {
-      name: "HTN",
-      level: getTierLevel(
-        value,
-        5.5,
-        6.5
-      )
-    };
-  }
-
-  if (value < 7.5) {
-    return {
-      name: "Chadlite",
-      level: getTierLevel(
-        value,
-        6.5,
-        7.5
-      )
-    };
-  }
-
-  if (value < 9) {
-    return {
-      name: "Chad",
-      level: getTierLevel(
-        value,
-        7.5,
-        9
-      )
-    };
-  }
-
-  if (value < 9.5) {
-    return {
-      name: "Adamlite",
-      level: getTierLevel(
-        value,
-        9,
-        9.5
-      )
-    };
-  }
-
-  if (value < 10) {
-    return {
-      name: "Near True Adam",
-      level: getTierLevel(
-        value,
-        9.5,
-        10
-      )
-    };
-  }
-
-  return {
-    name: "True Adam",
-    level: "base"
-  };
+  if (score === null || !Number.isFinite(Number(score))) return { name: null, level: null };
+  const value = Math.round(Number(score) * 10) / 10;
+  const female = gender === "female";
+  const labels = female ? ["LTB","MTB","HTB","Stacy Lite","Stacy"] : ["LTN","MTN","HTN","Chad Lite","Chad"];
+  if (value <= 2) return { name: "Sub 3", level: "base" };
+  if (value <= 3) return { name: "Sub 5", level: "base" };
+  const bands = [[4,4.4,`Low ${labels[0]}`],[4.5,4.7,labels[0]],[4.8,4.9,`High ${labels[0]}`],[5,5.4,`Low ${labels[1]}`],[5.5,5.7,labels[1]],[5.8,5.9,`High ${labels[1]}`],[6,6.4,`Low ${labels[2]}`],[6.5,6.7,labels[2]],[6.8,6.9,`High ${labels[2]}`],[7,7.4,`Low ${labels[3]}`],[7.5,7.7,labels[3]],[7.8,7.9,`High ${labels[3]}`],[8,8.4,`Low ${labels[4]}`],[8.5,8.7,labels[4]],[8.8,8.9,`High ${labels[4]}`]];
+  for (const [min,max,name] of bands) if (value >= min && value <= max) return { name, level: name.startsWith("Low") ? "low" : name.startsWith("High") ? "high" : "base" };
+  if (value === 9) return { name: female ? "Eve Lite" : "Adam Lite", level: "base" };
+  if (value === 10) return { name: female ? "True Eve" : "True Adam", level: "base" };
+  return { name: null, level: null };
 }
 
 
