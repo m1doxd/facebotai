@@ -2,7 +2,7 @@
 // FACE METRIC APP - UNIFIED FRONTEND v2026.08.15-gender-modal-fix
 // ============================================================
 
-window.__FACEMETRIC_APP_VERSION__ = "2026-08-16-reference-metric-viewer-v2";
+window.__FACEMETRIC_APP_VERSION__ = "2026-08-21-howto-static-refs-v13";
 
 
 // ============================================================
@@ -7747,7 +7747,9 @@ function updateLandmarkEditorUI() {
   centerOnCurrentLandmark();
 }
 
-/** Fill «Как найти»: cropped close-up around the suggested point + centered red pin (FaceTheory style) */
+/** Fill «Как найти»: static anatomical reference image with red pin (FaceTheory style).
+ *  Uses pre-generated crops from web/refs/{front|profile}/{id}.jpg — NOT the user photo.
+ */
 function updateHowtoReference(lm) {
   const boxes = [
     document.getElementById("howto-ref-img"),
@@ -7755,167 +7757,30 @@ function updateHowtoReference(lm) {
   ].filter(Boolean);
   if (!boxes.length) return;
 
-  const src =
-    landmarkEditorMode === "profile"
-      ? selectedProfileObjectUrl
-      : selectedObjectUrl;
-
-  const map = getConfirmedMap();
-  let pt = map[lm?.id] || null;
-
-  // Precise: MediaPipe mesh index from landmark definition
-  if (!pt && lm?.mp != null && autoDetectedMesh && landmarkEditorMode === "front") {
-    pt = pointFromLm(autoDetectedMesh, lm.mp);
-  }
-
-  // Anatomical fallback applied later if still null
+  const mode = landmarkEditorMode === "profile" ? "profile" : "front";
+  const id = lm?.id || "";
+  // Static pre-cropped reference with baked-in red pin
+  const src = id ? `refs/${mode}/${id}.jpg` : null;
 
   boxes.forEach((box) => {
     box.innerHTML = "";
     if (!src) {
-      box.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#666;font-size:13px;padding:16px;text-align:center">Нет фото для подсказки</div>';
+      box.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#666;font-size:13px;padding:16px;text-align:center">Нет референса для этой точки</div>';
       return;
     }
-
-    // Cropped close-up container (object-fit + object-position = zoom on the point)
     const img = document.createElement("img");
-    img.alt = lm?.label || "Справка";
+    img.alt = lm?.label || "Как найти";
     img.draggable = false;
     img.src = src;
     img.style.width = "100%";
     img.style.height = "100%";
     img.style.objectFit = "cover";
-    // Default center; will be refined once pt is known
-    img.style.objectPosition = "50% 40%";
-    box.appendChild(img);
-  });
-
-  const box = boxes[0];
-  if (!box || !src) return;
-
-  // Anatomical fallback zones (normalized) — used only when no MediaPipe / confirmed point
-  const fallbackZones = {
-    // Front
-    hairline: { x: 0.50, y: 0.10 },
-    leftTemple: { x: 0.16, y: 0.26 },
-    rightTemple: { x: 0.84, y: 0.26 },
-    leftBrowOuter: { x: 0.22, y: 0.30 },
-    leftBrowPeak: { x: 0.32, y: 0.27 },
-    leftBrowInner: { x: 0.42, y: 0.30 },
-    glabella: { x: 0.50, y: 0.30 },
-    rightBrowInner: { x: 0.58, y: 0.30 },
-    rightBrowPeak: { x: 0.68, y: 0.27 },
-    rightBrowOuter: { x: 0.78, y: 0.30 },
-    rightBrowArch: { x: 0.68, y: 0.29 },
-    leftEyeLateralCanthus: { x: 0.26, y: 0.38 },
-    leftEyeUpper: { x: 0.34, y: 0.36 },
-    leftEyeInner: { x: 0.42, y: 0.38 },
-    leftEyeLower: { x: 0.34, y: 0.41 },
-    leftEyelidHoodEnd: { x: 0.22, y: 0.35 },
-    rightEyeInner: { x: 0.58, y: 0.38 },
-    rightEyeUpper: { x: 0.66, y: 0.36 },
-    rightEyeLateralCanthus: { x: 0.74, y: 0.38 },
-    rightEyeLower: { x: 0.66, y: 0.41 },
-    leftCheek: { x: 0.22, y: 0.52 },
-    rightCheek: { x: 0.78, y: 0.52 },
-    noseBridge: { x: 0.50, y: 0.40 },
-    leftNoseBridge: { x: 0.46, y: 0.40 },
-    rightNoseBridge: { x: 0.54, y: 0.40 },
-    noseTip: { x: 0.50, y: 0.50 },
-    leftNostril: { x: 0.44, y: 0.52 },
-    rightNostril: { x: 0.56, y: 0.52 },
-    nasalBase: { x: 0.50, y: 0.55 },
-    leftMouthCorner: { x: 0.38, y: 0.64 },
-    mouthMiddle: { x: 0.50, y: 0.64 },
-    rightMouthCorner: { x: 0.62, y: 0.64 },
-    upperLip: { x: 0.50, y: 0.61 },
-    lowerLip: { x: 0.50, y: 0.68 },
-    chinBottom: { x: 0.50, y: 0.88 },
-    leftJaw: { x: 0.20, y: 0.72 },
-    rightJaw: { x: 0.80, y: 0.72 },
-    leftOuterEar: { x: 0.08, y: 0.48 },
-    rightOuterEar: { x: 0.92, y: 0.48 },
-    neckLeft: { x: 0.28, y: 0.92 },
-    neckRight: { x: 0.72, y: 0.92 },
-    foreheadCenter: { x: 0.50, y: 0.18 },
-    leftEyeCenter: { x: 0.34, y: 0.38 },
-    rightEyeCenter: { x: 0.66, y: 0.38 },
-    philtrum: { x: 0.50, y: 0.58 },
-    leftCheekbone: { x: 0.26, y: 0.48 },
-    rightCheekbone: { x: 0.74, y: 0.48 },
-    leftJawline: { x: 0.28, y: 0.78 },
-    rightJawline: { x: 0.72, y: 0.78 },
-    menton: { x: 0.50, y: 0.90 },
-    leftAlar: { x: 0.44, y: 0.53 },
-    rightAlar: { x: 0.56, y: 0.53 },
-    // Profile (approximate for typical right-facing profile)
-    profile_glabella: { x: 0.55, y: 0.28 },
-    profile_nasion: { x: 0.52, y: 0.32 },
-    profile_supratip: { x: 0.68, y: 0.42 },
-    profile_pronasale: { x: 0.72, y: 0.48 },
-    profile_columella: { x: 0.68, y: 0.52 },
-    profile_subnasale: { x: 0.62, y: 0.54 },
-    profile_labiale_superius: { x: 0.62, y: 0.58 },
-    profile_labiale_inferius: { x: 0.60, y: 0.66 },
-    profile_pogonion: { x: 0.58, y: 0.78 },
-    profile_menton: { x: 0.52, y: 0.86 },
-    profile_gonion: { x: 0.30, y: 0.70 },
-    profile_chin_neck: { x: 0.42, y: 0.90 },
-    profile_orbitale: { x: 0.50, y: 0.40 },
-    profile_tragion: { x: 0.22, y: 0.48 },
-    profile_zygomatic: { x: 0.48, y: 0.48 },
-    profile_lower_eyelid: { x: 0.52, y: 0.42 },
-    profile_upper_eyelid: { x: 0.52, y: 0.36 },
-    profile_forehead: { x: 0.48, y: 0.18 },
-    profile_nose_bridge: { x: 0.60, y: 0.40 },
-    profile_ala: { x: 0.62, y: 0.50 },
-    profile_stomion: { x: 0.60, y: 0.62 },
-    profile_soft_tissue_gnathion: { x: 0.54, y: 0.84 },
-    profile_cervical: { x: 0.38, y: 0.94 },
-    profile_ear_top: { x: 0.20, y: 0.38 },
-    profile_ear_bottom: { x: 0.24, y: 0.58 },
-    profile_jaw_angle_low: { x: 0.28, y: 0.76 },
-    profile_sublabiale: { x: 0.58, y: 0.70 },
-    profile_trichion: { x: 0.48, y: 0.10 },
-    profile_sellion: { x: 0.52, y: 0.34 },
-    profile_rhinion: { x: 0.64, y: 0.38 },
-    profile_infraorbitale: { x: 0.50, y: 0.44 }
-  };
-  if (!pt) pt = fallbackZones[lm?.id] || { x: 0.5, y: 0.4 };
-
-  // Scale factor of the ref image (matches CSS width/height 260%)
-  const SCALE = 2.6;
-
-  boxes.forEach((b) => {
-    const img = b.querySelector("img");
-    if (!img) return;
-
-    // After image loads, position so (pt.x, pt.y) lands at the center of the box
-    const place = () => {
-      const bw = b.clientWidth || 1;
-      const bh = b.clientHeight || 1;
-      // Image is SCALE times the box; point at (pt.x * imgW, pt.y * imgH) should go to box center
-      const imgW = bw * SCALE;
-      const imgH = bh * SCALE;
-      const tx = bw / 2 - pt.x * imgW;
-      const ty = bh / 2 - pt.y * imgH;
-      img.style.width = imgW + "px";
-      img.style.height = imgH + "px";
-      img.style.transform = `translate(${tx}px, ${ty}px)`;
+    img.style.objectPosition = "center center";
+    img.onerror = () => {
+      box.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#666;font-size:13px;padding:16px;text-align:center">Референс загружается…</div>';
     };
-
-    if (img.complete && img.naturalWidth) {
-      place();
-    } else {
-      img.onload = place;
-    }
-
-    // Pin always dead-center of the crop card
-    const pin = document.createElement("div");
-    pin.className = "howto-ref__pin";
-    pin.style.left = "50%";
-    pin.style.top = "50%";
-    b.appendChild(pin);
+    box.appendChild(img);
+    // Pin is already baked into the static image — no extra CSS pin needed
   });
 }
 
