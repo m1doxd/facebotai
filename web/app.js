@@ -1237,6 +1237,49 @@ function buildDenseFrontLandmarks(mesh) {
   return Object.keys(raw).length >= 10 ? raw : null;
 }
 
+// Profile landmarks are intentionally only suggestions. MediaPipe gives us a
+// stable face mesh; these anchors seed the existing 31-point editor so the
+// user can make the final anatomical correction instead of placing from zero.
+const PROFILE_AUTO_MP = {
+  profile_glabella: 9, profile_nasion: 168, profile_supratip: 6,
+  profile_pronasale: 1, profile_columella: 2, profile_subnasale: 2,
+  profile_labiale_superius: 13, profile_labiale_inferius: 14,
+  profile_pogonion: 152, profile_menton: 152, profile_gonion: 172,
+  profile_chin_neck: 199, profile_orbitale: 145, profile_tragion: 234,
+  profile_zygomatic: 234, profile_lower_eyelid: 145, profile_upper_eyelid: 159,
+  profile_forehead: 10, profile_nose_bridge: 6, profile_ala: 98,
+  profile_stomion: 13, profile_soft_tissue_gnathion: 152, profile_cervical: 199,
+  profile_ear_top: 127, profile_ear_bottom: 132, profile_jaw_angle_low: 172,
+  profile_sublabiale: 17, profile_trichion: 10, profile_sellion: 168,
+  profile_rhinion: 6, profile_infraorbitale: 145
+};
+
+async function detectProfileLandmarksFromUrl(src) {
+  if (!src) return null;
+  const detector = await getFaceLandmarker();
+  if (!detector) return null;
+  const img = new Image();
+  img.decoding = "async";
+  img.src = src;
+  try {
+    if (img.decode) await img.decode();
+    else await new Promise((resolve, reject) => { img.onload = resolve; img.onerror = reject; });
+    const result = detector.detect(img);
+    const mesh = result?.faceLandmarks?.[0];
+    if (!Array.isArray(mesh) || mesh.length < 400) return null;
+    const out = {};
+    for (const lm of PROFILE_LANDMARKS) {
+      const index = PROFILE_AUTO_MP[lm.id];
+      const pt = Number.isInteger(index) ? pointFromLm(mesh, index, 0.82) : null;
+      if (pt) out[lm.id] = pt;
+    }
+    return Object.keys(out).length ? out : null;
+  } catch (error) {
+    console.warn("FaceMetric: profile auto landmark detection failed.", error);
+    return null;
+  }
+}
+
 async function detectDenseFrontLandmarks() {
   if (!analysisImage) return null;
   if (!analysisImage.complete || !analysisImage.naturalWidth) {
@@ -7841,7 +7884,10 @@ function updateLandmarkEditorUI() {
   const howtoDesc = $("#howto-desc");
   const header = document.querySelector(".landmark-editor__header");
 
-  if (stepEl) stepEl.textContent = `${idx + 1} из ${total}`;
+  if (stepEl) {
+    const autoCount = Object.keys(getConfirmedMap()).filter(key => list.some(item => item.id === key)).length;
+    stepEl.textContent = `${idx + 1} из ${total}${autoCount ? ` · авто: ${autoCount}` : ""}`;
+  }
   if (titleEl) titleEl.textContent = lm.label;
   if (techEl) techEl.textContent = `${lm.tech} (${landmarkEditorMode === "front" ? "анфас" : "профиль"})`;
   const pct = ((idx + 1) / total * 100).toFixed(1);
@@ -8089,6 +8135,23 @@ function confirmCurrentLandmark() {
   renderConfirmedDots();
 }
 
+async function openProfileLandmarkEditorWithAutoSuggestions() {
+  if (!autoDetectedProfile) {
+    try {
+      showToast("Приблизительно определяем точки профиля…");
+      autoDetectedProfile = await detectProfileLandmarksFromUrl(selectedProfileObjectUrl);
+      if (autoDetectedProfile) {
+        confirmedProfileLandmarks = { ...confirmedProfileLandmarks, ...autoDetectedProfile };
+      } else {
+        showToast("Автопоиск профиля недоступен — можно расставить точки вручную.");
+      }
+    } catch (error) {
+      console.warn("Profile auto suggestions failed", error);
+    }
+  }
+  openLandmarkEditor("profile");
+}
+
 function goNextLandmark() {
   confirmCurrentLandmark();
   const list = getLandmarkList(landmarkEditorMode);
@@ -8096,8 +8159,9 @@ function goNextLandmark() {
     // finished this mode
     if (landmarkEditorMode === "front") {
       if (pendingProfileFile && selectedProfileObjectUrl) {
-        // switch to profile
-        openLandmarkEditor("profile");
+        // Seed the existing profile editor before it opens. These are only
+        // approximate suggestions; every point remains editable/confirmable.
+        openProfileLandmarkEditorWithAutoSuggestions();
         return;
       } else {
         finishLandmarkVerification();
