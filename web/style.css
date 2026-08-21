@@ -4228,6 +4228,7 @@ body.metric-reference-open{overflow:hidden}
   margin: 4px 0 0;
   font-size: 12px;
   line-height: 1.4;
+  line-clamp: 2;
   color: rgba(255,255,255,0.5);
   display: -webkit-box;
   -webkit-line-clamp: 2;
