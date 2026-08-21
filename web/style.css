@@ -4207,15 +4207,11 @@ body.metric-reference-open{overflow:hidden}
 }
 .landmark-editor__ref-card .howto-ref img {
   position: absolute;
-  width: 260%;
-  height: 260%;
-  max-width: none !important;
-  max-height: none !important;
+  inset: 0;
+  width: 100%;
+  height: 100%;
   object-fit: cover;
-  left: 0;
-  top: 0;
-  /* JS sets translate so the landmark point sits under the pin (center) */
-  transform-origin: 0 0;
+  object-position: center center;
 }
 .landmark-editor__ref-meta {
   text-align: center;
@@ -4234,7 +4230,6 @@ body.metric-reference-open{overflow:hidden}
   line-height: 1.4;
   color: rgba(255,255,255,0.5);
   display: -webkit-box;
-  line-clamp: 2;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
