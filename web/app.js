@@ -1160,19 +1160,29 @@ async function getFaceLandmarker() {
     try {
       const vision = await import(`https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${FACE_LANDMARKER_VERSION}`);
       const fileset = await vision.FilesetResolver.forVisionTasks(FACE_LANDMARKER_WASM_URL);
-      return await vision.FaceLandmarker.createFromOptions(fileset, {
-        baseOptions: {
-          modelAssetPath: FACE_LANDMARKER_MODEL_URL,
-          delegate: "GPU"
-        },
+      const common = {
         runningMode: "IMAGE",
         numFaces: 1,
-        minFaceDetectionConfidence: 0.55,
-        minFacePresenceConfidence: 0.55,
-        minTrackingConfidence: 0.55
-      });
+        minFaceDetectionConfidence: 0.45,
+        minFacePresenceConfidence: 0.45,
+        minTrackingConfidence: 0.45
+      };
+      // GPU is faster, but some browsers / WebViews fail before returning any
+      // landmarks. Fall back to CPU instead of silently opening an empty editor.
+      try {
+        return await vision.FaceLandmarker.createFromOptions(fileset, {
+          ...common,
+          baseOptions: { modelAssetPath: FACE_LANDMARKER_MODEL_URL, delegate: "GPU" }
+        });
+      } catch (gpuError) {
+        console.warn("FaceMetric: GPU landmark detector unavailable; retrying on CPU.", gpuError);
+        return await vision.FaceLandmarker.createFromOptions(fileset, {
+          ...common,
+          baseOptions: { modelAssetPath: FACE_LANDMARKER_MODEL_URL, delegate: "CPU" }
+        });
+      }
     } catch (error) {
-      console.warn("FaceMetric: dense landmark detector unavailable; using Worker landmarks.", error);
+      console.warn("FaceMetric: automatic landmark detector unavailable.", error);
       faceLandmarkerPromise = null;
       return null;
     }
@@ -1256,17 +1266,9 @@ const PROFILE_AUTO_MP = {
 
 async function detectProfileLandmarksFromUrl(src) {
   if (!src) return null;
-  const detector = await getFaceLandmarker();
-  if (!detector) return null;
-  const img = new Image();
-  img.decoding = "async";
-  img.src = src;
   try {
-    if (img.decode) await img.decode();
-    else await new Promise((resolve, reject) => { img.onload = resolve; img.onerror = reject; });
-    const result = detector.detect(img);
-    const mesh = result?.faceLandmarks?.[0];
-    if (!Array.isArray(mesh) || mesh.length < 400) return null;
+    const mesh = await detectFaceMeshFromSource(src);
+    if (!mesh) return null;
     const out = {};
     for (const lm of PROFILE_LANDMARKS) {
       const index = PROFILE_AUTO_MP[lm.id];
@@ -1280,6 +1282,38 @@ async function detectProfileLandmarksFromUrl(src) {
   }
 }
 
+async function detectFaceMeshFromSource(src) {
+  if (!src) return null;
+  const detector = await getFaceLandmarker();
+  if (!detector) return null;
+  const img = new Image();
+  img.decoding = "async";
+  img.src = src;
+  try {
+    if (img.decode) await img.decode();
+    else await new Promise((resolve, reject) => { img.onload = resolve; img.onerror = reject; });
+    const result = detector.detect(img);
+    const mesh = result?.faceLandmarks?.[0];
+    return Array.isArray(mesh) && mesh.length >= 400 ? mesh : null;
+  } catch (error) {
+    console.warn("FaceMetric: automatic landmark detection failed for editor image.", error);
+    return null;
+  }
+}
+
+function seedFrontEditorFromMesh(mesh) {
+  if (!Array.isArray(mesh) || mesh.length < 400) return 0;
+  let count = 0;
+  for (const lm of FRONT_LANDMARKS) {
+    if (!Number.isInteger(lm.mp)) continue;
+    const pt = pointFromLm(mesh, lm.mp, 0.82);
+    if (!pt) continue;
+    confirmedFrontLandmarks[lm.id] = pt;
+    count++;
+  }
+  return count;
+}
+
 async function detectDenseFrontLandmarks() {
   if (!analysisImage) return null;
   if (!analysisImage.complete || !analysisImage.naturalWidth) {
@@ -1291,8 +1325,11 @@ async function detectDenseFrontLandmarks() {
   const detector = await getFaceLandmarker();
   if (!detector) return null;
   try {
-    const result = detector.detect(analysisImage);
-    const mesh = result?.faceLandmarks?.[0];
+    let result = detector.detect(analysisImage);
+    let mesh = result?.faceLandmarks?.[0];
+    if (!Array.isArray(mesh) || mesh.length < 400) {
+      mesh = await detectFaceMeshFromSource(selectedObjectUrl);
+    }
     autoDetectedMesh = Array.isArray(mesh) && mesh.length >= 400 ? mesh : null;
     const landmarks = buildDenseFrontLandmarks(mesh);
     if (landmarks) {
@@ -7763,6 +7800,12 @@ async function beginLandmarkVerification(file, profileFile = null) {
         });
       }
       autoDetectedFront = await detectDenseFrontLandmarks();
+      // The editor needs the exact 52 named point ids, not only the sparse
+      // metric aliases. If the DOM image was not ready, detect directly from
+      // its object URL and seed the same state used by the manual editor.
+      if (!autoDetectedMesh && selectedObjectUrl) {
+        autoDetectedMesh = await detectFaceMeshFromSource(selectedObjectUrl);
+      }
     }
   } catch (e) {
     console.warn("Auto landmark detect failed", e);
@@ -7800,13 +7843,11 @@ async function beginLandmarkVerification(file, profileFile = null) {
       }
     }
   }
-  // Full mesh → precise initial positions for every FRONT_LANDMARK that has mp
+  // Full mesh → explicit initial positions for all 52 named editor points.
+  // These are written directly into confirmedFrontLandmarks because this is
+  // the exact state renderConfirmedDots() and the rest of the editor read.
   if (autoDetectedMesh) {
-    FRONT_LANDMARKS.forEach((lm) => {
-      if (lm.mp == null || confirmedFrontLandmarks[lm.id]) return;
-      const pt = pointFromLm(autoDetectedMesh, lm.mp);
-      if (pt) confirmedFrontLandmarks[lm.id] = pt;
-    });
+    seedFrontEditorFromMesh(autoDetectedMesh);
   }
 
   openLandmarkEditor("front");
@@ -7845,8 +7886,11 @@ function openLandmarkEditor(mode) {
       editorImageTy = 0;
       layoutEditorImage();
       applyEditorTransform();
+      // Force the complete auto-seeded map to be painted immediately after
+      // the image gets real dimensions.
+      renderConfirmedDots();
       updateLandmarkEditorUI();
-      // Auto-center on first auto-detected point if any
+      // Auto-center on the current suggested point for quick refinement.
       centerOnCurrentLandmark();
     };
     if (img.getAttribute("src") === src && img.complete && img.naturalWidth > 0) {
