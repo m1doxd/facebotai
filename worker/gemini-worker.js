@@ -1411,7 +1411,8 @@ with the remaining fields populated as reasonably as possible.
     normalized =
       normalizeAnalysis(
         parsed,
-        model
+        model,
+        { analysisGender }
       );
   } catch (error) {
     console.error(
@@ -1602,8 +1603,10 @@ function parseJsonResponse(text) {
 
 function normalizeAnalysis(
   data,
-  model
+  model,
+  context = {}
 ) {
+  const analysisGender = context.analysisGender === "female" ? "female" : "male";
   if (
     !data ||
     typeof data !== "object" ||
@@ -1643,15 +1646,7 @@ function normalizeAnalysis(
       true
     );
 
-  
-    if (profileProvided && profileBase64) {
-      profile.available = true;
-      profile.landmarks = {
-        ...(profile.landmarks || {}),
-        ...clientProfileLandmarks
-      };
-      profile.confirmed_landmarks = clientProfileLandmarks;
-    }
+
 const landmarks =
     normalizeLandmarks(
       data.landmarks
