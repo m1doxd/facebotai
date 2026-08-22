@@ -720,6 +720,19 @@
         </div>
       </section>
 
+
+      <!-- PROFILE ALIGNMENT -->
+      <section class="screen" id="screen-profile-align" aria-labelledby="profile-align-title">
+        <div class="profile-align-card">
+          <header class="profile-align-header"><button type="button" class="profile-align-back" id="profile-align-back">←</button><div><span>FACEMETRIC</span><h2 id="profile-align-title">Выровняйте профиль</h2></div></header>
+          <p class="profile-align-copy">Поверните фото так, чтобы голова стояла ровно — нос вправо, взгляд по горизонтали.</p>
+          <div class="profile-align-stage"><img id="profile-align-image" alt="Выравнивание профиля"><i class="guide-v guide-v1"></i><i class="guide-v guide-v2"></i><i class="guide-h"></i></div>
+          <div class="profile-align-angle" id="profile-rotate-value">0.0°</div>
+          <div class="profile-align-controls"><button id="profile-rotate-minus" type="button">−</button><input id="profile-rotate-range" type="range" min="-30" max="30" step="0.1" value="0"><button id="profile-rotate-plus" type="button">+</button></div>
+          <div class="profile-align-actions"><button id="profile-align-mirror" type="button">↔ Отразить</button><button id="profile-rotate-reset" type="button">↺ Сбросить</button></div>
+          <footer><button id="profile-align-back-bottom" type="button">НАЗАД</button><button id="profile-align-confirm" type="button">ВЫГЛЯДИТ РОВНО</button></footer>
+        </div>
+      </section>
       <!-- =======================================================
            RESULT
       ======================================================== -->
@@ -1440,6 +1453,7 @@
     <div class="capture-flow__progress"><i id="captureFlowProgress"></i></div>
     <div class="capture-flow__body" id="captureFlowBody"></div>
     <footer class="capture-flow__footer">
+      <label class="capture-flow__skip"><input type="checkbox" id="captureSkipGuides"> Больше не показывать инструкции</label>
       <button type="button" class="capture-flow__back" id="captureFlowBack">Назад</button>
       <button type="button" class="capture-flow__next" id="captureFlowNext">Далее <span>→</span></button>
     </footer>
