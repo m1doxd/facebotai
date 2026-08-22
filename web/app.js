@@ -1316,7 +1316,7 @@ async function requestAILandmarkSuggestions(file, mode, options = {}) {
   const body = new FormData(); body.append("file", file, file.name || `${mode}.jpg`); body.append("mode", mode); body.append("landmark_ids", JSON.stringify(ids));
   if (options.confirmed && typeof options.confirmed === "object") body.append("confirmed_landmarks", JSON.stringify(options.confirmed));
   if (options.targetId) body.append("target_landmark", options.targetId);
-  const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(), 60000);
+  const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(), 15000);
   try {
     const response = await fetch(LANDMARK_SUGGESTIONS_ENDPOINT, { method:"POST", headers:{"X-Gemini-Key":key,"Accept":"application/json"}, body, signal:controller.signal, cache:"no-store" });
     const rawText = await response.text(); let data = null; try { data = rawText ? JSON.parse(rawText) : null; } catch {}
@@ -8119,33 +8119,51 @@ async function ensureCurrentLandmarkSuggestion() {
   const confirmed = getConfirmedMap();
   const suggested = getSuggestedMap();
   if (confirmed[lm.id] || suggested[lm.id]) return;
+
   const mode = landmarkEditorMode;
+  const index = landmarkEditorIndex;
   const requestId = ++landmarkSuggestionRequestId;
-  const file = mode === "profile" ? (profileWorkingFile || pendingProfileFile) : pendingAnalysisFile;
-  if (file && getGeminiApiKey() && LANDMARK_SUGGESTIONS_ENABLED) {
-    try {
-      showToast(`ИИ ищет точку: ${lm.label}…`);
-      const ai = await requestAILandmarkSuggestions(file, mode, {
-        ids: [lm.id], targetId: lm.id, confirmed
-      });
-      if (requestId !== landmarkSuggestionRequestId || landmarkEditorMode !== mode || landmarkEditorIndex !== list.indexOf(lm)) return;
-      if (ai?.[lm.id]) {
-        suggested[lm.id] = { ...ai[lm.id], source: "gemini_step_suggestion" };
-        showToast(`ИИ предложил позицию: ${lm.label}`);
-      }
-    } catch (e) {
-      console.warn("Step AI suggestion failed", e);
-      showToast("ИИ не ответил — используется локальная подсказка.");
+
+  // IMPORTANT: never leave the editor waiting for Gemini. First place a
+  // local face-AI/MediaPipe estimate for THIS point, then let Gemini refine it.
+  const fallback = getCurrentSuggestionFallback(lm);
+  if (fallback) {
+    suggested[lm.id] = { ...fallback, source: "local_ai_step_suggestion" };
+    if (landmarkEditorActive && landmarkEditorMode === mode && landmarkEditorIndex === index) {
+      renderConfirmedDots();
+      updateLandmarkEditorUI();
+      centerOnCurrentLandmark();
     }
-  } else if (!getGeminiApiKey()) {
-    console.warn("FaceMetric: step AI skipped because Gemini API key is missing.");
+    showToast(`Предварительная позиция: ${lm.label}`);
   }
-  if (!suggested[lm.id]) {
-    const fallback = getCurrentSuggestionFallback(lm);
-    if (fallback) suggested[lm.id] = { ...fallback, source: "mediapipe_step_suggestion" };
+
+  const file = mode === "profile" ? (profileWorkingFile || pendingProfileFile) : pendingAnalysisFile;
+  if (!file || !getGeminiApiKey() || !LANDMARK_SUGGESTIONS_ENABLED) {
+    if (!fallback) showToast("Не удалось предложить позицию — поставьте точку вручную.");
+    return;
   }
-  if (landmarkEditorActive && landmarkEditorMode === mode) {
-    renderConfirmedDots(); updateLandmarkEditorUI(); centerOnCurrentLandmark();
+
+  showToast(`ИИ уточняет точку: ${lm.label}…`);
+  const ai = await requestAILandmarkSuggestions(file, mode, {
+    ids: [lm.id],
+    targetId: lm.id,
+    confirmed
+  });
+
+  if (requestId !== landmarkSuggestionRequestId || landmarkEditorMode !== mode || landmarkEditorIndex !== index) return;
+  if (ai?.[lm.id]) {
+    suggested[lm.id] = { ...ai[lm.id], source: "gemini_step_suggestion" };
+    showToast(`ИИ предложил позицию: ${lm.label}`);
+  } else if (fallback) {
+    showToast(`Используется предварительная позиция: ${lm.label}`);
+  } else {
+    showToast("ИИ не вернул позицию — поставьте точку вручную.");
+  }
+
+  if (landmarkEditorActive && landmarkEditorMode === mode && landmarkEditorIndex === index) {
+    renderConfirmedDots();
+    updateLandmarkEditorUI();
+    centerOnCurrentLandmark();
   }
 }
 
