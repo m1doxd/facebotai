@@ -1319,17 +1319,28 @@ function sanitizeAISuggestedLandmarks(raw, expectedIds) {
   return out;
 }
 
-function normalizeSuggestionLaterality(points, mode) {
+function normalizeSuggestionLaterality(points, mode, mesh = autoDetectedMesh) {
   if (mode !== "front" || !points) return points || {};
   const out = { ...points };
   const pairs = [["leftTemple","rightTemple"],["leftBrowOuter","rightBrowOuter"],["leftBrowPeak","rightBrowPeak"],["leftBrowInner","rightBrowInner"],["leftEyeLateralCanthus","rightEyeLateralCanthus"],["leftEyeInner","rightEyeInner"],["leftEyeUpper","rightEyeUpper"],["leftEyeLower","rightEyeLower"],["leftCheek","rightCheek"],["leftNoseBridge","rightNoseBridge"],["leftNostril","rightNostril"],["leftMouthCorner","rightMouthCorner"],["leftJaw","rightJaw"],["leftOuterEar","rightOuterEar"],["neckLeft","neckRight"],["leftEyeCenter","rightEyeCenter"],["leftCheekbone","rightCheekbone"],["leftJawline","rightJawline"],["leftAlar","rightAlar"]];
-  // Editor convention: left/right means the PERSON'S anatomy. On a normal
-  // frontal portrait anatomical left is screen-right.
+  // Anatomical convention: on a normal frontal photo the person's LEFT is on
+  // screen-right. Do not trust the model's wording alone: enforce this from x.
   for (const [leftId,rightId] of pairs) {
-    const left=out[leftId], right=out[rightId];
+    let left = out[leftId], right = out[rightId];
     if (left && right && Number.isFinite(left.x) && Number.isFinite(right.x) && left.x < right.x) {
-      out[leftId]={...right,source:right.source||"normalized_laterality"};
-      out[rightId]={...left,source:left.source||"normalized_laterality"};
+      out[leftId] = { ...right, source: `${right.source || "ai"}_laterality_fixed` };
+      out[rightId] = { ...left, source: `${left.source || "ai"}_laterality_fixed` };
+      left = out[leftId]; right = out[rightId];
+    }
+    // If AI returned only one member of a pair on the wrong side, use the
+    // deterministic mesh anchor for that landmark rather than inventing a mirror.
+    const leftDef = FRONT_LANDMARKS.find(l => l.id === leftId);
+    const rightDef = FRONT_LANDMARKS.find(l => l.id === rightId);
+    if (left && left.x < 0.5 && leftDef?.mp != null && Array.isArray(mesh)) {
+      const p = pointFromLm(mesh, leftDef.mp, 0.86); if (p) out[leftId] = { ...p, source:"mesh_laterality_anchor" };
+    }
+    if (right && right.x > 0.5 && rightDef?.mp != null && Array.isArray(mesh)) {
+      const p = pointFromLm(mesh, rightDef.mp, 0.86); if (p) out[rightId] = { ...p, source:"mesh_laterality_anchor" };
     }
   }
   return out;
@@ -7999,12 +8010,17 @@ async function beginLandmarkVerification(file, profileFile = null) {
     ]);
     autoDetectedFront = denseFront;
     if (!autoDetectedMesh && selectedObjectUrl) autoDetectedMesh = await detectFaceMeshFromSource(selectedObjectUrl);
-    if (aiFront) suggestedFrontLandmarks = normalizeSuggestionLaterality(aiFront, "front");
-    // Fill only missing suggestions from local geometry, never confirmed state.
-    for (const [id, pt] of Object.entries(denseFront || {})) {
-      if (!suggestedFrontLandmarks[id]) suggestedFrontLandmarks[id] = { ...pt, source:"local_suggestion" };
+    if (aiFront) suggestedFrontLandmarks = normalizeSuggestionLaterality(aiFront, "front", autoDetectedMesh);
+    // Guarantee an immediate starting position for every editor step. AI wins
+    // when available; otherwise use the exact local mesh anchor already found
+    // before the editor opens. Approximate is fine because the user refines it.
+    for (const lm of FRONT_LANDMARKS) {
+      if (suggestedFrontLandmarks[lm.id]) continue;
+      let pt = denseFront?.[lm.id] || null;
+      if (!pt && lm.mp != null && autoDetectedMesh) pt = pointFromLm(autoDetectedMesh, lm.mp, 0.82);
+      if (pt) suggestedFrontLandmarks[lm.id] = { ...pt, source:"local_prefetch" };
     }
-    suggestedFrontLandmarks = normalizeSuggestionLaterality(suggestedFrontLandmarks, "front");
+    suggestedFrontLandmarks = normalizeSuggestionLaterality(suggestedFrontLandmarks, "front", autoDetectedMesh);
   } catch (e) { console.warn("Auto landmark prefetch failed", e); }
   openLandmarkEditor("front");
 }
@@ -8087,7 +8103,7 @@ function updateLandmarkEditorUI() {
   if (stepEl) {
     const confirmedCount = list.filter(item => getConfirmedMap()[item.id]).length;
     const suggestionCount = list.filter(item => getSuggestedMap()[item.id]).length;
-    stepEl.textContent = `${idx + 1} из ${total} · подтверждено: ${confirmedCount}${suggestionCount ? ` · ИИ-подсказка` : ""}`;
+    stepEl.textContent = `${idx + 1} из ${total} · подтверждено: ${confirmedCount}`;
   }
   if (titleEl) titleEl.textContent = lm.label;
   if (techEl) techEl.textContent = `${lm.tech} (${landmarkEditorMode === "front" ? "анфас" : "профиль"})`;
@@ -8223,27 +8239,11 @@ function layoutEditorImage() {
 function renderConfirmedDots() {
   const container = $("#landmark-confirmed-dots");
   if (!container) return;
+  // The editor is intentionally crosshair-driven: no approximate circles are
+  // drawn over the face. The current cached point moves the photo underneath
+  // the fixed crosshair, then the user makes the final correction.
   container.innerHTML = "";
-  const map = getConfirmedMap();
-  const list = getLandmarkList(landmarkEditorMode);
-
-  list.forEach((lm) => {
-    const confirmed = map[lm.id];
-    const suggestion = getSuggestedMap()[lm.id];
-    const p = confirmed || suggestion;
-    if (!p || !Number.isFinite(p.x) || !Number.isFinite(p.y)) return;
-    const dot = document.createElement("div");
-    dot.className = confirmed ? "dot" : "dot is-suggestion";
-    // wrap is now exactly the image size → % matches photo pixels
-    dot.style.left = (p.x * 100) + "%";
-    dot.style.top = (p.y * 100) + "%";
-    if (lm.id === getLandmarkList(landmarkEditorMode)[landmarkEditorIndex]?.id) {
-      dot.classList.add("is-current");
-    }
-    container.appendChild(dot);
-  });
 }
-
 function centerOnCurrentLandmark() {
   const list = getLandmarkList(landmarkEditorMode);
   const lm = list[landmarkEditorIndex];
@@ -8427,11 +8427,12 @@ function resetCurrentLandmark() {
   if (!lm) return;
   const map = getConfirmedMap();
   delete map[lm.id];
-  delete getSuggestedMap()[lm.id];
   landmarkSuggestionRequestId++;
+  // Keep the prefetched suggestion so reset instantly returns to the automatic
+  // starting position instead of triggering a new search.
   renderConfirmedDots();
-  showToast("Точка сброшена — возвращена сохранённая подсказка.");
-  ensureCurrentLandmarkSuggestion();
+  centerOnCurrentLandmark();
+  showToast("Точка сброшена — возвращена автоматическая позиция.");
 }
 
 function finishLandmarkVerification() {
