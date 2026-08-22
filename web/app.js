@@ -1322,20 +1322,14 @@ function sanitizeAISuggestedLandmarks(raw, expectedIds) {
 function normalizeSuggestionLaterality(points, mode) {
   if (mode !== "front" || !points) return points || {};
   const out = { ...points };
-  // Anatomical left/right is the PERSON'S left/right. On a normal unmirrored
-  // front photo the person's left appears on screen-right. Detect obvious swaps
-  // geometrically and swap paired suggestion values while preserving IDs.
-  const pairs = [
-    ["leftTemple","rightTemple"],["leftCheek","rightCheek"],["leftJaw","rightJaw"],
-    ["leftEyeCenter","rightEyeCenter"],["leftEyeInner","rightEyeInner"],
-    ["leftEyeLateralCanthus","rightEyeLateralCanthus"],["leftNostril","rightNostril"],
-    ["leftMouthCorner","rightMouthCorner"],["leftAlar","rightAlar"]
-  ];
+  const pairs = [["leftTemple","rightTemple"],["leftBrowOuter","rightBrowOuter"],["leftBrowPeak","rightBrowPeak"],["leftBrowInner","rightBrowInner"],["leftEyeLateralCanthus","rightEyeLateralCanthus"],["leftEyeInner","rightEyeInner"],["leftEyeUpper","rightEyeUpper"],["leftEyeLower","rightEyeLower"],["leftCheek","rightCheek"],["leftNoseBridge","rightNoseBridge"],["leftNostril","rightNostril"],["leftMouthCorner","rightMouthCorner"],["leftJaw","rightJaw"],["leftOuterEar","rightOuterEar"],["neckLeft","neckRight"],["leftEyeCenter","rightEyeCenter"],["leftCheekbone","rightCheekbone"],["leftJawline","rightJawline"],["leftAlar","rightAlar"]];
+  // Editor convention: left/right means the PERSON'S anatomy. On a normal
+  // frontal portrait anatomical left is screen-right.
   for (const [leftId,rightId] of pairs) {
-    const a=out[leftId], b=out[rightId];
-    // Person-left should usually be to screen-right. If reversed, IDs were swapped.
-    if (a && b && Number.isFinite(a.x) && Number.isFinite(b.x) && a.x < b.x) {
-      out[leftId]=b; out[rightId]=a;
+    const left=out[leftId], right=out[rightId];
+    if (left && right && Number.isFinite(left.x) && Number.isFinite(right.x) && left.x < right.x) {
+      out[leftId]={...right,source:right.source||"normalized_laterality"};
+      out[rightId]={...left,source:left.source||"normalized_laterality"};
     }
   }
   return out;
@@ -1348,23 +1342,43 @@ async function requestAILandmarkSuggestions(file, mode, options = {}) {
   if (!ids.length) return null;
   const key = getGeminiApiKey();
   if (!key) return null;
-  const body = new FormData(); body.append("file", file, file.name || `${mode}.jpg`); body.append("mode", mode); body.append("landmark_ids", JSON.stringify(ids));
-  if (options.confirmed && typeof options.confirmed === "object") body.append("confirmed_landmarks", JSON.stringify(options.confirmed));
-  if (options.targetId) body.append("target_landmark", options.targetId);
-  const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(), 15000);
+
+  // Ask in small batches. A single 52-point JSON response can be truncated by
+  // the model, leaving early landmarks such as hairline without a suggestion.
+  const batches = [];
+  for (let i = 0; i < ids.length; i += 14) batches.push(ids.slice(i, i + 14));
+
+  const requestBatch = async (batch) => {
+    const body = new FormData();
+    body.append("file", file, file.name || `${mode}.jpg`);
+    body.append("mode", mode);
+    body.append("landmark_ids", JSON.stringify(batch));
+    if (options.confirmed && typeof options.confirmed === "object") body.append("confirmed_landmarks", JSON.stringify(options.confirmed));
+    if (options.targetId && batch.includes(options.targetId)) body.append("target_landmark", options.targetId);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 22000);
+    try {
+      const response = await fetch(LANDMARK_SUGGESTIONS_ENDPOINT, { method:"POST", headers:{"X-Gemini-Key":key,"Accept":"application/json"}, body, signal:controller.signal, cache:"no-store" });
+      const rawText = await response.text(); let data = null; try { data = rawText ? JSON.parse(rawText) : null; } catch {}
+      if (!response.ok || !data?.success) throw new Error(data?.detail || `AI landmark endpoint failed (${response.status})`);
+      return sanitizeAISuggestedLandmarks(data.landmarks, batch);
+    } finally { clearTimeout(timeout); }
+  };
+
   try {
-    const response = await fetch(LANDMARK_SUGGESTIONS_ENDPOINT, { method:"POST", headers:{"X-Gemini-Key":key,"Accept":"application/json"}, body, signal:controller.signal, cache:"no-store" });
-    const rawText = await response.text(); let data = null; try { data = rawText ? JSON.parse(rawText) : null; } catch {}
-    if (!response.ok || !data?.success) throw new Error(data?.detail || `AI landmark endpoint failed (${response.status})`);
-    const clean = sanitizeAISuggestedLandmarks(data.landmarks, ids);
+    const results = await Promise.all(batches.map(async batch => {
+      try { return await requestBatch(batch); }
+      catch (error) { console.warn("FaceMetric AI landmark batch failed", batch, error); return {}; }
+    }));
+    const clean = Object.assign({}, ...results);
     console.info(`FaceMetric AI ${mode}: ${Object.keys(clean).length}/${ids.length}`, clean);
-    window.__facemetricLandmarkDebug = { ...(window.__facemetricLandmarkDebug || {}), [mode]: { requested:ids.length, received:Object.keys(clean).length, workerCount:data.count ?? null, endpoint:LANDMARK_SUGGESTIONS_ENDPOINT } };
+    window.__facemetricLandmarkDebug = { ...(window.__facemetricLandmarkDebug || {}), [mode]: { requested:ids.length, received:Object.keys(clean).length, endpoint:LANDMARK_SUGGESTIONS_ENDPOINT } };
     return Object.keys(clean).length ? clean : null;
   } catch (error) {
     console.warn("FaceMetric: AI landmark suggestions unavailable.", error);
     window.__facemetricLandmarkDebug = { ...(window.__facemetricLandmarkDebug || {}), [mode]: { requested:ids.length, error:error?.message || String(error), endpoint:LANDMARK_SUGGESTIONS_ENDPOINT } };
     return null;
-  } finally { clearTimeout(timeout); }
+  }
 }
 
 async function detectProfileLandmarksFromUrl(src) {
@@ -7990,6 +8004,7 @@ async function beginLandmarkVerification(file, profileFile = null) {
     for (const [id, pt] of Object.entries(denseFront || {})) {
       if (!suggestedFrontLandmarks[id]) suggestedFrontLandmarks[id] = { ...pt, source:"local_suggestion" };
     }
+    suggestedFrontLandmarks = normalizeSuggestionLaterality(suggestedFrontLandmarks, "front");
   } catch (e) { console.warn("Auto landmark prefetch failed", e); }
   openLandmarkEditor("front");
 }
@@ -8031,9 +8046,8 @@ function openLandmarkEditor(mode) {
       // the image gets real dimensions.
       renderConfirmedDots();
       updateLandmarkEditorUI();
-      // Auto-center on the current suggested point for quick refinement.
+      // Suggestions are prefetched before the editor opens.
       centerOnCurrentLandmark();
-      ensureCurrentLandmarkSuggestion();
     };
     if (img.getAttribute("src") === src && img.complete && img.naturalWidth > 0) {
       apply();
@@ -8149,61 +8163,25 @@ function getSuggestedMap() {
 function getCurrentSuggestionFallback(lm) {
   if (!lm) return null;
   if (landmarkEditorMode === "front") {
+    // MediaPipe index 10 is forehead, not the visible hair/skin boundary.
+    // Do not silently place the hairline there as a fake suggestion.
+    if (lm.id === "hairline") return null;
     if (lm.mp != null && autoDetectedMesh) return pointFromLm(autoDetectedMesh, lm.mp, 0.72);
     return autoDetectedFront?.[lm.id] || null;
   }
   return autoDetectedProfile?.[lm.id] || null;
 }
 
-async function ensureCurrentLandmarkSuggestion() {
-  const list = getLandmarkList(landmarkEditorMode);
-  const lm = list[landmarkEditorIndex];
+function ensureCurrentLandmarkSuggestion() {
+  // Cache-only: never call Gemini while the editor is open.
+  const list=getLandmarkList(landmarkEditorMode);
+  const lm=list[landmarkEditorIndex];
   if (!lm) return;
-  const confirmed = getConfirmedMap();
-  const suggested = getSuggestedMap();
+  const confirmed=getConfirmedMap(), suggested=getSuggestedMap();
   if (confirmed[lm.id] || suggested[lm.id]) return;
-
-  const mode = landmarkEditorMode;
-  const index = landmarkEditorIndex;
-  const requestId = ++landmarkSuggestionRequestId;
-
-  // IMPORTANT: never leave the editor waiting for Gemini. First place a
-  // local face-AI/MediaPipe estimate for THIS point, then let Gemini refine it.
-  const fallback = getCurrentSuggestionFallback(lm);
+  const fallback=getCurrentSuggestionFallback(lm);
   if (fallback) {
-    suggested[lm.id] = { ...fallback, source: "local_ai_step_suggestion" };
-    if (landmarkEditorActive && landmarkEditorMode === mode && landmarkEditorIndex === index) {
-      renderConfirmedDots();
-      updateLandmarkEditorUI();
-      centerOnCurrentLandmark();
-    }
-    showToast(`Предварительная позиция: ${lm.label}`);
-  }
-
-  const file = mode === "profile" ? (profileWorkingFile || pendingProfileFile) : pendingAnalysisFile;
-  if (!file || !getGeminiApiKey() || !LANDMARK_SUGGESTIONS_ENABLED) {
-    if (!fallback) showToast("Не удалось предложить позицию — поставьте точку вручную.");
-    return;
-  }
-
-  showToast(`ИИ уточняет точку: ${lm.label}…`);
-  const ai = await requestAILandmarkSuggestions(file, mode, {
-    ids: [lm.id],
-    targetId: lm.id,
-    confirmed
-  });
-
-  if (requestId !== landmarkSuggestionRequestId || landmarkEditorMode !== mode || landmarkEditorIndex !== index) return;
-  if (ai?.[lm.id]) {
-    suggested[lm.id] = { ...ai[lm.id], source: "gemini_step_suggestion" };
-    showToast(`ИИ предложил позицию: ${lm.label}`);
-  } else if (fallback) {
-    showToast(`Используется предварительная позиция: ${lm.label}`);
-  } else {
-    showToast("ИИ не вернул позицию — поставьте точку вручную.");
-  }
-
-  if (landmarkEditorActive && landmarkEditorMode === mode && landmarkEditorIndex === index) {
+    suggested[lm.id]={...fallback,source:"local_cached_fallback"};
     renderConfirmedDots();
     updateLandmarkEditorUI();
     centerOnCurrentLandmark();
@@ -8434,7 +8412,6 @@ function goNextLandmark() {
   landmarkEditorIndex++;
   landmarkSuggestionRequestId++;
   updateLandmarkEditorUI();
-  ensureCurrentLandmarkSuggestion();
 }
 
 function goPrevLandmark() {
@@ -8442,7 +8419,6 @@ function goPrevLandmark() {
   landmarkEditorIndex--;
   landmarkSuggestionRequestId++;
   updateLandmarkEditorUI();
-  ensureCurrentLandmarkSuggestion();
 }
 
 function resetCurrentLandmark() {
@@ -8454,7 +8430,7 @@ function resetCurrentLandmark() {
   delete getSuggestedMap()[lm.id];
   landmarkSuggestionRequestId++;
   renderConfirmedDots();
-  showToast("Точка сброшена — ИИ ищет её заново…");
+  showToast("Точка сброшена — возвращена сохранённая подсказка.");
   ensureCurrentLandmarkSuggestion();
 }
 
