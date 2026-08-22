@@ -13,7 +13,7 @@ const DEFAULT_MODEL = "gemini-3.6-flash";
 // Deployment marker: 2026-08-16-merged-landmark-metric-motion-v1
 // This intentionally changes the Worker source so Git/Cloudflare
 // detects a new deployment.
-const WORKER_BUILD = "2026-08-16-merged-landmark-metric-motion-v1";
+const WORKER_BUILD = "2026-08-22-ai-landmark-apply-v19";
 
 const SCORE_MIN = 0;
 const SCORE_MAX = 10;
@@ -219,7 +219,7 @@ async function landmarkSuggestions(request, env) {
   const base64 = uint8ToBase64(new Uint8Array(await file.arrayBuffer()));
   const model = env.GEMINI_MODEL || DEFAULT_MODEL;
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
-  const prompt = `You assist a manual facial landmark editor. Analyze this SINGLE ${mode.toUpperCase()} face image.\n\nReturn ONLY JSON with this exact shape:\n{"landmarks":{"landmark_id":{"x":0.0,"y":0.0,"confidence":0.0}}}\n\nRequested landmark ids: ${JSON.stringify(landmarkIds)}\nCoordinates are normalized to the ORIGINAL IMAGE: top-left is (0,0), bottom-right is (1,1).\nFor every requested landmark that is visually identifiable, estimate its approximate anatomical location. These are STARTING SUGGESTIONS ONLY, so do not invent precision. Omit points you cannot reasonably locate. Never return pixels, bounding boxes, explanations, markdown, or extra keys. Confidence is 0..1. The user will manually correct every point before analysis.`;
+  const prompt = `You PRE-PLACE points for a manual facial landmark editor. Analyze this SINGLE ${mode.toUpperCase()} face image. Use every requested landmark ID EXACTLY as written; never rename IDs.\n\nReturn ONLY JSON with this exact shape:\n{"landmarks":{"landmark_id":{"x":0.0,"y":0.0,"confidence":0.0}}}\n\nRequested landmark ids: ${JSON.stringify(landmarkIds)}\nCoordinates are normalized to the ORIGINAL IMAGE: top-left is (0,0), bottom-right is (1,1).\nTry to return every requested point that is visibly locatable. These are STARTING SUGGESTIONS ONLY. Never return pixels, bounding boxes, explanations, markdown, code fences, aliases, or extra keys. Confidence is 0..1. The user will manually correct every point before analysis.`;
 
   const response = await fetch(endpoint, {
     method:"POST",
@@ -230,7 +230,7 @@ async function landmarkSuggestions(request, env) {
   let envelope; try { envelope = JSON.parse(raw); } catch { envelope = null; }
   if (!response.ok) return json({ success:false, detail: envelope?.error?.message || `Gemini API error (${response.status}).` }, response.status === 429 ? 429 : 502);
   const text = envelope?.candidates?.[0]?.content?.parts?.map(p=>p.text || "").join("") || "";
-  let parsed; try { parsed = JSON.parse(text); } catch { return json({success:false, detail:"Gemini returned invalid landmark JSON."}, 502); }
+  let parsed; try { parsed = JSON.parse(text); } catch { const match = text.match(/\{[\s\S]*\}/); try { parsed = match ? JSON.parse(match[0]) : null; } catch {} if (!parsed) return json({success:false, detail:"Gemini returned invalid landmark JSON."}, 502); }
   const requested = new Set(landmarkIds);
   const clean = {};
   for (const [id, pt] of Object.entries(parsed?.landmarks || {})) {
