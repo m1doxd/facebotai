@@ -524,6 +524,7 @@ const ALLOWED_TYPES = new Set([
 const API_ENDPOINT = "https://facebot-gemini.snow4lyt.workers.dev/api/analyze";
 const HEALTH_ENDPOINT = "https://facebot-gemini.snow4lyt.workers.dev/api/health";
 const VALIDATE_KEY_ENDPOINT = "https://facebot-gemini.snow4lyt.workers.dev/api/validate-key";
+const LANDMARK_SUGGESTIONS_ENDPOINT = API_ENDPOINT.replace(/\/analyze$/, "/landmark-suggestions");
 
 // Dense client-side face landmarks. Gemini remains the semantic/analysis
 // engine, while MediaPipe Face Landmarker supplies stable geometric points
@@ -1264,6 +1265,39 @@ const PROFILE_AUTO_MP = {
   profile_rhinion: 6, profile_infraorbitale: 145
 };
 
+function sanitizeAISuggestedLandmarks(raw, expectedIds) {
+  const out = {};
+  const allowed = new Set(expectedIds || []);
+  for (const [id, pt] of Object.entries(raw || {})) {
+    const x = Number(pt?.x), y = Number(pt?.y), confidence = Number(pt?.confidence);
+    if (!allowed.has(id) || !Number.isFinite(x) || !Number.isFinite(y) || x < 0 || x > 1 || y < 0 || y > 1) continue;
+    out[id] = { x, y, confidence: Number.isFinite(confidence) ? Math.max(0, Math.min(1, confidence)) : 0.5, source: "gemini_suggestion" };
+  }
+  return out;
+}
+
+async function requestAILandmarkSuggestions(file, mode) {
+  if (!file) return null;
+  const ids = (mode === "profile" ? PROFILE_LANDMARKS : FRONT_LANDMARKS).map(lm => lm.id);
+  const key = getGeminiApiKey();
+  if (!key) return null;
+  const body = new FormData();
+  body.append("file", file, file.name || `${mode}.jpg`);
+  body.append("mode", mode);
+  body.append("landmark_ids", JSON.stringify(ids));
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 30000);
+  try {
+    const response = await fetch(LANDMARK_SUGGESTIONS_ENDPOINT, { method:"POST", headers:{"X-Gemini-Key":key}, body, signal:controller.signal });
+    const data = await response.json().catch(() => null);
+    if (!response.ok || !data?.success) throw new Error(data?.detail || "AI landmark suggestions unavailable");
+    return sanitizeAISuggestedLandmarks(data.landmarks, ids);
+  } catch (error) {
+    console.warn("FaceMetric: AI landmark suggestions unavailable; using MediaPipe/manual fallback.", error);
+    return null;
+  } finally { clearTimeout(timeout); }
+}
+
 async function detectProfileLandmarksFromUrl(src) {
   if (!src) return null;
   try {
@@ -1308,8 +1342,10 @@ function seedFrontEditorFromMesh(mesh) {
     if (!Number.isInteger(lm.mp)) continue;
     const pt = pointFromLm(mesh, lm.mp, 0.82);
     if (!pt) continue;
-    confirmedFrontLandmarks[lm.id] = pt;
-    count++;
+    if (!confirmedFrontLandmarks[lm.id]) {
+      confirmedFrontLandmarks[lm.id] = pt;
+      count++;
+    }
   }
   return count;
 }
@@ -7788,7 +7824,19 @@ async function beginLandmarkVerification(file, profileFile = null) {
   pendingAnalysisFile = file;
   pendingProfileFile = profileFile;
 
-  // Auto-detect dense landmarks first
+  // Ask Gemini for anatomical starting suggestions first. These are never
+  // final: they only pre-fill the exact state used by the manual editor.
+  let aiFrontSuggestions = null;
+  try {
+    showToast("ИИ приблизительно расставляет точки…");
+    aiFrontSuggestions = await requestAILandmarkSuggestions(file, "front");
+    if (aiFrontSuggestions && Object.keys(aiFrontSuggestions).length) {
+      Object.assign(confirmedFrontLandmarks, aiFrontSuggestions);
+      showToast(`ИИ предложил ${Object.keys(aiFrontSuggestions).length}/52 точек — можно уточнять.`);
+    }
+  } catch (e) { console.warn("AI front suggestions failed", e); }
+
+  // MediaPipe fills any points AI could not confidently place.
   try {
     if (analysisImage && selectedObjectUrl) {
       // ensure image is loaded
@@ -8182,13 +8230,19 @@ function confirmCurrentLandmark() {
 async function openProfileLandmarkEditorWithAutoSuggestions() {
   if (!autoDetectedProfile) {
     try {
-      showToast("Приблизительно определяем точки профиля…");
+      showToast("ИИ приблизительно расставляет профильные точки…");
+      const ai = await requestAILandmarkSuggestions(pendingProfileFile, "profile");
+      if (ai && Object.keys(ai).length) {
+        confirmedProfileLandmarks = { ...confirmedProfileLandmarks, ...ai };
+        showToast(`ИИ предложил ${Object.keys(ai).length}/31 профильных точек.`);
+      }
       autoDetectedProfile = await detectProfileLandmarksFromUrl(selectedProfileObjectUrl);
       if (autoDetectedProfile) {
-        confirmedProfileLandmarks = { ...confirmedProfileLandmarks, ...autoDetectedProfile };
-      } else {
-        showToast("Автопоиск профиля недоступен — можно расставить точки вручную.");
+        for (const [id, pt] of Object.entries(autoDetectedProfile)) {
+          if (!confirmedProfileLandmarks[id]) confirmedProfileLandmarks[id] = pt;
+        }
       }
+      if (!Object.keys(confirmedProfileLandmarks).length) showToast("Автопоиск недоступен — можно расставить точки вручную.");
     } catch (error) {
       console.warn("Profile auto suggestions failed", error);
     }
