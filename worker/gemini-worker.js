@@ -13,7 +13,7 @@ const DEFAULT_MODEL = "gemini-3.6-flash";
 // Deployment marker: 2026-08-16-merged-landmark-metric-motion-v1
 // This intentionally changes the Worker source so Git/Cloudflare
 // detects a new deployment.
-const WORKER_BUILD = "2026-08-22-ai-landmark-apply-v19";
+const WORKER_BUILD = "2026-08-22-ai-landmark-cors-fix-v20";
 
 const SCORE_MIN = 0;
 const SCORE_MAX = 10;
@@ -41,7 +41,7 @@ export default {
         status: "ok",
         model: env.GEMINI_MODEL || DEFAULT_MODEL,
         build: WORKER_BUILD,
-        cors_headers: "Content-Type,Accept,X-Gemini-Key"
+        cors_headers: "Content-Type,Accept,X-Gemini-Key,Cache-Control"
       });
     }
 
@@ -2721,7 +2721,7 @@ function corsHeaders() {
       "GET,POST,OPTIONS",
 
     "Access-Control-Allow-Headers":
-      "Content-Type, Accept, X-Gemini-Key"
+      "Content-Type, Accept, X-Gemini-Key, Cache-Control"
   };
 }
 
