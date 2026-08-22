@@ -67,6 +67,22 @@ export default {
     }
 
     // ========================================================
+    // LANDMARK SUGGESTIONS (AI-assisted manual editor)
+    // ========================================================
+
+    if (url.pathname === "/api/landmark-suggestions") {
+      if (request.method !== "POST") {
+        return json({ success: false, detail: "Method not allowed." }, 405);
+      }
+      try {
+        return await landmarkSuggestions(request, env);
+      } catch (error) {
+        console.error("LANDMARK SUGGESTIONS ERROR:", error);
+        return json({ success: false, detail: error?.message || "Could not generate landmark suggestions." }, 500);
+      }
+    }
+
+    // ========================================================
     // ANALYZE
     // ========================================================
 
@@ -178,6 +194,52 @@ async function validateGeminiKey(request, env) {
   });
 }
 
+
+// ============================================================
+// AI LANDMARK SUGGESTIONS
+// ============================================================
+
+async function landmarkSuggestions(request, env) {
+  const apiKey = request.headers.get("X-Gemini-Key")?.trim() || String(env.GEMINI_API_KEY || "").trim();
+  if (!apiKey) return json({ success:false, code:"GEMINI_KEY_REQUIRED", detail:"Gemini API key is required." }, 400);
+
+  const formData = await request.formData();
+  const file = formData.get("file");
+  const mode = formData.get("mode") === "profile" ? "profile" : "front";
+  let landmarkIds = [];
+  try {
+    const parsed = JSON.parse(String(formData.get("landmark_ids") || "[]"));
+    if (Array.isArray(parsed)) landmarkIds = parsed.filter(x => typeof x === "string" && x.length <= 80).slice(0, 60);
+  } catch {}
+  if (!file || typeof file.arrayBuffer !== "function" || !ALLOWED_TYPES.has(file.type || "") || !landmarkIds.length) {
+    return json({ success:false, detail:"A supported image and landmark_ids are required." }, 400);
+  }
+  if (file.size <= 0 || file.size > MAX_FILE_SIZE) return json({ success:false, detail:"Invalid image size." }, 400);
+
+  const base64 = uint8ToBase64(new Uint8Array(await file.arrayBuffer()));
+  const model = env.GEMINI_MODEL || DEFAULT_MODEL;
+  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
+  const prompt = `You assist a manual facial landmark editor. Analyze this SINGLE ${mode.toUpperCase()} face image.\n\nReturn ONLY JSON with this exact shape:\n{"landmarks":{"landmark_id":{"x":0.0,"y":0.0,"confidence":0.0}}}\n\nRequested landmark ids: ${JSON.stringify(landmarkIds)}\nCoordinates are normalized to the ORIGINAL IMAGE: top-left is (0,0), bottom-right is (1,1).\nFor every requested landmark that is visually identifiable, estimate its approximate anatomical location. These are STARTING SUGGESTIONS ONLY, so do not invent precision. Omit points you cannot reasonably locate. Never return pixels, bounding boxes, explanations, markdown, or extra keys. Confidence is 0..1. The user will manually correct every point before analysis.`;
+
+  const response = await fetch(endpoint, {
+    method:"POST",
+    headers:{"Content-Type":"application/json","x-goog-api-key":apiKey},
+    body: JSON.stringify({ contents:[{role:"user",parts:[{text:prompt},{inline_data:{mime_type:file.type || "image/jpeg",data:base64}}]}], generationConfig:{temperature:0,responseMimeType:"application/json",maxOutputTokens:4096} })
+  });
+  const raw = await response.text();
+  let envelope; try { envelope = JSON.parse(raw); } catch { envelope = null; }
+  if (!response.ok) return json({ success:false, detail: envelope?.error?.message || `Gemini API error (${response.status}).` }, response.status === 429 ? 429 : 502);
+  const text = envelope?.candidates?.[0]?.content?.parts?.map(p=>p.text || "").join("") || "";
+  let parsed; try { parsed = JSON.parse(text); } catch { return json({success:false, detail:"Gemini returned invalid landmark JSON."}, 502); }
+  const requested = new Set(landmarkIds);
+  const clean = {};
+  for (const [id, pt] of Object.entries(parsed?.landmarks || {})) {
+    const x=Number(pt?.x), y=Number(pt?.y), confidence=Number(pt?.confidence);
+    if (!requested.has(id) || !Number.isFinite(x) || !Number.isFinite(y) || x < 0 || x > 1 || y < 0 || y > 1) continue;
+    clean[id] = { x, y, confidence: Number.isFinite(confidence) ? Math.max(0,Math.min(1,confidence)) : 0.5, source:"gemini_suggestion" };
+  }
+  return json({ success:true, mode, landmarks:clean, count:Object.keys(clean).length, model });
+}
 
 // ============================================================
 // MAIN ANALYSIS
