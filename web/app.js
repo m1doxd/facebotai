@@ -517,6 +517,7 @@ const API_ENDPOINT = "https://facebot-gemini.snow4lyt.workers.dev/api/analyze";
 const HEALTH_ENDPOINT = "https://facebot-gemini.snow4lyt.workers.dev/api/health";
 const VALIDATE_KEY_ENDPOINT = "https://facebot-gemini.snow4lyt.workers.dev/api/validate-key";
 const LANDMARK_SUGGESTIONS_ENDPOINT = API_ENDPOINT.replace(/\/analyze$/, "/landmark-suggestions");
+const LANDMARK_SUGGESTIONS_ENABLED = true;
 
 // Dense client-side face landmarks. Gemini remains the semantic/analysis
 // engine, while MediaPipe Face Landmarker supplies stable geometric points
@@ -8121,8 +8122,9 @@ async function ensureCurrentLandmarkSuggestion() {
   const mode = landmarkEditorMode;
   const requestId = ++landmarkSuggestionRequestId;
   const file = mode === "profile" ? (profileWorkingFile || pendingProfileFile) : pendingAnalysisFile;
-  if (file && getGeminiApiKey()) {
+  if (file && getGeminiApiKey() && LANDMARK_SUGGESTIONS_ENABLED) {
     try {
+      showToast(`ИИ ищет точку: ${lm.label}…`);
       const ai = await requestAILandmarkSuggestions(file, mode, {
         ids: [lm.id], targetId: lm.id, confirmed
       });
@@ -8131,7 +8133,12 @@ async function ensureCurrentLandmarkSuggestion() {
         suggested[lm.id] = { ...ai[lm.id], source: "gemini_step_suggestion" };
         showToast(`ИИ предложил позицию: ${lm.label}`);
       }
-    } catch (e) { console.warn("Step AI suggestion failed", e); }
+    } catch (e) {
+      console.warn("Step AI suggestion failed", e);
+      showToast("ИИ не ответил — используется локальная подсказка.");
+    }
+  } else if (!getGeminiApiKey()) {
+    console.warn("FaceMetric: step AI skipped because Gemini API key is missing.");
   }
   if (!suggested[lm.id]) {
     const fallback = getCurrentSuggestionFallback(lm);
