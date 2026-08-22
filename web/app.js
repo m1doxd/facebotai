@@ -243,14 +243,6 @@ function initClassificationModal() {
     if (genderSelect) genderSelect.value = selectedGender;
     if (adultConfirm) adultConfirm.checked = true;
 
-    if (!saveClassificationSettings(selectedGender, adultConfirmed)) {
-      if (error) {
-        error.textContent = "Не удалось сохранить настройки в браузере.";
-        error.hidden = false;
-      }
-      return;
-    }
-
     closeClassificationModal();
     updateAnalysisButtonState();
     showToast("Пол сохранён. Подготовим фото.");
@@ -744,7 +736,13 @@ let autoDetectedMesh = null; // full MediaPipe 478-point mesh (normalized) for p
 
 let autoDetectedProfile = null;
 
-
+// Profile preparation uses one canonical working image. Every downstream
+// profile operation (AI suggestions, manual points, metrics and overlays)
+// uses this exact transformed image.
+let profileWorkingFile = null;
+let profileWorkingObjectUrl = null;
+let profileRotationDegrees = 0;
+let profileMirrored = false;
 
 /* Capture / onboarding flow. This sits in front of the existing uploader and
    deliberately does not change the Worker request contract. */
@@ -1048,14 +1046,24 @@ function openFrontFilePickerDirect() {
   fileInput.click();
 }
 
+const CAPTURE_GUIDES_STORAGE_KEY = "facemetric_skip_capture_guides";
+function shouldSkipCaptureGuides() { return localStorage.getItem(CAPTURE_GUIDES_STORAGE_KEY) === "1"; }
+function setSkipCaptureGuides(value) { try { localStorage.setItem(CAPTURE_GUIDES_STORAGE_KEY, value ? "1" : "0"); } catch {} }
+
 function openCaptureFlow(mode = "front") {
+  captureMode = mode === "profile" ? "profile" : "front";
+  if (shouldSkipCaptureGuides()) {
+    if (captureMode === "front") openFrontFilePickerDirect(); else profileFileInput?.click();
+    return;
+  }
   if (!captureFlow || !captureFlowBody) {
     if (mode === "front") openFrontFilePickerDirect();
     else profileFileInput?.click();
     return;
   }
-  captureMode = mode === "profile" ? "profile" : "front";
   captureStep = 0;
+  const skip = document.getElementById("captureSkipGuides");
+  if (skip) skip.checked = shouldSkipCaptureGuides();
   captureFlow.hidden = false;
   captureFlow.style.pointerEvents = "";
   captureFlow.setAttribute("aria-hidden", "false");
@@ -1441,16 +1449,6 @@ function handleFileSelected(file) {
   cancelActiveAnalysis();
   analysisRequestId++;
 
-  // Keep previously chosen gender/18+ so the modal does not reopen every time.
-  // User already confirmed it at the start of the flow.
-  const savedClass = getClassificationSettings();
-  if (savedClass) {
-    selectedGender = savedClass.gender === "female" ? "female" : "male";
-    adultConfirmed = savedClass.adultConfirmed === true;
-    if (genderSelect) genderSelect.value = selectedGender;
-    if (adultConfirm) adultConfirm.checked = adultConfirmed;
-  }
-
   selectedFile = file;
 
   // New front photo → clear previous profile so it does not carry over
@@ -1495,6 +1493,73 @@ function handleFileSelected(file) {
   showToast("Анфас загружен. Можно добавить профиль или сразу начать анализ.");
 }
 
+function revokeProfileWorkingObjectUrl() {
+  if (profileWorkingObjectUrl) { try { URL.revokeObjectURL(profileWorkingObjectUrl); } catch {} }
+  profileWorkingObjectUrl = null;
+}
+
+async function renderProfileWorkingFile(file, rotation = profileRotationDegrees, mirrored = profileMirrored) {
+  const bitmap = await createImageBitmap(file);
+  const rad = rotation * Math.PI / 180;
+  const c = document.createElement("canvas");
+  // keep a stable square-ish bounding box so rotation never clips the profile
+  const cos = Math.abs(Math.cos(rad)), sin = Math.abs(Math.sin(rad));
+  c.width = Math.ceil(bitmap.width * cos + bitmap.height * sin);
+  c.height = Math.ceil(bitmap.width * sin + bitmap.height * cos);
+  const ctx = c.getContext("2d");
+  ctx.translate(c.width / 2, c.height / 2);
+  ctx.rotate(rad);
+  ctx.scale(mirrored ? -1 : 1, 1);
+  ctx.drawImage(bitmap, -bitmap.width / 2, -bitmap.height / 2);
+  bitmap.close?.();
+  const blob = await new Promise(resolve => c.toBlob(resolve, "image/jpeg", .96));
+  if (!blob) throw new Error("Не удалось подготовить профиль");
+  return new File([blob], "profile-aligned.jpg", { type:"image/jpeg" });
+}
+
+async function openProfileAlignment() {
+  if (!selectedProfileFile) return;
+  profileRotationDegrees = 0;
+  profileMirrored = false;
+  // Normalize orientation before the user fine-tunes rotation: MediaPipe nose
+  // point is compared with the visible ear-side point. If the nose points left,
+  // mirror into the canonical "nose right" coordinate system.
+  try {
+    const mesh = await detectFaceMeshFromSource(selectedProfileObjectUrl);
+    const nose = mesh?.[1], earSide = mesh?.[234] || mesh?.[454];
+    if (nose && earSide && Number(nose.x) < Number(earSide.x)) profileMirrored = true;
+  } catch (e) { console.warn("Profile orientation auto-detect unavailable", e); }
+  const img = document.getElementById("profile-align-image");
+  if (img) { img.src = selectedProfileObjectUrl; img.style.transform = "rotate(0deg) scaleX(1)"; }
+  const range = document.getElementById("profile-rotate-range");
+  if (range) range.value = 0;
+  updateProfileAlignmentUI();
+  showScreen("profile-align");
+}
+function updateProfileAlignmentUI() {
+  const angle = document.getElementById("profile-rotate-value");
+  const img = document.getElementById("profile-align-image");
+  const range = document.getElementById("profile-rotate-range");
+  if (angle) angle.textContent = `${profileRotationDegrees.toFixed(1)}°`;
+  if (range) range.value = profileRotationDegrees;
+  if (img) img.style.transform = `rotate(${profileRotationDegrees}deg) scaleX(${profileMirrored ? -1 : 1})`;
+}
+async function confirmProfileAlignment() {
+  if (!selectedProfileFile) return;
+  const button = document.getElementById("profile-align-confirm");
+  if (button) { button.disabled = true; button.textContent = "ПОДГОТАВЛИВАЕМ…"; }
+  try {
+    profileWorkingFile = await renderProfileWorkingFile(selectedProfileFile);
+    revokeProfileWorkingObjectUrl();
+    profileWorkingObjectUrl = URL.createObjectURL(profileWorkingFile);
+    // Canonical source from this point on.
+    pendingProfileFile = profileWorkingFile;
+    await openProfileLandmarkEditorWithAutoSuggestions();
+  } catch (e) {
+    console.error(e); showToast("Не удалось выровнять профиль.");
+  } finally { if (button) { button.disabled = false; button.textContent = "ВЫГЛЯДИТ РОВНО"; } }
+}
+
 function handleProfileFileSelected(file) {
   closeCaptureFlow();
   if (!getGeminiApiKey()) {
@@ -1526,7 +1591,7 @@ function handleProfileFileSelected(file) {
   showProfileUploadControl();
   updateDualPhotoStrip();
   updateAnalysisButtonState();
-  showToast("Профиль добавлен. Можно начинать анализ.");
+  showToast("Профиль добавлен. Выровняйте его перед разметкой.");
 }
 
 function showProfileUploadControl() {
@@ -6266,6 +6331,10 @@ function startNewAnalysis() {
 
   activeResultView = "front";
   activeMetric = null;
+  selectedGender = "male";
+  adultConfirmed = false;
+  profileWorkingFile = null;
+  revokeProfileWorkingObjectUrl();
 
   revokeSelectedObjectUrl();
   revokeSelectedProfileObjectUrl();
@@ -6339,6 +6408,7 @@ function startNewAnalysis() {
   resetAnalysisPreview();
 
   showScreen("home");
+  window.setTimeout(() => openClassificationModal({ force:true }), 180);
 }
 
 
@@ -7572,7 +7642,7 @@ function updateAnalysisButtonState() {
     adultConfirmed = true;
     selectedGender = saved.gender === "female" ? "female" : "male";
   }
-  const ready = Boolean(selectedFile) && adultConfirmed && Boolean(saved || getClassificationSettings());
+  const ready = Boolean(selectedFile) && adultConfirmed;
   startAnalysisButton.disabled = !ready;
   startAnalysisButton.removeAttribute("aria-disabled");
   startAnalysisButton.title = !ready
@@ -7619,14 +7689,25 @@ function bindEvents() {
         showToast("Сначала добавь фотографию анфас.");
         return;
       }
-      if (!getClassificationSettings() || !adultConfirmed) {
-        openClassificationModal();
+      if (!adultConfirmed) {
+        openClassificationModal({ force: true });
         return;
       }
       startAnalysisButton.disabled = true;
       beginLandmarkVerification(selectedFile, selectedProfileFile);
     }
   );
+
+  document.getElementById("captureSkipGuides")?.addEventListener("change", event => {
+    setSkipCaptureGuides(Boolean(event.target.checked));
+  });
+  ["profile-align-back", "profile-align-back-bottom"].forEach(id => document.getElementById(id)?.addEventListener("click", () => showScreen("analysis")));
+  document.getElementById("profile-rotate-range")?.addEventListener("input", event => { profileRotationDegrees = Number(event.target.value) || 0; updateProfileAlignmentUI(); });
+  document.getElementById("profile-rotate-minus")?.addEventListener("click", () => { profileRotationDegrees = Math.max(-30, profileRotationDegrees - .5); updateProfileAlignmentUI(); });
+  document.getElementById("profile-rotate-plus")?.addEventListener("click", () => { profileRotationDegrees = Math.min(30, profileRotationDegrees + .5); updateProfileAlignmentUI(); });
+  document.getElementById("profile-rotate-reset")?.addEventListener("click", () => { profileRotationDegrees = 0; profileMirrored = false; updateProfileAlignmentUI(); });
+  document.getElementById("profile-align-mirror")?.addEventListener("click", () => { profileMirrored = !profileMirrored; updateProfileAlignmentUI(); });
+  document.getElementById("profile-align-confirm")?.addEventListener("click", confirmProfileAlignment);
 
   profileUploadButton?.addEventListener(
     "click",
@@ -7830,6 +7911,8 @@ function clearLandmarkEditorState() {
   editorImageTy = 0;
   autoDetectedFront = null;
   autoDetectedProfile = null;
+  profileWorkingFile = null;
+  revokeProfileWorkingObjectUrl();
   autoDetectedMesh = null;
   pendingAnalysisFile = null;
   pendingProfileFile = null;
@@ -7930,7 +8013,7 @@ function openLandmarkEditor(mode) {
   const img = $("#landmark-editor-image");
   const src =
     mode === "profile"
-      ? selectedProfileObjectUrl
+      ? (profileWorkingObjectUrl || selectedProfileObjectUrl)
       : selectedObjectUrl;
 
   // Always start on «Фото» tab so user sees the image + reference card
@@ -8247,12 +8330,12 @@ async function openProfileLandmarkEditorWithAutoSuggestions() {
   if (!autoDetectedProfile) {
     try {
       showToast("ИИ приблизительно расставляет профильные точки…");
-      const ai = await requestAILandmarkSuggestions(pendingProfileFile, "profile");
+      const ai = await requestAILandmarkSuggestions(profileWorkingFile || pendingProfileFile, "profile");
       if (ai && Object.keys(ai).length) {
         const applied = applyLandmarkSuggestionsToEditor(ai, "profile", { overwrite: true });
         showToast(`ИИ предложил ${applied.applied}/31 профильных точек.`);
       }
-      autoDetectedProfile = await detectProfileLandmarksFromUrl(selectedProfileObjectUrl);
+      autoDetectedProfile = await detectProfileLandmarksFromUrl(profileWorkingObjectUrl || selectedProfileObjectUrl);
       if (autoDetectedProfile) {
         for (const [id, pt] of Object.entries(autoDetectedProfile)) {
           if (!confirmedProfileLandmarks[id]) confirmedProfileLandmarks[id] = pt;
@@ -8275,7 +8358,7 @@ function goNextLandmark() {
       if (pendingProfileFile && selectedProfileObjectUrl) {
         // Seed the existing profile editor before it opens. These are only
         // approximate suggestions; every point remains editable/confirmable.
-        openProfileLandmarkEditorWithAutoSuggestions();
+        openProfileAlignment();
         return;
       } else {
         finishLandmarkVerification();
