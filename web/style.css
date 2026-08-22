@@ -4228,9 +4228,9 @@ body.metric-reference-open{overflow:hidden}
   margin: 4px 0 0;
   font-size: 12px;
   line-height: 1.4;
-  line-clamp: 2;
   color: rgba(255,255,255,0.5);
   display: -webkit-box;
+  line-clamp: 2;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
@@ -4349,7 +4349,7 @@ body.metric-reference-open{overflow:hidden}
 .landmark-editor__confirmed-dots {
   position: absolute;
   inset: 0;
-  pointer-events: none;
+  pointer-events: none;  z-index: 20;
 }
 
 .landmark-editor__confirmed-dots .dot {
