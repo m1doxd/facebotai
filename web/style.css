@@ -4636,3 +4636,16 @@ body:has(#screen-landmark-editor.active) [class*="bottom-nav"] {
 #screen-profile-align{padding:32px 16px;align-items:center;justify-content:center}.profile-align-card{width:min(760px,100%);background:linear-gradient(145deg,#17191f,#101216);border:1px solid rgba(255,255,255,.09);border-radius:28px;overflow:hidden;box-shadow:0 28px 90px rgba(0,0,0,.45)}.profile-align-header{display:flex;align-items:center;gap:14px;padding:20px 24px;border-bottom:1px solid rgba(255,255,255,.07)}.profile-align-header span{font-size:9px;letter-spacing:.18em;color:#87909c}.profile-align-header h2{margin:3px 0 0;font-size:22px}.profile-align-back{width:44px;height:44px;border-radius:50%;border:1px solid rgba(255,255,255,.12);background:#20242b;color:#e8edf4;font-size:25px}.profile-align-copy{text-align:center;color:#aab1bc;margin:22px auto;max-width:600px}.profile-align-stage{position:relative;width:min(610px,90%);aspect-ratio:1/1;margin:auto;background:#080a0d;border-radius:22px;overflow:hidden;display:grid;place-items:center}.profile-align-stage img{max-width:86%;max-height:86%;object-fit:contain;transition:transform .16s ease;transform-origin:center}.profile-align-stage i{position:absolute;pointer-events:none}.guide-v{top:0;bottom:0;width:1px;background:rgba(255,255,255,.14)}.guide-v1{left:34%}.guide-v2{left:66%}.guide-h{left:0;right:0;top:50%;border-top:1px dashed rgba(255,255,255,.35)}.profile-align-angle{text-align:center;font-size:27px;letter-spacing:.05em;margin:17px}.profile-align-controls{display:flex;align-items:center;gap:18px;padding:0 38px}.profile-align-controls button,.profile-align-actions button{border:1px solid rgba(255,255,255,.13);background:#20242a;color:#f2f4f7}.profile-align-controls button{width:48px;height:48px;border-radius:50%;font-size:28px}.profile-align-controls input{flex:1;accent-color:#e8edf4}.profile-align-actions{display:flex;justify-content:center;gap:10px;padding:18px}.profile-align-actions button{border-radius:12px;padding:10px 16px}.profile-align-card footer{display:grid;grid-template-columns:1fr 1.2fr;gap:12px;padding:18px;border-top:1px solid rgba(255,255,255,.08)}.profile-align-card footer button{height:54px;border-radius:14px;border:1px solid rgba(255,255,255,.12);font-weight:800}.profile-align-card footer button:last-child{background:#edf1f4;color:#121419}.capture-flow__skip{font-size:11px;color:#aeb6c0;display:flex;align-items:center;gap:6px;margin-right:auto}
 /* Keep all report tabs on the same card grammar as the reference sections */
 .report-section .metric-card,.report-section .metric-row,.analysis-sections .metric-card{background:linear-gradient(145deg,rgba(30,34,42,.98),rgba(22,25,31,.98));border:1px solid rgba(255,255,255,.075);border-radius:18px;box-shadow:inset 0 1px rgba(255,255,255,.025)}
+/* Step-by-step AI landmark proposal: visually distinct from user-confirmed points. */
+.landmark-editor .dot.is-suggestion {
+  width: 14px;
+  height: 14px;
+  margin-left: -7px;
+  margin-top: -7px;
+  border: 2px dashed rgba(255,255,255,.95);
+  background: rgba(110,190,255,.20);
+  box-shadow: 0 0 0 5px rgba(110,190,255,.10), 0 0 18px rgba(110,190,255,.42);
+  animation: facemetric-suggestion-pulse 1.25s ease-in-out infinite;
+}
+.landmark-editor .dot.is-suggestion.is-current { transform: scale(1.15); }
+@keyframes facemetric-suggestion-pulse { 50% { opacity:.58; transform:scale(1.14); } }
