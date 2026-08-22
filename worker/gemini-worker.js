@@ -2323,8 +2323,34 @@ function getTier(
   const labels = female ? ["LTB","MTB","HTB","Stacy Lite","Stacy"] : ["LTN","MTN","HTN","Chad Lite","Chad"];
   if (value <= 2) return { name: "Sub 3", level: "base" };
   if (value <= 3) return { name: "Sub 5", level: "base" };
-  const bands = [[4,4.4,`Low ${labels[0]}`],[4.5,4.7,labels[0]],[4.8,4.9,`High ${labels[0]}`],[5,5.4,`Low ${labels[1]}`],[5.5,5.7,labels[1]],[5.8,5.9,`High ${labels[1]}`],[6,6.4,`Low ${labels[2]}`],[6.5,6.7,labels[2]],[6.8,6.9,`High ${labels[2]}`],[7,7.4,`Low ${labels[3]}`],[7.5,7.7,labels[3]],[7.8,7.9,`High ${labels[3]}`],[8,8.4,`Low ${labels[4]}`],[8.5,8.7,labels[4]],[8.8,8.9,`High ${labels[4]}`]];
-  for (const [min,max,name] of bands) if (value >= min && value <= max) return { name, level: name.startsWith("Low") ? "low" : name.startsWith("High") ? "high" : "base" };
+  const bands = [
+    { min: 4.0, max: 4.4, name: `Low ${labels[0]}` },
+    { min: 4.5, max: 4.7, name: labels[0] },
+    { min: 4.8, max: 4.9, name: `High ${labels[0]}` },
+    { min: 5.0, max: 5.4, name: `Low ${labels[1]}` },
+    { min: 5.5, max: 5.7, name: labels[1] },
+    { min: 5.8, max: 5.9, name: `High ${labels[1]}` },
+    { min: 6.0, max: 6.4, name: `Low ${labels[2]}` },
+    { min: 6.5, max: 6.7, name: labels[2] },
+    { min: 6.8, max: 6.9, name: `High ${labels[2]}` },
+    { min: 7.0, max: 7.4, name: `Low ${labels[3]}` },
+    { min: 7.5, max: 7.7, name: labels[3] },
+    { min: 7.8, max: 7.9, name: `High ${labels[3]}` },
+    { min: 8.0, max: 8.4, name: `Low ${labels[4]}` },
+    { min: 8.5, max: 8.7, name: labels[4] },
+    { min: 8.8, max: 8.9, name: `High ${labels[4]}` }
+  ];
+
+  for (const band of bands) {
+    if (value >= band.min && value <= band.max) {
+      const level = band.name.startsWith("Low")
+        ? "low"
+        : band.name.startsWith("High")
+          ? "high"
+          : "base";
+      return { name: band.name, level };
+    }
+  }
   if (value === 9) return { name: female ? "Eve Lite" : "Adam Lite", level: "base" };
   if (value === 10) return { name: female ? "True Eve" : "True Adam", level: "base" };
   return { name: null, level: null };
