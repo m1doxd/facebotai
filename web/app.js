@@ -1237,8 +1237,8 @@ function buildDenseFrontLandmarks(mesh) {
     if (p) raw[name] = p;
   };
 
-  // MediaPipe Face Mesh stable anchors. Left/right are assigned by image X,
-  // not by anatomical naming, so mirrored photos remain consistent.
+  // MediaPipe Face Mesh stable anchors. These dense aliases use visible image X
+  // (screen-left then screen-right), matching the Landmark Editor convention.
   const eyeA = sortedPair(pointFromLm(mesh, 33), pointFromLm(mesh, 263));
   const eyeInner = sortedPair(pointFromLm(mesh, 133), pointFromLm(mesh, 362));
   const browA = sortedPair(pointFromLm(mesh, 70), pointFromLm(mesh, 300));
@@ -1323,24 +1323,42 @@ function normalizeSuggestionLaterality(points, mode, mesh = autoDetectedMesh) {
   if (mode !== "front" || !points) return points || {};
   const out = { ...points };
   const pairs = [["leftTemple","rightTemple"],["leftBrowOuter","rightBrowOuter"],["leftBrowPeak","rightBrowPeak"],["leftBrowInner","rightBrowInner"],["leftEyeLateralCanthus","rightEyeLateralCanthus"],["leftEyeInner","rightEyeInner"],["leftEyeUpper","rightEyeUpper"],["leftEyeLower","rightEyeLower"],["leftCheek","rightCheek"],["leftNoseBridge","rightNoseBridge"],["leftNostril","rightNostril"],["leftMouthCorner","rightMouthCorner"],["leftJaw","rightJaw"],["leftOuterEar","rightOuterEar"],["neckLeft","neckRight"],["leftEyeCenter","rightEyeCenter"],["leftCheekbone","rightCheekbone"],["leftJawline","rightJawline"],["leftAlar","rightAlar"]];
-  // Anatomical convention: on a normal frontal photo the person's LEFT is on
-  // screen-right. Do not trust the model's wording alone: enforce this from x.
+  // Editor convention: LEFT and RIGHT mean the visible left/right side of the
+  // uploaded frontal image. This is what the user sees while placing points.
+  // Therefore left.x must be <= right.x. We normalize AFTER AI and local
+  // suggestions have been merged, so no later fallback can silently flip them.
   for (const [leftId,rightId] of pairs) {
     let left = out[leftId], right = out[rightId];
-    if (left && right && Number.isFinite(left.x) && Number.isFinite(right.x) && left.x < right.x) {
+
+    // Both points exist but arrived reversed: swap the complete point objects.
+    if (left && right && Number.isFinite(left.x) && Number.isFinite(right.x) && left.x > right.x) {
       out[leftId] = { ...right, source: `${right.source || "ai"}_laterality_fixed` };
       out[rightId] = { ...left, source: `${left.source || "ai"}_laterality_fixed` };
-      left = out[leftId]; right = out[rightId];
+      left = out[leftId];
+      right = out[rightId];
     }
-    // If AI returned only one member of a pair on the wrong side, use the
-    // deterministic mesh anchor for that landmark rather than inventing a mirror.
+
+    // A single returned member on the wrong visible half is replaced by its own
+    // deterministic MediaPipe anchor. This avoids mirroring or copying a point
+    // from the opposite side.
     const leftDef = FRONT_LANDMARKS.find(l => l.id === leftId);
     const rightDef = FRONT_LANDMARKS.find(l => l.id === rightId);
-    if (left && left.x < 0.5 && leftDef?.mp != null && Array.isArray(mesh)) {
-      const p = pointFromLm(mesh, leftDef.mp, 0.86); if (p) out[leftId] = { ...p, source:"mesh_laterality_anchor" };
+    if (left && left.x > 0.5 && leftDef?.mp != null && Array.isArray(mesh)) {
+      const p = pointFromLm(mesh, leftDef.mp, 0.86);
+      if (p) out[leftId] = { ...p, source:"mesh_laterality_anchor" };
     }
-    if (right && right.x > 0.5 && rightDef?.mp != null && Array.isArray(mesh)) {
-      const p = pointFromLm(mesh, rightDef.mp, 0.86); if (p) out[rightId] = { ...p, source:"mesh_laterality_anchor" };
+    if (right && right.x < 0.5 && rightDef?.mp != null && Array.isArray(mesh)) {
+      const p = pointFromLm(mesh, rightDef.mp, 0.86);
+      if (p) out[rightId] = { ...p, source:"mesh_laterality_anchor" };
+    }
+
+    // Final guard: local mesh index conventions can vary with mirrored input.
+    // The visible-coordinate contract always wins in this editor.
+    left = out[leftId];
+    right = out[rightId];
+    if (left && right && Number.isFinite(left.x) && Number.isFinite(right.x) && left.x > right.x) {
+      out[leftId] = { ...right, source: `${right.source || "local"}_laterality_fixed` };
+      out[rightId] = { ...left, source: `${left.source || "local"}_laterality_fixed` };
     }
   }
   return out;
