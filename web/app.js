@@ -1058,8 +1058,21 @@ function setSkipCaptureGuides(value) { try { localStorage.setItem(CAPTURE_GUIDES
 
 function openCaptureFlow(mode = "front") {
   captureMode = mode === "profile" ? "profile" : "front";
+  // "Больше не показывать инструкции" skips only instructional cards.
+  // The final in-app import screen must still be shown.
   if (shouldSkipCaptureGuides()) {
-    if (captureMode === "front") openFrontFilePickerDirect(); else profileFileInput?.click();
+    if (!captureFlow || !captureFlowBody) {
+      if (captureMode === "front") openFrontFilePickerDirect(); else profileFileInput?.click();
+      return;
+    }
+    captureStep = (CAPTURE_GUIDES[captureMode] || CAPTURE_GUIDES.front).length;
+    const skip = document.getElementById("captureSkipGuides");
+    if (skip) skip.checked = true;
+    captureFlow.hidden = false;
+    captureFlow.style.pointerEvents = "";
+    captureFlow.setAttribute("aria-hidden", "false");
+    requestAnimationFrame(() => captureFlow.classList.add("is-open"));
+    renderCaptureFlow();
     return;
   }
   if (!captureFlow || !captureFlowBody) {
@@ -1302,6 +1315,28 @@ function sanitizeAISuggestedLandmarks(raw, expectedIds) {
     const x = Number(pt?.x), y = Number(pt?.y), confidence = Number(pt?.confidence);
     if (!allowed.has(id) || !Number.isFinite(x) || !Number.isFinite(y) || x < 0 || x > 1 || y < 0 || y > 1) continue;
     out[id] = { x, y, confidence: Number.isFinite(confidence) ? Math.max(0, Math.min(1, confidence)) : 0.5, source: "gemini_suggestion" };
+  }
+  return out;
+}
+
+function normalizeSuggestionLaterality(points, mode) {
+  if (mode !== "front" || !points) return points || {};
+  const out = { ...points };
+  // Anatomical left/right is the PERSON'S left/right. On a normal unmirrored
+  // front photo the person's left appears on screen-right. Detect obvious swaps
+  // geometrically and swap paired suggestion values while preserving IDs.
+  const pairs = [
+    ["leftTemple","rightTemple"],["leftCheek","rightCheek"],["leftJaw","rightJaw"],
+    ["leftEyeCenter","rightEyeCenter"],["leftEyeInner","rightEyeInner"],
+    ["leftEyeLateralCanthus","rightEyeLateralCanthus"],["leftNostril","rightNostril"],
+    ["leftMouthCorner","rightMouthCorner"],["leftAlar","rightAlar"]
+  ];
+  for (const [leftId,rightId] of pairs) {
+    const a=out[leftId], b=out[rightId];
+    // Person-left should usually be to screen-right. If reversed, IDs were swapped.
+    if (a && b && Number.isFinite(a.x) && Number.isFinite(b.x) && a.x < b.x) {
+      out[leftId]=b; out[rightId]=a;
+    }
   }
   return out;
 }
@@ -7936,18 +7971,26 @@ async function beginLandmarkVerification(file, profileFile = null) {
   pendingAnalysisFile = file;
   pendingProfileFile = profileFile;
 
-  // Load MediaPipe geometry only as a private fallback. Nothing is written to
-  // confirmed landmarks here: the editor asks for help one landmark at a time.
+  // Pre-compute ALL suggestions once before opening the editor. Suggestions are
+  // never confirmed automatically; the editor only consumes the cached point for
+  // the current step, so moving between 52/31 points is instant.
   try {
-    if (analysisImage && selectedObjectUrl) {
-      if (!analysisImage.complete) await new Promise(res => { analysisImage.onload = res; analysisImage.onerror = res; setTimeout(res, 2000); });
-      autoDetectedFront = await detectDenseFrontLandmarks();
-      if (!autoDetectedMesh && selectedObjectUrl) autoDetectedMesh = await detectFaceMeshFromSource(selectedObjectUrl);
+    showToast("ИИ заранее ищет все точки…");
+    if (analysisImage && selectedObjectUrl && !analysisImage.complete) {
+      await new Promise(res => { analysisImage.onload = res; analysisImage.onerror = res; setTimeout(res, 2000); });
     }
-  } catch (e) {
-    console.warn("Auto landmark detect failed", e);
-  }
-
+    const [aiFront, denseFront] = await Promise.all([
+      requestAILandmarkSuggestions(file, "front"),
+      detectDenseFrontLandmarks().catch(() => null)
+    ]);
+    autoDetectedFront = denseFront;
+    if (!autoDetectedMesh && selectedObjectUrl) autoDetectedMesh = await detectFaceMeshFromSource(selectedObjectUrl);
+    if (aiFront) suggestedFrontLandmarks = normalizeSuggestionLaterality(aiFront, "front");
+    // Fill only missing suggestions from local geometry, never confirmed state.
+    for (const [id, pt] of Object.entries(denseFront || {})) {
+      if (!suggestedFrontLandmarks[id]) suggestedFrontLandmarks[id] = { ...pt, source:"local_suggestion" };
+    }
+  } catch (e) { console.warn("Auto landmark prefetch failed", e); }
   openLandmarkEditor("front");
 }
 
@@ -8356,6 +8399,15 @@ async function openProfileLandmarkEditorWithAutoSuggestions() {
     try { autoDetectedProfile = await detectProfileLandmarksFromUrl(profileWorkingObjectUrl || selectedProfileObjectUrl); }
     catch (error) { console.warn("Profile fallback detection failed", error); }
   }
+  try {
+    showToast("ИИ заранее ищет все профильные точки…");
+    const working = profileWorkingFile || pendingProfileFile || selectedProfileFile;
+    const aiProfile = await requestAILandmarkSuggestions(working, "profile");
+    if (aiProfile) suggestedProfileLandmarks = { ...suggestedProfileLandmarks, ...aiProfile };
+    for (const [id, pt] of Object.entries(autoDetectedProfile || {})) {
+      if (!suggestedProfileLandmarks[id]) suggestedProfileLandmarks[id] = { ...pt, source:"local_suggestion" };
+    }
+  } catch (error) { console.warn("Profile AI prefetch failed", error); }
   openLandmarkEditor("profile");
 }
 
