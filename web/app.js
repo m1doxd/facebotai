@@ -1300,7 +1300,7 @@ async function requestAILandmarkSuggestions(file, mode) {
   const body = new FormData(); body.append("file", file, file.name || `${mode}.jpg`); body.append("mode", mode); body.append("landmark_ids", JSON.stringify(ids));
   const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(), 60000);
   try {
-    const response = await fetch(LANDMARK_SUGGESTIONS_ENDPOINT, { method:"POST", headers:{"X-Gemini-Key":key,"Accept":"application/json","Cache-Control":"no-store"}, body, signal:controller.signal, cache:"no-store" });
+    const response = await fetch(LANDMARK_SUGGESTIONS_ENDPOINT, { method:"POST", headers:{"X-Gemini-Key":key,"Accept":"application/json"}, body, signal:controller.signal, cache:"no-store" });
     const rawText = await response.text(); let data = null; try { data = rawText ? JSON.parse(rawText) : null; } catch {}
     if (!response.ok || !data?.success) throw new Error(data?.detail || `AI landmark endpoint failed (${response.status})`);
     const clean = sanitizeAISuggestedLandmarks(data.landmarks, ids);
